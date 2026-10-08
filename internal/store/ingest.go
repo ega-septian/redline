@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,19 @@ type GroupChange struct {
 	TestKey     string `json:"test"`
 	Error       string `json:"error,omitempty"` // ringkasan error (sudah diredaksi)
 	Occurrences int    `json:"occurrences"`
+	Incident    string `json:"incident,omitempty"` // key insiden; kosong untuk resolved
+}
+
+// Incident adalah kegagalan beberapa test di run ini yang penyebabnya sama.
+type Incident struct {
+	Key   string `json:"key"`
+	Kind  string `json:"kind"` // connection, http, error
+	Label string `json:"label"`
+	Tests int    `json:"tests"`
+	// Representative: fingerprint yang cukup dianalisis mewakili seluruh insiden
+	// (regressed lebih dulu, lalu new, lalu recurring).
+	Representative string   `json:"representative"`
+	Fingerprints   []string `json:"fingerprints"`
 }
 
 // IngestResult adalah ringkasan setelah satu laporan disimpan.
@@ -43,6 +57,7 @@ type IngestResult struct {
 	Regressed  []GroupChange `json:"regressed"` // pernah beres, sekarang gagal lagi
 	Resolved   []GroupChange `json:"resolved"`  // dulu gagal, sekarang lulus
 	FlakyTests []string      `json:"flaky_tests"`
+	Incidents  []Incident    `json:"incidents"` // kegagalan run ini, dikelompokkan per penyebab, terbesar dulu
 }
 
 // IngestReport menyimpan satu laporan Playwright dan memperbarui status kelompok kegagalan.
@@ -54,8 +69,10 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	outcomes := rep.Outcomes()
 	res := &IngestResult{
 		New: []GroupChange{}, Recurring: []GroupChange{}, Regressed: []GroupChange{},
-		Resolved: []GroupChange{}, FlakyTests: []string{},
+		Resolved: []GroupChange{}, FlakyTests: []string{}, Incidents: []Incident{},
 	}
+	incidents := newIncidentSet()
+	shapes := map[string]bool{} // isi calls JSON unik di run ini
 
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var started *time.Time
@@ -78,7 +95,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 		var passedKeys []string
 		for _, o := range outcomes {
 			res.Total++
-			fingerprint, cleanMsg := "", ""
+			fingerprint, cleanMsg, incidentKey := "", "", ""
 			switch o.Status {
 			case report.StatusPassed:
 				res.Passed++
@@ -93,15 +110,22 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			}
 			if o.ErrorMessage != "" {
 				cleanMsg = triage.Clean(o.ErrorMessage)
-				fingerprint = triage.Fingerprint(o.Key(), triage.Normalize(cleanMsg))
+				normalized := triage.Normalize(cleanMsg)
+				fingerprint = triage.Fingerprint(o.Key(), normalized)
+				var kind, label string
+				incidentKey, kind, label = triage.IncidentKey(normalized, o.Calls)
+				if o.Status == report.StatusFailed {
+					incidents.add(incidentKey, kind, triage.Clean(label))
+				}
 			}
 			// Hanya kegagalan murni yang membuka/memperbarui kelompok.
 			// Flaky dicatat di test_results saja (fingerprint tetap disimpan untuk analisis nanti).
 			if o.Status == report.StatusFailed && fingerprint != "" {
-				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg)
+				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.label(incidentKey))
 				if err != nil {
 					return err
 				}
+				incidents.member(incidentKey, fingerprint, kind)
 				switch kind {
 				case "new":
 					res.New = append(res.New, change)
@@ -111,6 +135,10 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					res.Recurring = append(res.Recurring, change)
 				}
 			}
+			calls := callsJSON(o.Calls)
+			if calls != "[]" {
+				shapes[calls] = true
+			}
 			screenshots := o.Screenshots
 			if screenshots == nil {
 				screenshots = []string{}
@@ -118,13 +146,28 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO test_results (run_id, test_key, project, file, title, line, status, retries, duration_ms,
 					error_message, error_snippet, error_location, fingerprint, trace_path, screenshots,
-					source_hash, http_calls)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)`,
+					source_hash, calls_hash, incident_key)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+					CASE WHEN $17::jsonb = '[]'::jsonb THEN '' ELSE md5($17::jsonb::text) END, $18)`,
 				res.RunID, o.Key(), o.Project, o.File, o.Title, o.Line, o.Status, o.Retries, o.DurationMs,
 				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, o.TracePath, screenshots,
-				o.SourceHash, callsJSON(o.Calls),
+				o.SourceHash, calls, incidentKey,
 			); err != nil {
 				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
+			}
+		}
+
+		// Satu query untuk semua bentuk unik; yang sudah ada dari run sebelumnya dilewati.
+		if len(shapes) > 0 {
+			list := make([]string, 0, len(shapes))
+			for c := range shapes {
+				list = append(list, c)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO response_shapes (hash, calls)
+				SELECT md5(c::jsonb::text), c::jsonb FROM unnest($1::text[]) AS c
+				ON CONFLICT (hash) DO NOTHING`, list); err != nil {
+				return fmt.Errorf("simpan bentuk response: %w", err)
 			}
 		}
 
@@ -160,6 +203,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	if err != nil {
 		return nil, err
 	}
+	res.Incidents = incidents.list()
 	return res, nil
 }
 
@@ -182,18 +226,19 @@ func callsJSON(calls []report.HTTPCall) string {
 
 // upsertGroup membuat kelompok baru atau memperbarui yang sudah ada.
 // kind: "new", "recurring", atau "regressed".
-func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg string) (GroupChange, string, error) {
-	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), Error: summarize(cleanMsg)}
+func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string) (GroupChange, string, error) {
+	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), Error: summarize(cleanMsg), Incident: incidentKey}
 
 	var prevStatus string
 	err := tx.QueryRow(ctx, `SELECT status FROM failure_groups WHERE fingerprint = $1 FOR UPDATE`, fingerprint).Scan(&prevStatus)
 	if err == pgx.ErrNoRows {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO failure_groups (fingerprint, test_key, project, file, title, normalized_error, sample_error,
-				status, first_seen_run, last_seen_run)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $8)
+				status, first_seen_run, last_seen_run, incident_key, incident_label)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $8, $9, $10)
 			ON CONFLICT (fingerprint) DO NOTHING`,
-			fingerprint, o.Key(), o.Project, o.File, o.Title, triage.Normalize(cleanMsg), cleanMsg, runID)
+			fingerprint, o.Key(), o.Project, o.File, o.Title, triage.Normalize(cleanMsg), cleanMsg, runID,
+			incidentKey, incidentLabel)
 		if err != nil {
 			return change, "", fmt.Errorf("buat kelompok %s: %w", fingerprint, err)
 		}
@@ -217,9 +262,11 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 			status        = CASE WHEN status = 'resolved' THEN 'regressed' ELSE status END,
 			regressions   = regressions + CASE WHEN status = 'resolved' THEN 1 ELSE 0 END,
 			resolved_run  = NULL,
-			resolved_at   = NULL
+			resolved_at   = NULL,
+			incident_key   = $4,
+			incident_label = $5
 		WHERE fingerprint = $1
-		RETURNING occurrences`, fingerprint, runID, cleanMsg).Scan(&change.Occurrences)
+		RETURNING occurrences`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel).Scan(&change.Occurrences)
 	if err != nil {
 		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
 	}
@@ -261,4 +308,60 @@ func informative(line string) bool {
 		return !strings.HasPrefix(rest, "Expected") && !strings.HasPrefix(rest, "Received")
 	}
 	return false
+}
+
+// incidentSet mengumpulkan insiden selama ingest, dengan urutan kemunculan dipertahankan.
+type incidentSet struct {
+	order []string
+	byKey map[string]*Incident
+	rank  map[string]int // peringkat representative sekarang: 3 regressed, 2 new, 1 recurring
+}
+
+func newIncidentSet() *incidentSet {
+	return &incidentSet{byKey: map[string]*Incident{}, rank: map[string]int{}}
+}
+
+func (s *incidentSet) add(key, kind, label string) {
+	if _, ok := s.byKey[key]; ok {
+		return
+	}
+	s.order = append(s.order, key)
+	s.byKey[key] = &Incident{Key: key, Kind: kind, Label: label, Fingerprints: []string{}}
+}
+
+func (s *incidentSet) label(key string) string {
+	if inc, ok := s.byKey[key]; ok {
+		return inc.Label
+	}
+	return ""
+}
+
+// member mencatat satu kelompok kegagalan. kind dari upsertGroup: new, recurring, regressed.
+func (s *incidentSet) member(key, fingerprint, kind string) {
+	inc, ok := s.byKey[key]
+	if !ok {
+		return
+	}
+	inc.Tests++
+	inc.Fingerprints = append(inc.Fingerprints, fingerprint)
+	r := map[string]int{"regressed": 3, "new": 2}[kind]
+	if r == 0 {
+		r = 1
+	}
+	if r > s.rank[key] {
+		s.rank[key] = r
+		inc.Representative = fingerprint
+	}
+}
+
+// list: insiden terbesar dulu; yang sama besar mengikuti urutan kemunculan.
+func (s *incidentSet) list() []Incident {
+	out := make([]Incident, 0, len(s.order))
+	for _, k := range s.order {
+		if inc := s.byKey[k]; inc.Tests > 0 {
+			out = append(out, *inc)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Tests > out[j].Tests })
+	return out
 }

@@ -19,6 +19,20 @@ gagal lagi (sama)   → regressed
 
 Test flaky (gagal lalu lulus saat retry) dicatat terpisah dan tidak membuka kelompok.
 
+- Menggabungkan kegagalan banyak test yang penyebabnya sama menjadi satu **insiden**, supaya
+  server mati atau satu endpoint rusak tidak muncul sebagai ratusan baris terpisah:
+
+| Jenis        | Kapan                                         | Contoh label                                   |
+|--------------|-----------------------------------------------|------------------------------------------------|
+| `connection` | `ECONNREFUSED`, `ENOTFOUND`, dan sejenisnya   | `Tidak bisa terhubung: ECONNREFUSED localhost:8091` |
+| `http`       | ada panggilan API yang membalas 5xx (butuh fixture Redline) | `POST /users/login → 500`        |
+| `error`      | selain itu: pesan error ternormalisasi sama   | baris pertama pesan error                      |
+
+  Respons `POST /api/runs` berisi `incidents` (terbesar dulu) beserta `representative`: satu
+  kelompok yang cukup dianalisis untuk seluruh insiden. Reporter Redline memakainya sehingga
+  analisis dan biaya AI dihitung per insiden, bukan per test. 4xx sengaja tidak dipakai karena
+  bisa jadi memang diharapkan oleh test negatif.
+
 - Menganalisis penyebab tiap kelompok: `backend_bug`, `test_bug`, `environment`, `flaky`,
   atau `unknown` (lihat [Analisis penyebab](#analisis-penyebab)).
 
@@ -174,8 +188,17 @@ internal/store/        Postgres: migrasi, ingest (open/resolved/regressed), quer
 internal/api/          HTTP handler
 ```
 
-Tabel: `runs`, `test_results`, `failure_groups`, `analyses`. File besar (trace.zip, screenshot) tidak
-masuk database; yang disimpan hanya path-nya di mesin yang menjalankan test.
+Tabel: `runs`, `test_results`, `failure_groups`, `analyses`, `response_shapes`. File besar
+(trace.zip, screenshot) tidak masuk database; yang disimpan hanya path-nya di mesin yang menjalankan test.
+
+### Menjaga ukuran database
+
+- **Bentuk response disimpan sekali.** `test_results.calls_hash` merujuk ke `response_shapes`,
+  jadi 500 test yang memanggil endpoint dengan bentuk sama di 1.000 run tetap satu baris bentuk.
+- **Retensi.** Setiap start lalu setiap 24 jam, detail `test_results` dari run yang lebih tua dari
+  `RETENTION_DAYS` (default 30, `0` = mati) dihapus, **kecuali** hasil lulus terakhir tiap test
+  (pembanding analisis) serta kemunculan pertama dan terakhir tiap kelompok kegagalan. Bentuk
+  response yang tidak dirujuk lagi ikut dihapus. `runs` dan `failure_groups` tidak disentuh.
 
 ## Test
 
@@ -202,7 +225,5 @@ satu skip) dan `run2-fixed.json` (semua sudah diperbaiki).
 
 ## Rencana berikutnya
 
-1. Korelasi antar test: kalau semua test yang memanggil endpoint yang sama gagal bersamaan,
-   condong ke backend/environment; kalau hanya satu, condong ke test.
-2. Perintah CLI `redline ingest` untuk CI (langsung ke database, tanpa server).
-3. Halaman web kecil untuk melihat kelompok, hasil analisis, dan memberi label.
+1. Perintah CLI `redline ingest` untuk CI (langsung ke database, tanpa server).
+2. Halaman web kecil untuk melihat kelompok, hasil analisis, dan memberi label.

@@ -57,6 +57,12 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	if cfg.RetentionDays > 0 {
+		go pruneLoop(ctx, db, cfg.RetentionDays, log)
+	} else {
+		log.Info("retensi mati (RETENTION_DAYS=0); semua detail test disimpan")
+	}
+
 	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Pricing: pricing(cfg.AnthropicModel), Log: log}
 	if cfg.AnthropicAPIKey != "" {
 		analyzer.LLM = llm.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
@@ -88,4 +94,23 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// pruneLoop menjalankan retensi saat start lalu setiap 24 jam.
+func pruneLoop(ctx context.Context, db *store.Store, days int, log *slog.Logger) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		before := time.Now().AddDate(0, 0, -days)
+		if res, err := db.Prune(ctx, before); err != nil {
+			log.Error("retensi gagal", "err", err)
+		} else if res.TestResults+res.Shapes > 0 {
+			log.Info("retensi selesai", "hari", days, "test_results", res.TestResults, "response_shapes", res.Shapes)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

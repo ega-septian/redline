@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
+	// RetentionDays: detail test_results lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
+	RetentionDays int
 
 	// Analisis AI. Kosongkan ANTHROPIC_API_KEY untuk mematikan AI (aturan tetap jalan).
 	AnthropicAPIKey  string
@@ -31,10 +33,15 @@ func Load() (Config, error) {
 	if err != nil || maxMB <= 0 {
 		return Config{}, fmt.Errorf("MAX_REPORT_MB harus angka positif")
 	}
+	retention, err := strconv.Atoi(getenv("RETENTION_DAYS", "30"))
+	if err != nil || retention < 0 {
+		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
+	}
 	return Config{
-		Port:        getenv("PORT", "8787"),
-		DatabaseURL: getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
-		MaxReportMB: maxMB,
+		Port:          getenv("PORT", "8787"),
+		RetentionDays: retention,
+		DatabaseURL:   getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
+		MaxReportMB:   maxMB,
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),

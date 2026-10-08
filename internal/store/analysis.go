@@ -69,8 +69,9 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 	var curHash string
 	var curCalls []byte
 	if err := s.pool.QueryRow(ctx, `
-		SELECT error_message, error_snippet, error_location, source_hash, http_calls FROM test_results
-		WHERE fingerprint = $1 AND status = 'failed' ORDER BY run_id DESC LIMIT 1`, fingerprint,
+		SELECT t.error_message, t.error_snippet, t.error_location, t.source_hash, COALESCE(s.calls, '[]'::jsonb)
+		FROM test_results t LEFT JOIN response_shapes s ON s.hash = t.calls_hash
+		WHERE t.fingerprint = $1 AND t.status = 'failed' ORDER BY t.run_id DESC LIMIT 1`, fingerprint,
 	).Scan(&f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls); err != nil && err != pgx.ErrNoRows {
 		return nil, fmt.Errorf("kemunculan terakhir: %w", err)
 	}
@@ -81,7 +82,8 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 	var passHash string
 	var passCalls []byte
 	err = s.pool.QueryRow(ctx, `
-		SELECT `+runRef+`, t.source_hash, t.http_calls FROM test_results t JOIN runs r ON r.id = t.run_id
+		SELECT `+runRef+`, t.source_hash, COALESCE(s.calls, '[]'::jsonb)
+		FROM test_results t JOIN runs r ON r.id = t.run_id LEFT JOIN response_shapes s ON s.hash = t.calls_hash
 		WHERE t.test_key = $1 AND t.status = 'passed' AND r.id < $2
 		ORDER BY r.id DESC LIMIT 1`, g.TestKey, g.LastSeenRun,
 	).Scan(&lp.RunID, &lp.At, &lp.Source, &lp.CommitSHA, &lp.AppVersion, &passHash, &passCalls)
