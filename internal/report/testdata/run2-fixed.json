@@ -1,0 +1,381 @@
+{
+  "config": {
+    "configFile": "/tmp/pwfix/playwright.config.ts",
+    "rootDir": "/tmp/pwfix/tests",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results/results.json"
+        }
+      ],
+      [
+        "/tmp/pwfix/reporters/redline.ts",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/tmp/pwfix/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "toolshop",
+        "name": "toolshop",
+        "testDir": "/tmp/pwfix/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "shard": null,
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.56.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "api.spec.ts",
+      "file": "api.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "register user",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "toolshop",
+              "projectName": "toolshop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 28,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-08T09:49:19.803Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "redline-http",
+                      "contentType": "application/json",
+                      "body": "W3sibWV0aG9kIjoiUE9TVCIsInBhdGgiOiIvdXNlcnMvcmVnaXN0ZXIiLCJzdGF0dXMiOjIwMSwic2hhcGUiOnsiaWQiOiJzdHJpbmciLCJlbWFpbCI6InN0cmluZyIsInRva2VuIjoic3RyaW5nIn19XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1ea1b1599cbc08f16936-f57376d42234d973828a",
+          "file": "api.spec.ts",
+          "line": 16,
+          "column": 5
+        },
+        {
+          "title": "order dibayar",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "toolshop",
+              "projectName": "toolshop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-08T09:49:19.859Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "redline-http",
+                      "contentType": "application/json",
+                      "body": "W3sibWV0aG9kIjoiR0VUIiwicGF0aCI6Ii9vcmRlcnMiLCJzdGF0dXMiOjIwMCwic2hhcGUiOnsiaWQiOiJzdHJpbmciLCJzdGF0dXMiOiJzdHJpbmciLCJ0b3RhbCI6Im51bWJlciIsIml0ZW1zIjpbXX19XQ=="
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1ea1b1599cbc08f16936-17f65c81469891c858ee",
+          "file": "api.spec.ts",
+          "line": 21,
+          "column": 5
+        },
+        {
+          "title": "kadang lambat (flaky)",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "toolshop",
+              "projectName": "toolshop",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 6,
+                  "error": {
+                    "message": "Error: gagal di percobaan pertama\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m0\u001b[39m\nReceived:   \u001b[31m0\u001b[39m",
+                    "stack": "Error: gagal di percobaan pertama\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m0\u001b[39m\nReceived:   \u001b[31m0\u001b[39m\n    at /tmp/pwfix/tests/api.spec.ts:27:56",
+                    "location": {
+                      "file": "/tmp/pwfix/tests/api.spec.ts",
+                      "column": 56,
+                      "line": 27
+                    },
+                    "snippet": "  25 |\n  26 | test(\"kadang lambat (flaky)\", async ({}, testInfo) => {\n> 27 |   expect(testInfo.retry, \"gagal di percobaan pertama\").toBeGreaterThan(0);\n     |                                                        ^\n  28 | });\n  29 |\n  30 | test.skip(\"fitur wishlist belum ada\", async () => {});"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/pwfix/tests/api.spec.ts",
+                        "column": 56,
+                        "line": 27
+                      },
+                      "message": "Error: gagal di percobaan pertama\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeGreaterThan\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m\n\nExpected: > \u001b[32m0\u001b[39m\nReceived:   \u001b[31m0\u001b[39m\n\n  25 |\n  26 | test(\"kadang lambat (flaky)\", async ({}, testInfo) => {\n> 27 |   expect(testInfo.retry, \"gagal di percobaan pertama\").toBeGreaterThan(0);\n     |                                                        ^\n  28 | });\n  29 |\n  30 | test.skip(\"fitur wishlist belum ada\", async () => {});\n    at /tmp/pwfix/tests/api.spec.ts:27:56"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-08T09:49:19.900Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/pwfix/test-results/api-kadang-lambat-flaky--toolshop/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/pwfix/tests/api.spec.ts",
+                    "column": 56,
+                    "line": 27
+                  }
+                },
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "2026-10-08T09:49:20.931Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "1ea1b1599cbc08f16936-deadc21cee07f76dcbea",
+          "file": "api.spec.ts",
+          "line": 26,
+          "column": 5
+        },
+        {
+          "title": "fitur wishlist belum ada",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "skip",
+                  "location": {
+                    "file": "/tmp/pwfix/tests/api.spec.ts",
+                    "line": 30,
+                    "column": 6
+                  }
+                }
+              ],
+              "expectedStatus": "skipped",
+              "projectId": "toolshop",
+              "projectName": "toolshop",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "skipped",
+                  "duration": 0,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-08T09:49:20.982Z",
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "/tmp/pwfix/tests/api.spec.ts",
+                        "line": 30,
+                        "column": 6
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "skipped"
+            }
+          ],
+          "id": "1ea1b1599cbc08f16936-fb6972835180f513f183",
+          "file": "api.spec.ts",
+          "line": 30,
+          "column": 6
+        }
+      ],
+      "suites": [
+        {
+          "title": "Brand",
+          "file": "api.spec.ts",
+          "line": 3,
+          "column": 6,
+          "specs": [
+            {
+              "title": "brands punya slug",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "toolshop",
+                  "projectName": "toolshop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 85,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T09:49:19.604Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "redline-http",
+                          "contentType": "application/json",
+                          "body": "W3sibWV0aG9kIjoiR0VUIiwicGF0aCI6Ii9icmFuZHMiLCJzdGF0dXMiOjIwMCwic2hhcGUiOlt7ImlkIjoic3RyaW5nIiwibmFtZSI6InN0cmluZyIsInNsdWciOiJzdHJpbmcifV19XQ=="
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "1ea1b1599cbc08f16936-ec2a77174107b43bb889",
+              "file": "api.spec.ts",
+              "line": 4,
+              "column": 7
+            },
+            {
+              "title": "detail brand",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "toolshop",
+                  "projectName": "toolshop",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 42,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-08T09:49:19.738Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "redline-http",
+                          "contentType": "application/json",
+                          "body": "W3sibWV0aG9kIjoiR0VUIiwicGF0aCI6Ii9icmFuZHMvOmlkIiwic3RhdHVzIjoyMDAsInNoYXBlIjp7ImlkIjoic3RyaW5nIiwibmFtZSI6InN0cmluZyIsInNsdWciOiJzdHJpbmcifX1d"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "1ea1b1599cbc08f16936-5e1b41ce5ed7dea4a153",
+              "file": "api.spec.ts",
+              "line": 10,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-08T09:49:18.600Z",
+    "duration": 2400.63,
+    "expected": 4,
+    "skipped": 1,
+    "unexpected": 0,
+    "flaky": 1
+  }
+}
