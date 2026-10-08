@@ -7,8 +7,10 @@ Isinya:
 
 - Menerima `results.json` dari reporter JSON Playwright.
 - Meredaksi token, password, JWT, dan angka 16 digit (NIK/kartu) **sebelum** disimpan.
-- Membuat fingerprint dari test + pesan error yang dinormalisasi (UUID, ULID, waktu, email,
-  dan id panjang diabaikan; kode status seperti 404 vs 500 tetap dibedakan).
+- Mengelompokkan kegagalan: test yang sama dengan error yang sama masuk satu **kelompok
+  kegagalan**. ID kelompok adalah hash (kode pendek yang selalu sama untuk teks yang sama) dari
+  nama test + pesan error yang dinormalisasi (UUID, ULID, waktu, email, dan id panjang diabaikan;
+  kode status seperti 404 vs 500 tetap dibedakan).
 - Melacak status tiap kelompok kegagalan:
 
 ```
@@ -46,6 +48,21 @@ docker compose up -d          # Postgres di port 5433 (Carikan tetap di 5432)
 go mod tidy                   # sekali saja, mengunduh pgx dan membuat go.sum
 go run ./cmd/server           # API di http://localhost:8787, migrasi tabel otomatis
 ```
+
+### Dipakai bersama tim
+
+| Env              | Default        | Fungsi                                                                 |
+|------------------|----------------|------------------------------------------------------------------------|
+| `STATUS_FROM`    | `ci`           | Source run yang boleh mengubah status kelompok: `ci`, `local`, atau `all` |
+| `TIMEZONE`       | `Asia/Jakarta` | Zona waktu semua waktu di respons API dan log, walaupun jam server UTC |
+| `RETENTION_DAYS` | `30`           | Lihat [Menjaga ukuran database](#menjaga-ukuran-database)               |
+
+Dengan `STATUS_FROM=ci`, run dari laptop tetap disimpan, dikelompokkan, dan bisa dianalisis,
+tapi **tidak mengubah status bersama**: test yang kebetulan lulus di laptop tidak menutup
+kelompok, dan kegagalan baru dari laptop ditandai `local_only` sehingga tidak muncul di
+`GET /api/groups`. Begitu kegagalan yang sama terlihat di CI, kelompok itu menjadi kelompok
+bersama dan dihitung baru sejak run CI tersebut. Respons ingest berisi `shared_status: false`
+untuk run yang hanya pratinjau. Kalau Redline dipakai sendiri, pakai `STATUS_FROM=all`.
 
 ## Mengirim hasil test dari project Playwright
 
@@ -121,7 +138,7 @@ Contoh balasan:
 | `GET /api/groups?status=all`      | Semua kelompok; bisa juga `status=resolved` atau `open,regressed` |
 | `GET /api/groups/{fingerprint}`   | Detail kelompok + 20 kemunculan terakhir + hasil analisis |
 | `POST /api/groups/{fingerprint}/analyze` | Analisis penyebab (pakai cache; `?force=1` untuk ulang) |
-| `PUT /api/groups/{fingerprint}/label` | Label manual: `{"label":"test_bug","note":"..."}`; label kosong menghapus |
+| `PUT /api/groups/{fingerprint}/label` | Label manual: `{"label":"test_bug","note":"...","by":"nama"}`; `by` wajib; label kosong menghapus |
 | `GET /healthz`                    | Cek server hidup                                            |
 
 ## Analisis penyebab
@@ -188,12 +205,27 @@ internal/store/        Postgres: migrasi, ingest (open/resolved/regressed), quer
 internal/api/          HTTP handler
 ```
 
-Tabel: `runs`, `test_results`, `failure_groups`, `analyses`, `response_shapes`. File besar
-(trace.zip, screenshot) tidak masuk database; yang disimpan hanya path-nya di mesin yang menjalankan test.
+Skema lengkap dengan penjelasan tiap kolom ada di `internal/store/migrations/001_schema.sql`.
+
+| Tabel             | Isi                                                                        |
+|-------------------|----------------------------------------------------------------------------|
+| `runs`            | Satu kali eksekusi test: kapan, siapa (`triggered_by`), link CI (`ci_url`) |
+| `failure_groups`  | Kelompok kegagalan: test, status, penyebab (`cause`), label manual         |
+| `test_results`    | Hasil tiap test di tiap run; tabel terbesar, dibersihkan oleh retensi      |
+| `response_shapes` | Bentuk response API yang unik (nama field + tipe, tanpa isi data)          |
+| `analyses`        | Hasil analisis penyebab per kelompok                                       |
+
+File besar (trace.zip, screenshot) tidak masuk database. Yang disimpan hanya path-nya, **relatif
+terhadap project** (misalnya `test-results/brand-toolshop/trace.zip`), supaya tidak membocorkan
+struktur folder laptop. Untuk run CI, buka `runs.ci_url` untuk mengunduh artifact berisi file itu.
+
+Nama field di respons API (`fingerprint`, `incident`, `sample_error`, `human_label`) sengaja
+belum diubah supaya reporter yang sudah ada tetap jalan; di database namanya `id`/`group_id`,
+`cause_id`, `last_error`, dan `manual_category`.
 
 ### Menjaga ukuran database
 
-- **Bentuk response disimpan sekali.** `test_results.calls_hash` merujuk ke `response_shapes`,
+- **Bentuk response disimpan sekali.** `test_results.response_shape_id` merujuk ke `response_shapes`,
   jadi 500 test yang memanggil endpoint dengan bentuk sama di 1.000 run tetap satu baris bentuk.
 - **Retensi.** Setiap start lalu setiap 24 jam, detail `test_results` dari run yang lebih tua dari
   `RETENTION_DAYS` (default 30, `0` = mati) dihapus, **kecuali** hasil lulus terakhir tiap test

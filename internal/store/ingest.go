@@ -16,10 +16,12 @@ import (
 
 // RunMeta adalah informasi tambahan tentang run. Semuanya opsional.
 type RunMeta struct {
-	Source     string `json:"source"` // local / ci
-	Branch     string `json:"branch"`
-	CommitSHA  string `json:"commit"`
-	AppVersion string `json:"app_version"`
+	Source      string `json:"source"`       // local / ci
+	TriggeredBy string `json:"triggered_by"` // siapa yang menjalankan: user, atau ci:<actor>
+	CIURL       string `json:"ci_url"`       // halaman run CI (log + artifact)
+	Branch      string `json:"branch"`
+	CommitSHA   string `json:"commit"`
+	AppVersion  string `json:"app_version"`
 }
 
 // GroupChange adalah kelompok kegagalan yang statusnya berubah karena run ini.
@@ -58,6 +60,9 @@ type IngestResult struct {
 	Resolved   []GroupChange `json:"resolved"`  // dulu gagal, sekarang lulus
 	FlakyTests []string      `json:"flaky_tests"`
 	Incidents  []Incident    `json:"incidents"` // kegagalan run ini, dikelompokkan per penyebab, terbesar dulu
+	// SharedStatus false: run ini (misalnya lokal) tidak mengubah status bersama;
+	// New/Recurring/Regressed/Resolved hanya pratinjau.
+	SharedStatus bool `json:"shared_status"`
 }
 
 // IngestReport menyimpan satu laporan Playwright dan memperbarui status kelompok kegagalan.
@@ -73,6 +78,8 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	}
 	incidents := newIncidentSet()
 	shapes := map[string]bool{} // isi calls JSON unik di run ini
+	shared := s.SharesStatus(meta.Source)
+	res.SharedStatus = shared
 
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var started *time.Time
@@ -84,22 +91,23 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			reportErrors = append(reportErrors, triage.Clean(e.Message))
 		}
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO runs (started_at, duration_ms, source, branch, commit_sha, app_version, playwright_version, report_errors)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-			started, int(rep.Stats.Duration), meta.Source, meta.Branch, meta.CommitSHA, meta.AppVersion,
-			rep.Config.Version, reportErrors,
+			INSERT INTO runs (started_at, duration_ms, source, triggered_by, ci_url, branch, commit_sha, app_version,
+				playwright_version, report_errors)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+			started, int(rep.Stats.Duration), meta.Source, meta.TriggeredBy, meta.CIURL, meta.Branch, meta.CommitSHA,
+			meta.AppVersion, rep.Config.Version, reportErrors,
 		).Scan(&res.RunID); err != nil {
 			return fmt.Errorf("simpan run: %w", err)
 		}
 
-		var passedKeys []string
+		var passed testList
 		for _, o := range outcomes {
 			res.Total++
 			fingerprint, cleanMsg, incidentKey := "", "", ""
 			switch o.Status {
 			case report.StatusPassed:
 				res.Passed++
-				passedKeys = append(passedKeys, o.Key())
+				passed.add(o)
 			case report.StatusSkipped:
 				res.Skipped++
 			case report.StatusFlaky:
@@ -119,9 +127,9 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				}
 			}
 			// Hanya kegagalan murni yang membuka/memperbarui kelompok.
-			// Flaky dicatat di test_results saja (fingerprint tetap disimpan untuk analisis nanti).
+			// Flaky dicatat di test_results saja (group_id tetap disimpan untuk analisis nanti).
 			if o.Status == report.StatusFailed && fingerprint != "" {
-				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.label(incidentKey))
+				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.label(incidentKey), shared)
 				if err != nil {
 					return err
 				}
@@ -144,14 +152,14 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				screenshots = []string{}
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO test_results (run_id, test_key, project, file, title, line, status, retries, duration_ms,
-					error_message, error_snippet, error_location, fingerprint, trace_path, screenshots,
-					source_hash, calls_hash, incident_key)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-					CASE WHEN $17::jsonb = '[]'::jsonb THEN '' ELSE md5($17::jsonb::text) END, $18)`,
-				res.RunID, o.Key(), o.Project, o.File, o.Title, o.Line, o.Status, o.Retries, o.DurationMs,
-				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, o.TracePath, screenshots,
-				o.SourceHash, calls, incidentKey,
+				INSERT INTO test_results (run_id, test_key, status, retries, duration_ms,
+					error_message, error_snippet, error_location, group_id, cause_id, test_code_hash,
+					response_shape_id, trace_path, screenshots)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14)`,
+				res.RunID, o.Key(), o.Status, o.Retries, o.DurationMs,
+				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, incidentKey, o.SourceHash,
+				calls, o.TracePath, screenshots,
 			); err != nil {
 				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
 			}
@@ -164,20 +172,24 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				list = append(list, c)
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO response_shapes (hash, calls)
+				INSERT INTO response_shapes (id, shape)
 				SELECT md5(c::jsonb::text), c::jsonb FROM unnest($1::text[]) AS c
-				ON CONFLICT (hash) DO NOTHING`, list); err != nil {
+				ON CONFLICT (id) DO NOTHING`, list); err != nil {
 				return fmt.Errorf("simpan bentuk response: %w", err)
 			}
 		}
 
 		// Test yang lulus bersih menutup semua kelompok kegagalannya yang masih terbuka.
-		if len(passedKeys) > 0 {
-			rows, err := tx.Query(ctx, `
-				UPDATE failure_groups
-				SET status = 'resolved', resolved_run = $1, resolved_at = now()
-				WHERE test_key = ANY($2) AND status IN ('open', 'regressed') AND last_seen_run <> $1
-				RETURNING fingerprint, test_key, sample_error, occurrences`, res.RunID, passedKeys)
+		// Run yang tidak mengubah status bersama hanya menampilkan pratinjaunya.
+		if len(passed.project) > 0 {
+			const match = `(project, file, title) IN (SELECT * FROM unnest($2::text[], $3::text[], $4::text[]))
+				AND status IN ('open', 'regressed') AND last_seen_run <> $1`
+			query := `UPDATE failure_groups SET status = 'resolved', resolved_run = $1
+				WHERE ` + match + ` RETURNING id, ` + testKeySQL + `, last_error, occurrences`
+			if !shared {
+				query = `SELECT id, ` + testKeySQL + `, last_error, occurrences FROM failure_groups WHERE ` + match
+			}
+			rows, err := tx.Query(ctx, query, res.RunID, passed.project, passed.file, passed.title)
 			if err != nil {
 				return fmt.Errorf("tutup kelompok yang sudah lulus: %w", err)
 			}
@@ -226,19 +238,21 @@ func callsJSON(calls []report.HTTPCall) string {
 
 // upsertGroup membuat kelompok baru atau memperbarui yang sudah ada.
 // kind: "new", "recurring", atau "regressed".
-func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string) (GroupChange, string, error) {
+// shared false: kelompok baru dibuat sebagai local_only dan kelompok yang ada tidak diubah.
+func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
 	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), Error: summarize(cleanMsg), Incident: incidentKey}
 
 	var prevStatus string
-	err := tx.QueryRow(ctx, `SELECT status FROM failure_groups WHERE fingerprint = $1 FOR UPDATE`, fingerprint).Scan(&prevStatus)
+	var localOnly bool
+	err := tx.QueryRow(ctx, `SELECT status, local_only, occurrences FROM failure_groups WHERE id = $1 FOR UPDATE`,
+		fingerprint).Scan(&prevStatus, &localOnly, &change.Occurrences)
 	if err == pgx.ErrNoRows {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO failure_groups (fingerprint, test_key, project, file, title, normalized_error, sample_error,
-				status, first_seen_run, last_seen_run, incident_key, incident_label)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $8, $9, $10)
-			ON CONFLICT (fingerprint) DO NOTHING`,
-			fingerprint, o.Key(), o.Project, o.File, o.Title, triage.Normalize(cleanMsg), cleanMsg, runID,
-			incidentKey, incidentLabel)
+			INSERT INTO failure_groups (id, project, file, title, last_error, status, first_seen_run, last_seen_run,
+				cause_id, cause, local_only)
+			VALUES ($1, $2, $3, $4, $5, 'open', $6, $6, $7, $8, $9)
+			ON CONFLICT (id) DO NOTHING`,
+			fingerprint, o.Project, o.File, o.Title, cleanMsg, runID, incidentKey, incidentLabel, !shared)
 		if err != nil {
 			return change, "", fmt.Errorf("buat kelompok %s: %w", fingerprint, err)
 		}
@@ -253,19 +267,34 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 	if prevStatus == "resolved" {
 		kind = "regressed"
 	}
+	if !shared {
+		return change, kind, nil
+	}
+	if localOnly {
+		// Pertama kali terlihat di run yang mengubah status: mulai sebagai kelompok bersama yang baru.
+		_, err = tx.Exec(ctx, `
+			UPDATE failure_groups SET
+				local_only = false, status = 'open', occurrences = 1, regressions = 0,
+				first_seen_run = $2, last_seen_run = $2, last_error = $3, resolved_run = NULL,
+				cause_id = $4, cause = $5
+			WHERE id = $1`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel)
+		if err != nil {
+			return change, "", fmt.Errorf("jadikan kelompok bersama %s: %w", fingerprint, err)
+		}
+		change.Occurrences = 1
+		return change, "new", nil
+	}
 	err = tx.QueryRow(ctx, `
 		UPDATE failure_groups SET
 			occurrences   = occurrences + 1,
 			last_seen_run = $2,
-			last_seen_at  = now(),
-			sample_error  = $3,
+			last_error    = $3,
 			status        = CASE WHEN status = 'resolved' THEN 'regressed' ELSE status END,
 			regressions   = regressions + CASE WHEN status = 'resolved' THEN 1 ELSE 0 END,
 			resolved_run  = NULL,
-			resolved_at   = NULL,
-			incident_key   = $4,
-			incident_label = $5
-		WHERE fingerprint = $1
+			cause_id      = $4,
+			cause         = $5
+		WHERE id = $1
 		RETURNING occurrences`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel).Scan(&change.Occurrences)
 	if err != nil {
 		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
@@ -364,4 +393,17 @@ func (s *incidentSet) list() []Incident {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Tests > out[j].Tests })
 	return out
+}
+
+// testKeySQL menyusun test_key ("project › file › judul") dari kolom failure_groups,
+// sama dengan report.Outcome.Key().
+const testKeySQL = `project || ' › ' || file || ' › ' || title`
+
+// testList mengumpulkan test sebagai tiga array sejajar, untuk dicocokkan dengan unnest di SQL.
+type testList struct{ project, file, title []string }
+
+func (l *testList) add(o report.Outcome) {
+	l.project = append(l.project, o.Project)
+	l.file = append(l.file, o.File)
+	l.title = append(l.title, o.Title)
 }

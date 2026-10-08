@@ -116,6 +116,9 @@ func TestIngest_Lifecycle(t *testing.T) {
 	if len(occ) != 3 || occ[0].RunID != r4.RunID || occ[len(occ)-1].CommitSHA != "aaa111" || occ[0].TracePath == "" {
 		t.Errorf("riwayat salah: %+v", occ)
 	}
+	if !strings.HasPrefix(occ[0].TracePath, "test-results/") {
+		t.Errorf("trace_path harus relatif terhadap project, bukan path di laptop: %q", occ[0].TracePath)
+	}
 	if g.SampleError == "" || g.Summary == "" {
 		t.Errorf("detail harus berisi contoh error: %+v", g)
 	}
@@ -153,7 +156,7 @@ func TestIngest_RedactsBeforeSaving(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sample string
-	if err := s.pool.QueryRow(ctx, `SELECT sample_error FROM failure_groups`).Scan(&sample); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT last_error FROM failure_groups`).Scan(&sample); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range []string{msg, snippet, sample} {

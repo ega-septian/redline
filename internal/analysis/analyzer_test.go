@@ -209,7 +209,7 @@ func TestAnalyze_Flow(t *testing.T) {
 	}
 
 	// 5. Label manual menang atas semuanya.
-	if err := s.SetLabel(ctx, fps["order dibayar"], "test_bug", "status memang sengaja diubah jadi PENDING"); err != nil {
+	if err := s.SetLabel(ctx, fps["order dibayar"], "test_bug", "status memang sengaja diubah jadi PENDING", "ega"); err != nil {
 		t.Fatal(err)
 	}
 	res, _, err = a.Analyze(ctx, fps["order dibayar"], true)
@@ -222,7 +222,7 @@ func TestAnalyze_Flow(t *testing.T) {
 	if res, _, err := off.Analyze(ctx, fps["brands punya slug"], false); err != nil || res.Source != "rule" {
 		t.Errorf("aturan matriks harus jalan tanpa AI: %+v %v", res, err)
 	}
-	if err := s.SetLabel(ctx, fps["order dibayar"], "", ""); err != nil {
+	if err := s.SetLabel(ctx, fps["order dibayar"], "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := off.Analyze(ctx, fps["order dibayar"], true); !errors.Is(err, ErrAIDisabled) {

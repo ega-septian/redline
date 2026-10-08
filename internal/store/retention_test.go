@@ -47,7 +47,7 @@ func TestIngest_DedupesResponseShapes(t *testing.T) {
 	if n := count(t, s, `SELECT count(*) FROM response_shapes`); n != 2 {
 		t.Errorf("mau 2 bentuk unik, dapat %d", n)
 	}
-	if n := count(t, s, `SELECT count(*) FROM test_results WHERE calls_hash = ''`); n != 0 {
+	if n := count(t, s, `SELECT count(*) FROM test_results WHERE response_shape_id = ''`); n != 0 {
 		t.Errorf("semua hasil yang punya calls harus menyimpan hash, %d kosong", n)
 	}
 	// Test tanpa fixture Redline: tidak membuat bentuk kosong.

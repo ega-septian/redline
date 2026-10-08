@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,8 +25,9 @@ const (
 // Report adalah bagian dari results.json yang kita pakai. Field lain diabaikan.
 type Report struct {
 	Config struct {
-		Version string `json:"version"`
-		RootDir string `json:"rootDir"`
+		Version    string `json:"version"`
+		RootDir    string `json:"rootDir"`
+		ConfigFile string `json:"configFile"`
 	} `json:"config"`
 	Suites []Suite      `json:"suites"`
 	Errors []ErrorEntry `json:"errors"` // error di luar test, misalnya globalSetup gagal
@@ -170,11 +172,37 @@ func (r *Report) Outcomes() []Outcome {
 	for _, s := range r.Suites {
 		out = walk(out, s, nil, true)
 	}
+	root := path.Dir(slash(r.Config.ConfigFile))
 	for i := range out {
 		out[i].SourceHash = r.TestHashes[out[i].File+":"+strconv.Itoa(out[i].Line)]
+		out[i].TracePath = ProjectPath(root, out[i].TracePath)
+		for j, p := range out[i].Screenshots {
+			out[i].Screenshots[j] = ProjectPath(root, p)
+		}
 	}
 	return out
 }
+
+// ProjectPath mengubah path di mesin yang menjalankan test menjadi path relatif terhadap project
+// (folder playwright.config.ts), supaya tidak membocorkan struktur folder pribadi dan sama
+// untuk semua anggota tim. Tanpa root yang cocok, dipotong mulai dari "test-results/", atau
+// tinggal nama filenya.
+func ProjectPath(root, p string) string {
+	if p == "" {
+		return ""
+	}
+	p = slash(p)
+	if root != "" && root != "." && strings.HasPrefix(p, root+"/") {
+		return strings.TrimPrefix(p, root+"/")
+	}
+	if i := strings.Index(p, "test-results/"); i >= 0 {
+		return p[i:]
+	}
+	return path.Base(p)
+}
+
+// slash memakai "/" untuk semua path, termasuk path Windows dari runner CI lain.
+func slash(p string) string { return strings.ReplaceAll(p, `\`, "/") }
 
 func walk(out []Outcome, s Suite, titles []string, root bool) []Outcome {
 	// Suite paling atas adalah file; judulnya sama dengan nama file, jadi tidak ikut judul test.

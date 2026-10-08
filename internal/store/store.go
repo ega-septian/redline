@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,14 @@ var ErrNotFound = errors.New("not found")
 
 type Store struct {
 	pool *pgxpool.Pool
+	// StatusSources: source run yang boleh mengubah status kelompok bersama (misalnya "ci").
+	// Kosong = semua source.
+	StatusSources []string
+}
+
+// SharesStatus: apakah run dari source ini boleh mengubah status kelompok bersama.
+func (s *Store) SharesStatus(source string) bool {
+	return len(s.StatusSources) == 0 || slices.Contains(s.StatusSources, source)
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {

@@ -75,17 +75,17 @@ func TestIngest_GroupsIncidents(t *testing.T) {
 
 	// Tersimpan di database untuk query lintas run.
 	var n int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM failure_groups WHERE incident_label = 'POST /users/login → 500'`).Scan(&n); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM failure_groups WHERE cause = 'POST /users/login → 500'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 5 {
-		t.Errorf("mau 5 kelompok dengan label insiden login, dapat %d", n)
+		t.Errorf("mau 5 kelompok dengan penyebab login, dapat %d", n)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT incident_key) FROM test_results WHERE incident_key <> ''`).Scan(&n); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(DISTINCT cause_id) FROM test_results WHERE cause_id <> ''`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 3 {
-		t.Errorf("mau 3 incident_key di test_results, dapat %d", n)
+		t.Errorf("mau 3 cause_id di test_results, dapat %d", n)
 	}
 }
 

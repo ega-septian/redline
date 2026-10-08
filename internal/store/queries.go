@@ -13,6 +13,8 @@ type Run struct {
 	StartedAt         *time.Time `json:"started_at"`
 	DurationMs        int        `json:"duration_ms"`
 	Source            string     `json:"source"`
+	TriggeredBy       string     `json:"triggered_by"`
+	CIURL             string     `json:"ci_url"`
 	Branch            string     `json:"branch"`
 	CommitSHA         string     `json:"commit"`
 	AppVersion        string     `json:"app_version"`
@@ -26,25 +28,27 @@ type Run struct {
 }
 
 type Group struct {
-	Fingerprint     string     `json:"fingerprint"`
-	TestKey         string     `json:"test"`
-	Project         string     `json:"project"`
-	File            string     `json:"file"`
-	Title           string     `json:"title"`
-	Status          string     `json:"status"`
-	Summary         string     `json:"summary"`
-	SampleError     string     `json:"sample_error,omitempty"`
-	NormalizedError string     `json:"normalized_error,omitempty"`
-	Occurrences     int        `json:"occurrences"`
-	Regressions     int        `json:"regressions"`
-	FirstSeenRun    int64      `json:"first_seen_run"`
-	LastSeenRun     int64      `json:"last_seen_run"`
-	ResolvedRun     *int64     `json:"resolved_run"`
-	FirstSeenAt     time.Time  `json:"first_seen_at"`
-	LastSeenAt      time.Time  `json:"last_seen_at"`
-	ResolvedAt      *time.Time `json:"resolved_at"`
-	HumanLabel      string     `json:"human_label,omitempty"`
-	HumanNote       string     `json:"human_note,omitempty"`
+	Fingerprint  string     `json:"fingerprint"`
+	TestKey      string     `json:"test"`
+	Project      string     `json:"project"`
+	File         string     `json:"file"`
+	Title        string     `json:"title"`
+	Status       string     `json:"status"`
+	Summary      string     `json:"summary"`
+	SampleError  string     `json:"sample_error,omitempty"` // pesan error terakhir
+	Cause        string     `json:"cause,omitempty"`        // penyebab yang bisa dibaca
+	Occurrences  int        `json:"occurrences"`
+	Regressions  int        `json:"regressions"`
+	FirstSeenRun int64      `json:"first_seen_run"`
+	LastSeenRun  int64      `json:"last_seen_run"`
+	ResolvedRun  *int64     `json:"resolved_run"`
+	FirstSeenAt  time.Time  `json:"first_seen_at"`
+	LastSeenAt   time.Time  `json:"last_seen_at"`
+	ResolvedAt   *time.Time `json:"resolved_at"`
+	HumanLabel   string     `json:"human_label,omitempty"` // kategori dari label manual
+	HumanNote    string     `json:"human_note,omitempty"`
+	LabeledBy    string     `json:"labeled_by,omitempty"`
+	LocalOnly    bool       `json:"local_only"` // hanya terlihat di run lokal; tidak masuk daftar tim
 }
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.
@@ -63,8 +67,8 @@ type Occurrence struct {
 	Screenshots   []string  `json:"screenshots"`
 }
 
-const runColumns = `id, created_at, started_at, duration_ms, source, branch, commit_sha, app_version,
-	playwright_version, total, passed, failed, flaky, skipped, report_errors`
+const runColumns = `id, created_at, started_at, duration_ms, source, triggered_by, ci_url, branch, commit_sha,
+	app_version, playwright_version, total, passed, failed, flaky, skipped, report_errors`
 
 func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	if limit <= 0 || limit > 200 {
@@ -78,7 +82,8 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	runs := []Run{}
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.CreatedAt, &r.StartedAt, &r.DurationMs, &r.Source, &r.Branch, &r.CommitSHA,
+		if err := rows.Scan(&r.ID, &r.CreatedAt, &r.StartedAt, &r.DurationMs, &r.Source, &r.TriggeredBy, &r.CIURL,
+			&r.Branch, &r.CommitSHA,
 			&r.AppVersion, &r.PlaywrightVersion, &r.Total, &r.Passed, &r.Failed, &r.Flaky, &r.Skipped,
 			&r.ReportErrors); err != nil {
 			return nil, err
@@ -88,20 +93,30 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	return runs, rows.Err()
 }
 
-const groupColumns = `fingerprint, test_key, project, file, title, status, sample_error, normalized_error,
-	occurrences, regressions, first_seen_run, last_seen_run, resolved_run, first_seen_at, last_seen_at, resolved_at,
-	coalesce(human_label, ''), human_note`
+// groupSelect: kolom kelompok kegagalan, dengan waktu diambil dari run terkait.
+// Tambahkan WHERE/ORDER BY dengan alias g.
+const groupSelect = `SELECT g.id, ` + testKeyG + `, g.project, g.file, g.title, g.status, g.last_error, g.cause,
+	g.occurrences, g.regressions, g.first_seen_run, g.last_seen_run, g.resolved_run,
+	fr.created_at, lr.created_at, rr.created_at,
+	coalesce(g.manual_category, ''), g.manual_note, g.labeled_by, g.local_only
+	FROM failure_groups g
+	JOIN runs fr ON fr.id = g.first_seen_run
+	JOIN runs lr ON lr.id = g.last_seen_run
+	LEFT JOIN runs rr ON rr.id = g.resolved_run`
+
+const testKeyG = `g.project || ' › ' || g.file || ' › ' || g.title`
 
 func scanGroup(row pgx.Row) (Group, error) {
 	var g Group
-	err := row.Scan(&g.Fingerprint, &g.TestKey, &g.Project, &g.File, &g.Title, &g.Status, &g.SampleError,
-		&g.NormalizedError, &g.Occurrences, &g.Regressions, &g.FirstSeenRun, &g.LastSeenRun, &g.ResolvedRun,
-		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote)
+	err := row.Scan(&g.Fingerprint, &g.TestKey, &g.Project, &g.File, &g.Title, &g.Status, &g.SampleError, &g.Cause,
+		&g.Occurrences, &g.Regressions, &g.FirstSeenRun, &g.LastSeenRun, &g.ResolvedRun,
+		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote, &g.LabeledBy, &g.LocalOnly)
 	g.Summary = summarize(g.SampleError)
 	return g, err
 }
 
-// ListGroups mengembalikan kelompok kegagalan. statuses kosong = open + regressed (yang perlu dikerjakan).
+// ListGroups mengembalikan kelompok kegagalan bersama (tanpa local_only).
+// statuses kosong = open + regressed (yang perlu dikerjakan).
 func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([]Group, error) {
 	if len(statuses) == 0 {
 		statuses = []string{"open", "regressed"}
@@ -109,8 +124,8 @@ func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+groupColumns+` FROM failure_groups
-		WHERE status = ANY($1) ORDER BY last_seen_at DESC LIMIT $2`, statuses, limit)
+	rows, err := s.pool.Query(ctx, groupSelect+`
+		WHERE g.status = ANY($1) AND NOT g.local_only ORDER BY g.last_seen_run DESC LIMIT $2`, statuses, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +136,7 @@ func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([
 		if err != nil {
 			return nil, err
 		}
-		g.SampleError, g.NormalizedError = "", "" // daftar cukup ringkasan
+		g.SampleError = "" // daftar cukup ringkasan
 		groups = append(groups, g)
 	}
 	return groups, rows.Err()
@@ -129,7 +144,7 @@ func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([
 
 // GetGroup mengembalikan satu kelompok beserta kemunculan terakhirnya.
 func (s *Store) GetGroup(ctx context.Context, fingerprint string) (Group, []Occurrence, error) {
-	g, err := scanGroup(s.pool.QueryRow(ctx, `SELECT `+groupColumns+` FROM failure_groups WHERE fingerprint = $1`, fingerprint))
+	g, err := scanGroup(s.pool.QueryRow(ctx, groupSelect+` WHERE g.id = $1`, fingerprint))
 	if err == pgx.ErrNoRows {
 		return Group{}, nil, ErrNotFound
 	}
@@ -140,7 +155,7 @@ func (s *Store) GetGroup(ctx context.Context, fingerprint string) (Group, []Occu
 		SELECT r.id, r.created_at, r.source, r.branch, r.commit_sha, r.app_version,
 		       t.status, t.retries, t.error_location, t.error_snippet, t.trace_path, t.screenshots
 		FROM test_results t JOIN runs r ON r.id = t.run_id
-		WHERE t.fingerprint = $1
+		WHERE t.group_id = $1
 		ORDER BY r.id DESC LIMIT 20`, fingerprint)
 	if err != nil {
 		return Group{}, nil, err

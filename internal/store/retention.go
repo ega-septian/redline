@@ -26,11 +26,11 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 				(SELECT DISTINCT ON (test_key) id FROM test_results
 				 WHERE status = 'passed' ORDER BY test_key, run_id DESC)
 				UNION
-				(SELECT DISTINCT ON (fingerprint) id FROM test_results
-				 WHERE fingerprint <> '' ORDER BY fingerprint, run_id ASC)
+				(SELECT DISTINCT ON (group_id) id FROM test_results
+				 WHERE group_id <> '' ORDER BY group_id, run_id ASC)
 				UNION
-				(SELECT DISTINCT ON (fingerprint) id FROM test_results
-				 WHERE fingerprint <> '' ORDER BY fingerprint, run_id DESC)
+				(SELECT DISTINCT ON (group_id) id FROM test_results
+				 WHERE group_id <> '' ORDER BY group_id, run_id DESC)
 			)
 			DELETE FROM test_results t USING runs r
 			WHERE r.id = t.run_id AND r.created_at < $1 AND t.id NOT IN (SELECT id FROM keep)`, before)
@@ -41,7 +41,7 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 
 		tag, err = tx.Exec(ctx, `
 			DELETE FROM response_shapes s
-			WHERE NOT EXISTS (SELECT 1 FROM test_results t WHERE t.calls_hash = s.hash)`)
+			WHERE NOT EXISTS (SELECT 1 FROM test_results t WHERE t.response_shape_id = s.id)`)
 		if err != nil {
 			return fmt.Errorf("hapus bentuk response yatim: %w", err)
 		}

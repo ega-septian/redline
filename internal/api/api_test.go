@@ -39,11 +39,11 @@ func (f *fakeStore) GetGroup(_ context.Context, fp string) (store.Group, []store
 func (f *fakeStore) GetAnalysis(context.Context, string, string) (store.Analysis, error) {
 	return store.Analysis{}, store.ErrNotFound
 }
-func (f *fakeStore) SetLabel(_ context.Context, fp, label, note string) error {
+func (f *fakeStore) SetLabel(_ context.Context, fp, label, note, by string) error {
 	if fp != "ada" {
 		return store.ErrNotFound
 	}
-	f.label = label + "|" + note
+	f.label = label + "|" + note + "|" + by
 	return nil
 }
 
@@ -147,17 +147,20 @@ func TestAnalyze(t *testing.T) {
 func TestLabel(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(fs, 0)
-	rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":"test_bug","note":"assertion usang"}`))
-	if rec.Code != 200 || fs.label != "test_bug|assertion usang" {
+	rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":"test_bug","note":"assertion usang","by":"ega"}`))
+	if rec.Code != 200 || fs.label != "test_bug|assertion usang|ega" {
 		t.Errorf("label tidak tersimpan: %d %s %q", rec.Code, rec.Body, fs.label)
 	}
 	if rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":"salah"}`)); rec.Code != 400 {
 		t.Errorf("label tidak dikenal harus 400, dapat %d", rec.Code)
 	}
-	if rec := do(h, "PUT", "/api/groups/tidakada/label", strings.NewReader(`{"label":"flaky"}`)); rec.Code != 404 {
+	if rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":"flaky"}`)); rec.Code != 400 {
+		t.Errorf("label tanpa \"by\" harus 400, dapat %d", rec.Code)
+	}
+	if rec := do(h, "PUT", "/api/groups/tidakada/label", strings.NewReader(`{"label":"flaky","by":"ega"}`)); rec.Code != 404 {
 		t.Errorf("kelompok tidak ada harus 404, dapat %d", rec.Code)
 	}
-	if rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":""}`)); rec.Code != 200 || fs.label != "|" {
+	if rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":""}`)); rec.Code != 200 || fs.label != "||" {
 		t.Errorf("label kosong harus menghapus label: %q", fs.label)
 	}
 }

@@ -16,6 +16,10 @@ type Config struct {
 	MaxReportMB int64
 	// RetentionDays: detail test_results lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
 	RetentionDays int
+	// StatusSources: source run yang boleh mengubah status kelompok bersama. Kosong = semua.
+	StatusSources []string
+	// Timezone untuk semua waktu yang dikeluarkan server (JSON dan log).
+	Timezone string
 
 	// Analisis AI. Kosongkan ANTHROPIC_API_KEY untuk mematikan AI (aturan tetap jalan).
 	AnthropicAPIKey  string
@@ -37,9 +41,19 @@ func Load() (Config, error) {
 	if err != nil || retention < 0 {
 		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
 	}
+	var sources []string
+	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
+		for _, s := range strings.Split(from, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				sources = append(sources, s)
+			}
+		}
+	}
 	return Config{
 		Port:          getenv("PORT", "8787"),
 		RetentionDays: retention,
+		StatusSources: sources,
+		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		DatabaseURL:   getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
 		MaxReportMB:   maxMB,
 

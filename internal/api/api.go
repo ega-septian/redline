@@ -23,7 +23,7 @@ type Store interface {
 	ListGroups(ctx context.Context, statuses []string, limit int) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
-	SetLabel(ctx context.Context, fingerprint, label, note string) error
+	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
 }
 
 // Analyzer menentukan penyebab kegagalan (aturan, cache, lalu AI).
@@ -55,7 +55,7 @@ func (s *Server) Routes() http.Handler {
 // handleIngest menerima isi results.json di body (mentah, atau dibungkus reporter Redline
 // sebagai {"playwright": ..., "test_hashes": ...}). Metadata run lewat query string:
 //
-//	POST /api/runs?source=local&branch=main&commit=abc123&app_version=sprint5-with-bugs
+//	POST /api/runs?source=local&branch=main&commit=abc123&app_version=sprint5-with-bugs&triggered_by=ega&ci_url=https://...
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	limit := s.MaxBodySize
 	if limit <= 0 {
@@ -84,10 +84,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	meta := store.RunMeta{
-		Source:     source,
-		Branch:     q.Get("branch"),
-		CommitSHA:  q.Get("commit"),
-		AppVersion: q.Get("app_version"),
+		Source:      source,
+		TriggeredBy: q.Get("triggered_by"),
+		CIURL:       q.Get("ci_url"),
+		Branch:      q.Get("branch"),
+		CommitSHA:   q.Get("commit"),
+		AppVersion:  q.Get("app_version"),
 	}
 	res, err := s.Store.IngestReport(r.Context(), rep, meta)
 	if err != nil {
@@ -184,22 +186,28 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"analysis": res, "cached": cached})
 }
 
-// handleLabel: PUT /api/groups/{fingerprint}/label {"label":"test_bug","note":"assertion salah"}
+// handleLabel: PUT /api/groups/{fingerprint}/label {"label":"test_bug","note":"assertion salah","by":"ega"}
 // Label kosong menghapus label. Label manual menimpa hasil aturan dan AI.
 func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Label string `json:"label"`
 		Note  string `json:"note"`
+		By    string `json:"by"` // siapa yang memberi label; wajib kalau label diisi
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"label\": \"...\", \"note\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"label\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	if body.Label != "" && !store.ValidCategory(body.Label) {
 		writeError(w, http.StatusBadRequest, "label harus salah satu dari: "+strings.Join(store.Categories, ", "))
 		return
 	}
-	err := s.Store.SetLabel(r.Context(), r.PathValue("fingerprint"), body.Label, strings.TrimSpace(body.Note))
+	body.By = strings.TrimSpace(body.By)
+	if body.Label != "" && body.By == "" {
+		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang memberi label")
+		return
+	}
+	err := s.Store.SetLabel(r.Context(), r.PathValue("fingerprint"), body.Label, strings.TrimSpace(body.Note), body.By)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
 		return
@@ -208,7 +216,7 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note})
+	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note, "by": body.By})
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {

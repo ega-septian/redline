@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // data zona waktu ikut di binary, untuk container yang tidak punya /usr/share/zoneinfo
 
 	"redline/internal/analysis"
 	"redline/internal/api"
@@ -45,16 +47,35 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("TIMEZONE %q tidak dikenal: %w", cfg.Timezone, err)
+	}
+	// Semua time.Time dari database dan log memakai zona ini, termasuk di server yang jam sistemnya UTC.
+	time.Local = loc
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	dbURL, err := store.WithTimezone(cfg.DatabaseURL, cfg.Timezone)
+	if err != nil {
+		return err
+	}
+	db, err := store.Open(ctx, dbURL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil {
 		return err
+	}
+	if err := db.SetDatabaseTimezone(ctx, cfg.Timezone); err != nil {
+		return err
+	}
+	db.StatusSources = cfg.StatusSources
+	if len(cfg.StatusSources) == 0 {
+		log.Info("semua run mengubah status kelompok (STATUS_FROM=all)")
+	} else {
+		log.Info("hanya run ini yang mengubah status kelompok; run lain hanya pratinjau", "source", cfg.StatusSources)
 	}
 
 	if cfg.RetentionDays > 0 {
