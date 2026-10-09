@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"redline/internal/analysis"
 	"redline/internal/report"
@@ -24,11 +25,19 @@ type Store interface {
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
+	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
+	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
+	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
+	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
+	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
 }
 
 // Analyzer menentukan penyebab kegagalan (aturan, cache, lalu AI).
 type Analyzer interface {
 	Analyze(ctx context.Context, fingerprint string, force bool) (*store.Analysis, bool, error)
+	ProposeFix(ctx context.Context, fingerprint string, files []analysis.SourceFile, attempts []analysis.Attempt) (*analysis.Fix, error)
+	ProposeRules(ctx context.Context) (*analysis.LearnResult, error)
+	EmbedPending(ctx context.Context) (int, error)
 }
 
 type Server struct {
@@ -49,6 +58,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/analyze", s.handleAnalyze)
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/label", s.handleLabel)
+	mux.HandleFunc("POST /api/groups/{fingerprint}/fix", s.handleFix)
+	mux.HandleFunc("POST /api/groups/{fingerprint}/experiments", s.handleSaveExperiment)
+	mux.HandleFunc("GET /api/rules", s.handleListRules)
+	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
+	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
+	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
 	return mux
 }
 
@@ -99,6 +114,15 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
+	// Embedding kegagalan baru dibuat sekarang, satu request untuk seluruh run, supaya analisis yang
+	// biasanya menyusul tidak perlu memanggil Voyage per kelompok. Gagal di sini tidak menggagalkan ingest.
+	if len(res.New)+len(res.Regressed) > 0 && s.Analyzer != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		if _, err := s.Analyzer.EmbedPending(ctx); err != nil {
+			s.Log.Warn("embedding setelah ingest gagal; dicoba lagi saat analisis", "err", err)
+		}
+		cancel()
+	}
 	writeJSON(w, http.StatusCreated, res)
 }
 
@@ -148,7 +172,12 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	resp := map[string]any{"group": g, "occurrences": occ, "analysis": nil}
+	experiments, err := s.Store.ListExperiments(r.Context(), g.Fingerprint)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	resp := map[string]any{"group": g, "occurrences": occ, "experiments": experiments, "analysis": nil}
 	if a, err := s.Store.GetAnalysis(r.Context(), g.Fingerprint, analysis.PromptVersion); err == nil {
 		resp["analysis"] = a
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -217,6 +246,164 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note, "by": body.By})
+}
+
+// handleFix: POST /api/groups/{fingerprint}/fix {"files": [{"path","content"}], "attempts": [...]}
+// AI membuat hipotesis + patch. Patch TIDAK dijalankan di server: CLI eksperimen yang punya kode test
+// menerapkannya di salinan project, menjalankan test, lalu mengirim hasilnya ke /experiments.
+func (s *Server) handleFix(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Files    []analysis.SourceFile `json:"files"`
+		Attempts []analysis.Attempt    `json:"attempts"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"files\": [{\"path\": \"...\", \"content\": \"...\"}]}")
+		return
+	}
+	fix, err := s.Analyzer.ProposeFix(r.Context(), r.PathValue("fingerprint"), body.Files, body.Attempts)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+	case errors.Is(err, analysis.ErrAIDisabled):
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, analysis.ErrBadFixInput):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case err != nil:
+		s.Log.Error("usulan patch gagal", "fingerprint", r.PathValue("fingerprint"), "err", err)
+		writeError(w, http.StatusBadGateway, "usulan patch gagal, cek log server")
+	default:
+		writeJSON(w, http.StatusOK, fix)
+	}
+}
+
+var experimentOutcomes = map[string]bool{"passed": true, "failed": true, "rejected": true, "skipped": true}
+
+// handleSaveExperiment: POST /api/groups/{fingerprint}/experiments, hasil eksperimen dari CLI.
+func (s *Server) handleSaveExperiment(w http.ResponseWriter, r *http.Request) {
+	var e store.Experiment
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&e); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON eksperimen")
+		return
+	}
+	e.GroupID = r.PathValue("fingerprint")
+	switch {
+	case e.Kind != "rerun" && e.Kind != "patch":
+		writeError(w, http.StatusBadRequest, "kind harus rerun atau patch")
+		return
+	case !experimentOutcomes[e.Outcome]:
+		writeError(w, http.StatusBadRequest, "outcome harus passed, failed, rejected, atau skipped")
+		return
+	case e.Category != "" && !store.ValidCategory(e.Category):
+		writeError(w, http.StatusBadRequest, "category harus salah satu dari: "+strings.Join(store.Categories, ", "))
+		return
+	case e.Runs < 1 || e.Passes < 0 || e.Passes > e.Runs:
+		writeError(w, http.StatusBadRequest, "runs minimal 1 dan passes di antara 0 dan runs")
+		return
+	case e.Outcome == "passed" && e.Passes == 0:
+		writeError(w, http.StatusBadRequest, "outcome passed butuh passes > 0")
+		return
+	}
+	id, err := s.Store.SaveExperiment(r.Context(), e)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.Log.Info("eksperimen tersimpan", "fingerprint", e.GroupID, "kind", e.Kind, "outcome", e.Outcome)
+	resp := map[string]any{"id": id, "verdicts": []store.ScoreEntry{}}
+	// Eksperimen yang lulus adalah jawaban: langsung nilai tebakan aturan/AI sebelumnya.
+	if e.Outcome == "passed" {
+		board, err := s.Store.Scores(r.Context(), e.GroupID, 0)
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		resp["verdicts"] = board.Entries
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// handleScoreboard: GET /api/scoreboard?limit=20. Akurasi tebakan aturan dan AI dibanding bukti.
+func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 500 {
+		limit = 20
+	}
+	board, err := s.Store.Scores(r.Context(), "", limit)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, board)
+}
+
+// handleListRules: GET /api/rules?status=proposed|active|rejected (kosong = semua).
+func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	if status != "" && !ruleStatuses[status] {
+		writeError(w, http.StatusBadRequest, "status harus proposed, active, atau rejected")
+		return
+	}
+	rules, err := s.Store.ListRules(r.Context(), status)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rules)
+}
+
+// handleProposeRules: POST /api/rules/propose. AI belajar dari kasus terbukti; hasilnya berstatus proposed.
+func (s *Server) handleProposeRules(w http.ResponseWriter, r *http.Request) {
+	res, err := s.Analyzer.ProposeRules(r.Context())
+	switch {
+	case errors.Is(err, analysis.ErrNothingToLearn):
+		writeJSON(w, http.StatusOK, map[string]any{"cases": 0, "proposed": []any{}, "rejected": []any{}, "message": err.Error()})
+	case errors.Is(err, analysis.ErrAIDisabled):
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+	case err != nil:
+		s.Log.Error("usulan aturan gagal", "err", err)
+		writeError(w, http.StatusBadGateway, "usulan aturan gagal, cek log server")
+	default:
+		writeJSON(w, http.StatusOK, res)
+	}
+}
+
+var ruleStatuses = map[string]bool{"proposed": true, "active": true, "rejected": true}
+
+// handleDecideRule: PUT /api/rules/{id} {"status": "active", "by": "ega"}
+func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id aturan harus angka")
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+		By     string `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || !ruleStatuses[body.Status] {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"active|rejected|proposed\", \"by\": \"...\"}")
+		return
+	}
+	body.By = strings.TrimSpace(body.By)
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang memutuskan")
+		return
+	}
+	rule, err := s.Store.DecideRule(r.Context(), id, body.Status, body.By)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "aturan tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	s.Log.Info("aturan diputuskan", "id", id, "status", body.Status, "by", body.By)
+	writeJSON(w, http.StatusOK, rule)
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {

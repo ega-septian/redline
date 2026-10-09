@@ -23,12 +23,15 @@ Butuh Go 1.24+ dan Docker.
 
 ```bash
 cp .env.example .env
-docker compose up -d        # Postgres di port 5433, supaya tidak bentrok dengan Postgres lain
+docker compose up -d        # Postgres + pgvector di port 5433, supaya tidak bentrok dengan Postgres lain
 go run ./cmd/server         # API di http://localhost:8787; tabel dibuat otomatis
 ```
 
-Untuk analisis dengan AI, isi `ANTHROPIC_API_KEY` di `.env`. Tanpa itu, Redline tetap jalan
-dengan aturan saja.
+Dua key opsional di `.env`:
+
+- `ANTHROPIC_API_KEY`: analisis AI dan eksperimen patch. Tanpa ini, Redline jalan dengan aturan saja.
+- `VOYAGE_API_KEY`: pencarian kasus mirip dengan embedding ([Voyage AI](https://dashboard.voyageai.com),
+  200 juta token pertama gratis). Tanpa ini, analisis jalan tanpa kasus mirip.
 
 ## Menghubungkan project Playwright
 
@@ -158,20 +161,24 @@ diharapkan oleh test negatif.
 Redline mencoba dari cara yang paling murah dan paling bisa dipercaya:
 
 1. **Label dari manusia.** Kalau seseorang sudah memberi label, itu yang dipakai.
-2. **Hasil sebelumnya.** Kelompok yang sudah pernah dianalisis tidak dianalisis ulang, kecuali
-   kegagalannya muncul lagi setelah sempat beres.
+2. **Bukti eksperimen.** Test lulus setelah patch → terbukti `test_bug`. Test lulus saat diulang
+   tanpa perubahan → `flaky`. Lihat [Eksperimen](#eksperimen-membuktikan-bukan-menebak).
 3. **Aturan tetap**, tanpa AI dan tanpa biaya:
    - Server tidak bisa dihubungi → `environment`
    - Test mengharapkan 2xx tapi dapat 5xx → `backend_bug`
+   - Yang diperiksa ternyata Promise (`received Promise`) → `test_bug`, kemungkinan lupa `await`
+   - Aturan yang **dipelajari** dan sudah disetujui. Lihat [Aturan yang dipelajari](#aturan-yang-dipelajari)
    - Dibandingkan dengan run terakhir yang lulus:
 
      | Kode test | Bentuk response API | Kesimpulan |
      |---|---|---|
-     | sama | berubah (field hilang, tipe atau status berubah) | `backend_bug` |
+     | sama | berubah (field hilang, tipe atau status berubah) | `backend_bug` (mengalahkan aturan yang dipelajari) |
      | berubah | sama, atau hanya ada field baru | `test_bug` |
      | lainnya | | diserahkan ke AI |
 
-4. **AI (Claude).** Hanya kalau langkah di atas tidak menjawab. AI menerima fakta yang sudah
+4. **Hasil AI sebelumnya.** Kelompok yang sudah pernah dianalisis AI tidak dianalisis ulang,
+   kecuali kegagalannya muncul lagi setelah sempat beres.
+5. **AI (Claude).** Hanya kalau langkah di atas tidak menjawab. AI menerima fakta yang sudah
    disamarkan: pesan error, potongan kode test, riwayat status, dan bentuk response (nama field
    dan tipenya, tanpa isi data).
 
@@ -181,6 +188,117 @@ tingkat keyakinannya diturunkan ke `low`.
 
 Satu analisis AI sekitar 1.000 token input dan 150 token output, atau kira-kira **$0,0002**
 dengan harga Claude Haiku 5.5. Biaya setiap analisis dicatat dan ditampilkan oleh reporter.
+
+### Eksperimen: membuktikan, bukan menebak
+
+AI yang hanya membaca pesan error tetap menebak. Eksperimen menguji tebakan itu dengan
+menjalankan test lagi:
+
+```bash
+npm run redline:verify     # kegagalan run terakhir (dari test-results/redline-last-run.json)
+```
+
+1. **Rerun.** Test dijalankan ulang 2x tanpa perubahan. Kalau lulus, kegagalannya tidak
+   konsisten (`flaky`) dan eksperimen berhenti di sini.
+2. **Patch.** AI menerima fakta + kode test (spec dan file lokal yang di-import, sudah
+   disamarkan), lalu mengusulkan hipotesis dan perubahan sekecil mungkin. Test dijalankan
+   dengan patch itu. Lulus berarti hipotesisnya **terbukti**; gagal berarti AI mencoba lagi
+   dengan error barunya (default 2 kali).
+
+Semua berjalan di **salinan project** di folder sementara, jadi kode kamu tidak berubah.
+Patch yang terbukti disimpan di `test-results/redline/<id>.patch` untuk di-review dan
+diterapkan dengan `git apply`.
+
+AI bisa "curang" supaya test lulus, jadi patch ditolak otomatis kalau mengurangi jumlah
+`expect`, matcher, atau `.parse`, atau kalau menambah `skip`/`only`/`fixme`, `try/catch`,
+atau retry/timeout. Kalau menurut AI penyebabnya di backend atau environment, AI tidak
+membuat patch: itu tidak bisa dibuktikan dengan mengubah test.
+
+Eksperimen dijalankan di mesin yang punya kode test. Server hanya membuat hipotesis
+(`POST /api/groups/{id}/fix`) dan menyimpan hasilnya (`POST /api/groups/{id}/experiments`),
+dan tidak pernah menjalankan kode.
+
+### Aturan yang dipelajari
+
+Setiap kasus yang sudah terbukti (label manual, atau patch yang lulus) bisa dijadikan aturan,
+supaya kasus serupa berikutnya diputuskan tanpa AI:
+
+```bash
+npm run redline:learn            # AI mengusulkan pola regex dari kasus terbukti
+npm run redline -- rules         # daftar aturan
+npm run redline -- approve 3     # aktifkan (atau: reject 3)
+```
+
+Sebelum disimpan, setiap usulan diuji ke data lama:
+
+- harus cocok dengan minimal satu kasus terbukti berkategori sama
+- tidak boleh cocok dengan kasus terbukti berkategori lain
+- tidak boleh cocok dengan lebih dari separuh semua kelompok (terlalu umum)
+- tidak boleh sama dengan aturan yang pernah ditolak. "Sama" berarti mencocokkan kelompok yang
+  persis sama, walaupun teks regex-nya berbeda
+
+Aturan baru berstatus `proposed` dan baru dipakai setelah disetujui manusia. Regex memakai
+sintaks Go (RE2), yang waktu prosesnya selalu linear, jadi pola dari AI tidak bisa membuat
+server macet.
+
+Hasilnya, semakin lama Redline dipakai, semakin banyak kegagalan yang diputuskan oleh aturan
+dan semakin sedikit biaya AI.
+
+### Ingatan: peta kode dan kasus mirip
+
+Setiap analisis AI mendapat dua jenis ingatan:
+
+- **Peta kode.** Reporter mengirim file lokal yang dipakai setiap test (file spec dan file yang
+  di-import langsung), dan fixture mencatat endpoint yang dipanggil. Redline lalu menghitung test
+  lain di run yang sama yang memakai endpoint atau file yang sama:
+
+  ```
+  - endpoint GET /brands: 3 test lain lulus, 0 gagal         → masalah condong ke test ini
+  - file tests/.../brand.schema.ts: 0 test lain lulus, 4 gagal → condong ke schema bersama atau backend
+  ```
+
+- **Kasus mirip.** Sampai 3 kasus terbukti (label manual atau patch yang lulus) yang pesan
+  error-nya paling mirip **maknanya**. Pesan error diubah menjadi embedding oleh Voyage AI
+  (`voyage-4-lite`), disimpan di Postgres dengan pgvector, lalu dibandingkan dengan cosine
+  similarity. Kasus ini dikirim sebagai **referensi, bukan bukti**, dan tidak boleh dikutip
+  sebagai evidence, karena error yang mirip bisa saja penyebabnya berbeda.
+
+  Contoh nyata: `Matcher error: received value must have a length property… Received has value:
+  undefined` dan `Cannot read properties of undefined (reading 'length')` kata-katanya berbeda,
+  tapi kemiripannya 0.81, dan keduanya memang salah bentuk response di test.
+
+  Beberapa hal yang sengaja dibuat begini:
+
+  - **Dibuat sekali per kelompok, sekaligus satu request per run.** Setelah ingest, semua kelompok
+    yang belum punya embedding dikirim ke Voyage dalam satu batch. Sekitar 30–60 token per error.
+  - **Batasnya 0.70.** Embedding membuat teks yang tidak berhubungan pun mendapat skor 0.5–0.7,
+    jadi batas yang rendah akan memasukkan referensi yang menyesatkan.
+  - **Model disimpan bersama embedding.** Kalau `VOYAGE_MODEL` diganti, hanya embedding dari model
+    yang sama yang dibandingkan, dan semuanya dibuat ulang otomatis.
+  - **Teks yang hampir sama belum tentu penyebabnya sama.** `Received: 500` dan `Received: 422`
+    mendapat skor 0.93, padahal yang satu bug server dan yang lain validasi. Karena itu kasus mirip
+    tidak pernah memutuskan sendiri; aturan dan eksperimen tetap yang menentukan.
+
+### Rapor: seberapa sering tebakan benar
+
+Setiap tebakan aturan dan AI dicatat. Setelah ada bukti (eksperimen yang lulus atau label
+manual), tebakan **sebelum** bukti itu dinilai benar atau salah:
+
+```bash
+npm run redline -- score
+```
+
+```
+  aturan  4/4 benar (100%)
+  AI      5/7 benar (71%), 1 tidak menebak
+```
+
+`npm run redline:verify` selalu mencatat tebakan dulu sebelum eksperimen, lalu menampilkan
+hasilnya, misalnya `AI: BUG BACKEND (high) → ❌ salah (terbukti BUG DI TEST)`. Reporter juga
+menampilkan satu baris rapor setiap kali ada kegagalan.
+
+Rapor ini yang dipakai untuk menilai apakah perubahan prompt atau ingatan benar-benar membuat
+analisis lebih tepat, bukan sekadar terasa lebih pintar.
 
 ### Dari mana Redline tahu sesuatu berubah
 
@@ -205,6 +323,12 @@ Karena butuh pembanding, run pertama setelah memasang fixture belum bisa dibandi
 | `GET /api/groups/{id}` | Detail kegagalan, 20 kemunculan terakhir, dan hasil analisis |
 | `POST /api/groups/{id}/analyze` | Analisis penyebab; `?force=1` untuk mengulang |
 | `PUT /api/groups/{id}/label` | Beri label: `{"label":"test_bug","note":"...","by":"nama"}` |
+| `POST /api/groups/{id}/fix` | AI membuat hipotesis + patch: `{"files":[{"path","content"}],"attempts":[...]}` |
+| `POST /api/groups/{id}/experiments` | Simpan hasil eksperimen (`kind` rerun/patch, `outcome`, `runs`, `passes`, `patch`) |
+| `GET /api/rules?status=proposed` | Daftar aturan yang dipelajari (`proposed`, `active`, `rejected`, kosong = semua) |
+| `POST /api/rules/propose` | AI mengusulkan aturan dari kasus terbukti |
+| `PUT /api/rules/{id}` | Setujui atau tolak: `{"status":"active","by":"nama"}` |
+| `GET /api/scoreboard?limit=20` | Rapor akurasi tebakan aturan dan AI dibanding bukti |
 | `GET /healthz` | Cek server hidup |
 
 Label harus salah satu dari `backend_bug`, `test_bug`, `environment`, `flaky`, atau `unknown`,
@@ -216,7 +340,7 @@ Beberapa nama field di respons API masih memakai nama lama (`fingerprint`, `inci
 ## Data
 
 Skema lengkap, dengan penjelasan setiap kolom, ada di
-[`internal/store/migrations/001_schema.sql`](internal/store/migrations/001_schema.sql).
+[`internal/store/migrations/`](internal/store/migrations/).
 
 | Tabel | Isi |
 |---|---|
@@ -225,6 +349,9 @@ Skema lengkap, dengan penjelasan setiap kolom, ada di
 | `test_results` | Hasil setiap test di setiap run (tabel terbesar) |
 | `response_shapes` | Bentuk response API yang unik, disimpan sekali |
 | `analyses` | Hasil analisis penyebab |
+| `experiments` | Hasil eksperimen (rerun dan patch), termasuk hipotesis dan patch-nya |
+| `learned_rules` | Aturan yang dipelajari: pola, hasil uji ke data lama, dan siapa yang menyetujui |
+| `predictions` | Riwayat tebakan aturan dan AI, untuk rapor |
 
 File besar seperti trace dan screenshot **tidak** masuk database. Yang disimpan hanya path-nya,
 relatif terhadap project (misalnya `test-results/brand-toolshop/trace.zip`), supaya sama untuk

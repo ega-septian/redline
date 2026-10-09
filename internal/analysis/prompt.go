@@ -11,7 +11,7 @@ import (
 
 // PromptVersion dinaikkan setiap kali prompt atau format fakta berubah,
 // supaya cache lama tidak dipakai untuk prompt baru.
-const PromptVersion = "v2"
+const PromptVersion = "v4"
 
 const toolName = "report_verdict"
 
@@ -35,6 +35,10 @@ Aturan:
 4. Field tambahan di response bukan breaking change. Field yang hilang atau tipe yang berubah adalah perubahan kontrak.
 5. Kalau ragu, pilih unknown atau confidence low. Salah yakin lebih buruk daripada mengaku tidak tahu.
 6. Tulis summary dan next_step dalam bahasa Indonesia, singkat (summary maksimal 3 kalimat).
+7. Peta kode: kalau test lain yang memakai endpoint atau file yang sama LULUS, penyebab condong ke test ini sendiri.
+   Kalau semuanya ikut GAGAL, condong ke bagian bersama: schema/helper bersama, atau backend.
+8. KASUS MIRIP hanya referensi dari masa lalu, bukan bukti. Jangan dikutip sebagai evidence. Pakai hanya kalau
+   fakta kasus ini benar-benar sesuai; error yang mirip bisa saja penyebabnya berbeda.
 
 Jawab dengan memanggil tool report_verdict.`
 
@@ -86,6 +90,19 @@ func BuildFacts(f *store.Facts) string {
 		}
 	}
 
+	if len(f.CodeFiles) > 0 || len(f.CurrentCalls) > 0 {
+		b.WriteString("\nPeta kode (test lain di run yang sama):\n")
+		if len(f.CodeFiles) > 0 {
+			fmt.Fprintf(&b, "- File yang dipakai test ini: %s\n", strings.Join(f.CodeFiles, ", "))
+		}
+		if len(f.CodeMap) == 0 {
+			b.WriteString("- Tidak ada test lain di run ini yang memakai endpoint atau file yang sama.\n")
+		}
+		for _, l := range f.CodeMap {
+			fmt.Fprintf(&b, "- %s %s: %d test lain lulus, %d gagal\n", l.Kind, l.Name, l.Passed, l.Failed)
+		}
+	}
+
 	b.WriteString("\nMatriks perubahan:\n")
 	if f.LastPass == nil {
 		b.WriteString("- Test ini belum pernah lulus sejak dicatat Redline, jadi tidak ada pembanding.\n")
@@ -98,6 +115,27 @@ func BuildFacts(f *store.Facts) string {
 		}
 		if info := versionInfo(f); info != "" {
 			b.WriteString(info)
+		}
+	}
+	return b.String()
+}
+
+// References menyusun bagian KASUS MIRIP. Sengaja di luar FAKTA: bukti AI hanya boleh dikutip dari FAKTA.
+func References(f *store.Facts) string {
+	if len(f.Similar) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nKASUS MIRIP YANG SUDAH TERBUKTI (referensi, bukan bukti; penyebabnya bisa berbeda):\n")
+	for i, c := range f.Similar {
+		by := "label manual"
+		if c.Source == "experiment" {
+			by = "eksperimen"
+		}
+		fmt.Fprintf(&b, "\n%d. %s, terbukti lewat %s, kemiripan makna error %.2f\n   Test: %s\n   Error: %s\n",
+			i+1, c.Category, by, c.Similarity, c.Test, strings.ReplaceAll(clip(c.Error, 400), "\n", "\n   "))
+		if c.Reason != "" {
+			fmt.Fprintf(&b, "   Penyebab: %s\n", clip(c.Reason, 300))
 		}
 	}
 	return b.String()

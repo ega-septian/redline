@@ -151,15 +151,19 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			if screenshots == nil {
 				screenshots = []string{}
 			}
+			codeFiles := o.CodeFiles
+			if codeFiles == nil {
+				codeFiles = []string{}
+			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO test_results (run_id, test_key, status, retries, duration_ms,
 					error_message, error_snippet, error_location, group_id, cause_id, test_code_hash,
-					response_shape_id, trace_path, screenshots)
+					response_shape_id, trace_path, screenshots, code_files)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14)`,
+					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15)`,
 				res.RunID, o.Key(), o.Status, o.Retries, o.DurationMs,
 				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, incidentKey, o.SourceHash,
-				calls, o.TracePath, screenshots,
+				calls, o.TracePath, screenshots, codeFiles,
 			); err != nil {
 				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
 			}
@@ -329,6 +333,10 @@ func summarize(s string) string {
 
 func informative(line string) bool {
 	if strings.HasPrefix(line, "Expected") || strings.HasPrefix(line, "Received") {
+		return true
+	}
+	// ZodError mencetak JSON; baris "message" berisi alasannya.
+	if strings.HasPrefix(line, `"message":`) {
 		return true
 	}
 	// Baris diff toEqual: "- \"status\": \"PAID\"," tapi bukan header "- Expected - 1".

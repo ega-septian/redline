@@ -38,6 +38,8 @@ type Report struct {
 
 	// TestHashes: "file:line" -> sidik jari kode test, dikirim reporter Redline di luar results.json.
 	TestHashes map[string]string `json:"-"`
+	// TestFiles: "file:line" -> file lokal yang dipakai test (spec + import langsung), relatif terhadap project.
+	TestFiles map[string][]string `json:"-"`
 }
 
 type Suite struct {
@@ -123,6 +125,8 @@ type Outcome struct {
 
 	// SourceHash: sidik jari kode test (kosong kalau reporter tidak mengirimnya).
 	SourceHash string
+	// CodeFiles: file lokal yang dipakai test (kosong kalau reporter tidak mengirimnya).
+	CodeFiles []string
 	// Calls: bentuk response API dari percobaan yang dilaporkan (kosong tanpa fixture Redline).
 	Calls []HTTPCall
 }
@@ -134,8 +138,9 @@ func (o Outcome) Key() string {
 
 // Upload adalah body yang dikirim reporter Redline: results.json ditambah sidik jari kode test.
 type upload struct {
-	Playwright json.RawMessage   `json:"playwright"`
-	TestHashes map[string]string `json:"test_hashes"`
+	Playwright json.RawMessage     `json:"playwright"`
+	TestHashes map[string]string   `json:"test_hashes"`
+	TestFiles  map[string][]string `json:"test_files"`
 }
 
 // ParseUpload menerima dua format: bungkus dari reporter Redline
@@ -148,6 +153,7 @@ func ParseUpload(data []byte) (*Report, error) {
 			return nil, err
 		}
 		rep.TestHashes = u.TestHashes
+		rep.TestFiles = u.TestFiles
 		return rep, nil
 	}
 	return Parse(bytes.NewReader(data))
@@ -174,7 +180,9 @@ func (r *Report) Outcomes() []Outcome {
 	}
 	root := path.Dir(slash(r.Config.ConfigFile))
 	for i := range out {
-		out[i].SourceHash = r.TestHashes[out[i].File+":"+strconv.Itoa(out[i].Line)]
+		loc := out[i].File + ":" + strconv.Itoa(out[i].Line)
+		out[i].SourceHash = r.TestHashes[loc]
+		out[i].CodeFiles = r.TestFiles[loc]
 		out[i].TracePath = ProjectPath(root, out[i].TracePath)
 		for j, p := range out[i].Screenshots {
 			out[i].Screenshots[j] = ProjectPath(root, p)

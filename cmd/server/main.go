@@ -18,6 +18,7 @@ import (
 	"redline/internal/analysis"
 	"redline/internal/api"
 	"redline/internal/config"
+	"redline/internal/embed"
 	"redline/internal/llm"
 	"redline/internal/store"
 )
@@ -90,6 +91,13 @@ func run(log *slog.Logger) error {
 		log.Info("analisis AI aktif", "model", cfg.AnthropicModel)
 	} else {
 		log.Info("analisis AI mati (ANTHROPIC_API_KEY kosong); hanya aturan deterministik yang jalan")
+	}
+	if cfg.VoyageAPIKey != "" {
+		analyzer.Embed = embed.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel, cfg.VoyageBaseURL)
+		analyzer.EmbedModel = cfg.VoyageModel
+		log.Info("pencarian kasus mirip aktif", "model", cfg.VoyageModel)
+	} else {
+		log.Info("pencarian kasus mirip mati (VOYAGE_API_KEY kosong)")
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20}

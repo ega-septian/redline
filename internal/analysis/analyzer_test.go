@@ -242,6 +242,8 @@ func TestApplyRules(t *testing.T) {
 		"Expected: 201\nReceived: 422":                                                 "", // 4xx bisa salah test atau salah API: serahkan ke AI
 		"Expected: 500\nReceived: 200":                                                 "",
 		"Test timeout of 30000ms exceeded.":                                            "",
+		"ZodError: [\n  {\n    \"message\": \"Invalid input: expected array, received Promise\"\n  }\n]": "test_bug",
+		"Expected: 200\nReceived: Promise {}": "test_bug",
 	}
 	for msg, want := range cases {
 		got := ApplyRules(&store.Facts{ErrorMessage: msg})

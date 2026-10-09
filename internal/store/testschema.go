@@ -27,5 +27,6 @@ func TestSchema(ctx context.Context, t testing.TB, url, schema string) string {
 	if strings.Contains(url, "?") {
 		sep = "&"
 	}
-	return url + sep + "search_path=" + schema
+	// public ikut di search_path karena ekstensi (pgvector) dipasang di sana.
+	return url + sep + "search_path=" + schema + ",public"
 }

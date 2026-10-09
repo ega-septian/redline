@@ -21,6 +21,8 @@ type fakeStore struct {
 	gotTests int
 	statuses []string
 	label    string
+
+	experiment store.Experiment
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -47,6 +49,25 @@ func (f *fakeStore) SetLabel(_ context.Context, fp, label, note, by string) erro
 	return nil
 }
 
+func (f *fakeStore) SaveExperiment(_ context.Context, e store.Experiment) (int64, error) {
+	f.experiment = e
+	return 1, nil
+}
+func (f *fakeStore) ListExperiments(context.Context, string) ([]store.Experiment, error) {
+	return []store.Experiment{}, nil
+}
+func (f *fakeStore) ListRules(context.Context, string) ([]store.LearnedRule, error) {
+	return []store.LearnedRule{}, nil
+}
+func (f *fakeStore) DecideRule(_ context.Context, id int64, status, by string) (store.LearnedRule, error) {
+	return store.LearnedRule{ID: id, Status: status, DecidedBy: by}, nil
+}
+
+func (f *fakeStore) Scores(_ context.Context, groupID string, _ int) (*store.Scoreboard, error) {
+	return &store.Scoreboard{Sources: []store.Score{}, Entries: []store.ScoreEntry{
+		{GroupID: groupID, Source: "ai", Predicted: "backend_bug", Truth: "test_bug"}}}, nil
+}
+
 type fakeAnalyzer struct {
 	force bool
 	err   error
@@ -58,6 +79,15 @@ func (a *fakeAnalyzer) Analyze(_ context.Context, fp string, force bool) (*store
 		return nil, false, a.err
 	}
 	return &store.Analysis{Fingerprint: fp, Source: "ai", Category: "backend_bug"}, !force, nil
+}
+
+func (a *fakeAnalyzer) ProposeFix(context.Context, string, []analysis.SourceFile, []analysis.Attempt) (*analysis.Fix, error) {
+	return &analysis.Fix{Category: "test_bug", Edits: []analysis.Edit{}}, nil
+}
+func (a *fakeAnalyzer) EmbedPending(context.Context) (int, error) { return 0, nil }
+
+func (a *fakeAnalyzer) ProposeRules(context.Context) (*analysis.LearnResult, error) {
+	return nil, analysis.ErrNothingToLearn
 }
 
 func newServer(fs *fakeStore, max int64) http.Handler {
@@ -162,5 +192,54 @@ func TestLabel(t *testing.T) {
 	}
 	if rec := do(h, "PUT", "/api/groups/ada/label", strings.NewReader(`{"label":""}`)); rec.Code != 200 || fs.label != "||" {
 		t.Errorf("label kosong harus menghapus label: %q", fs.label)
+	}
+}
+
+func TestSaveExperiment(t *testing.T) {
+	cases := map[string]int{
+		`{"kind":"patch","outcome":"passed","category":"test_bug","runs":1,"passes":1,"patch":"diff"}`: http.StatusCreated,
+		`{"kind":"rerun","outcome":"failed","runs":2,"passes":0}`:                                      http.StatusCreated,
+		`{"kind":"guess","outcome":"passed","runs":1,"passes":1}`:                                      http.StatusBadRequest,
+		`{"kind":"patch","outcome":"passed","runs":1,"passes":0}`:                                      http.StatusBadRequest,
+		`{"kind":"patch","outcome":"failed","runs":1,"passes":2}`:                                      http.StatusBadRequest,
+		`{"kind":"patch","outcome":"passed","category":"magic","runs":1,"passes":1}`:                   http.StatusBadRequest,
+	}
+	for body, want := range cases {
+		fs := &fakeStore{}
+		rec := do(newServer(fs, 0), "POST", "/api/groups/abc/experiments", strings.NewReader(body))
+		if rec.Code != want {
+			t.Errorf("%s: status %d, mau %d (%s)", body, rec.Code, want, rec.Body)
+		}
+		if want == http.StatusCreated && fs.experiment.GroupID != "abc" {
+			t.Errorf("group id dari path tidak dipakai: %+v", fs.experiment)
+		}
+		// Eksperimen lulus langsung mengembalikan penilaian tebakan sebelumnya.
+		if hasVerdict := strings.Contains(rec.Body.String(), `"truth": "test_bug"`); want == http.StatusCreated &&
+			hasVerdict != strings.Contains(body, `"outcome":"passed"`) {
+			t.Errorf("%s: verdicts hanya untuk outcome passed: %s", body, rec.Body)
+		}
+	}
+}
+
+func TestDecideRule(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+	if rec := do(h, "PUT", "/api/rules/3", strings.NewReader(`{"status":"active","by":"ega"}`)); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"status": "active"`) {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	for _, body := range []string{`{"status":"active"}`, `{"status":"maybe","by":"ega"}`} {
+		if rec := do(h, "PUT", "/api/rules/3", strings.NewReader(body)); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: mau 400, dapat %d", body, rec.Code)
+		}
+	}
+	if rec := do(h, "PUT", "/api/rules/abc", strings.NewReader(`{"status":"active","by":"ega"}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("id bukan angka: mau 400, dapat %d", rec.Code)
+	}
+}
+
+func TestProposeRules_NothingToLearn(t *testing.T) {
+	rec := do(newServer(&fakeStore{}, 0), "POST", "/api/rules/propose", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "belum ada kasus terbukti") {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
 }

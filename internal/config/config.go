@@ -25,6 +25,11 @@ type Config struct {
 	AnthropicAPIKey  string
 	AnthropicModel   string
 	AnthropicBaseURL string
+
+	// Embedding untuk mencari kasus mirip. Kosongkan VOYAGE_API_KEY untuk mematikannya.
+	VoyageAPIKey  string
+	VoyageModel   string
+	VoyageBaseURL string
 }
 
 // Load membaca file .env (kalau ada) lalu environment variable.
@@ -60,6 +65,10 @@ func Load() (Config, error) {
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+
+		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
+		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),
+		VoyageBaseURL: getenv("VOYAGE_BASE_URL", "https://api.voyageai.com"),
 	}, nil
 }
 

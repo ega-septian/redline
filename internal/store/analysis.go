@@ -53,6 +53,11 @@ type Facts struct {
 	CurrentCalls []report.HTTPCall   `json:"current_calls"` // bentuk response saat gagal
 	TestChanged  string              `json:"test_changed"`  // "ya" / "tidak" / "tidak diketahui"
 	Response     triage.ResponseDiff `json:"response"`
+
+	// Ingatan:
+	CodeFiles []string      `json:"code_files"` // file lokal yang dipakai test ini
+	CodeMap   []CodeLink    `json:"code_map"`   // test lain di run yang sama dengan endpoint/file yang sama
+	Similar   []SimilarCase `json:"similar"`    // kasus terbukti yang error-nya mirip maknanya (referensi, bukan bukti)
 }
 
 // Facts mengumpulkan bukti untuk satu kelompok kegagalan.
@@ -68,14 +73,28 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 
 	var curHash string
 	var curCalls []byte
+	var curRun int64
 	if err := s.pool.QueryRow(ctx, `
-		SELECT t.error_message, t.error_snippet, t.error_location, t.test_code_hash, COALESCE(s.shape, '[]'::jsonb)
+		SELECT t.run_id, t.error_message, t.error_snippet, t.error_location, t.test_code_hash,
+		       COALESCE(s.shape, '[]'::jsonb), t.code_files
 		FROM test_results t LEFT JOIN response_shapes s ON s.id = t.response_shape_id
 		WHERE t.group_id = $1 AND t.status = 'failed' ORDER BY t.run_id DESC LIMIT 1`, fingerprint,
-	).Scan(&f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls); err != nil && err != pgx.ErrNoRows {
+	).Scan(&curRun, &f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls, &f.CodeFiles); err != nil && err != pgx.ErrNoRows {
 		return nil, fmt.Errorf("kemunculan terakhir: %w", err)
 	}
 	f.CurrentCalls = decodeCalls(curCalls)
+	if f.CodeFiles == nil {
+		f.CodeFiles = []string{}
+	}
+
+	endpoints := []string{}
+	for _, c := range f.CurrentCalls {
+		endpoints = append(endpoints, c.Method+" "+c.Path)
+	}
+	if f.CodeMap, err = s.codeMap(ctx, curRun, g.TestKey, endpoints, f.CodeFiles); err != nil {
+		return nil, fmt.Errorf("peta kode: %w", err)
+	}
+	f.Similar = []SimilarCase{} // diisi analyzer kalau embedding aktif
 
 	const runRef = `r.id, r.created_at, r.source, r.commit_sha, r.app_version`
 	var lp RunRef
@@ -147,19 +166,21 @@ func decodeCalls(raw []byte) []report.HTTPCall {
 
 // Analysis adalah hasil analisis satu kelompok kegagalan.
 type Analysis struct {
-	Fingerprint   string    `json:"fingerprint"`
-	PromptVersion string    `json:"prompt_version"`
-	Source        string    `json:"source"` // rule, ai, atau human (label manual, tidak disimpan di tabel ini)
-	Model         string    `json:"model,omitempty"`
-	Category      string    `json:"category"`
-	Confidence    string    `json:"confidence"`
-	Summary       string    `json:"summary"`
-	Evidence      []string  `json:"evidence"`
-	NextStep      string    `json:"next_step"`
-	InputTokens   int       `json:"input_tokens"`  // hanya untuk analisis baru; tidak disimpan
-	OutputTokens  int       `json:"output_tokens"` // hanya untuk analisis baru; tidak disimpan
-	CostUSD       float64   `json:"cost_usd"`
-	CreatedAt     time.Time `json:"created_at"`
+	Fingerprint   string        `json:"fingerprint"`
+	PromptVersion string        `json:"prompt_version"`
+	Source        string        `json:"source"` // rule, ai, human (label manual) atau experiment (bukti eksperimen); dua terakhir tidak disimpan di tabel ini
+	Model         string        `json:"model,omitempty"`
+	Category      string        `json:"category"`
+	Confidence    string        `json:"confidence"`
+	Summary       string        `json:"summary"`
+	Evidence      []string      `json:"evidence"`
+	NextStep      string        `json:"next_step"`
+	Patch         string        `json:"patch,omitempty"`   // diff yang terbukti membuat test lulus (source experiment)
+	Similar       []SimilarCase `json:"similar,omitempty"` // kasus terbukti yang mirip; dihitung ulang, tidak disimpan
+	InputTokens   int           `json:"input_tokens"`      // hanya untuk analisis baru; tidak disimpan
+	OutputTokens  int           `json:"output_tokens"`     // hanya untuk analisis baru; tidak disimpan
+	CostUSD       float64       `json:"cost_usd"`
+	CreatedAt     time.Time     `json:"created_at"`
 }
 
 func (s *Store) SaveAnalysis(ctx context.Context, a Analysis) error {
@@ -202,7 +223,8 @@ func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by strin
 		note, by = "", ""
 	}
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE failure_groups SET manual_category = $2, manual_note = $3, labeled_by = $4
+		UPDATE failure_groups SET manual_category = $2, manual_note = $3, labeled_by = $4,
+			labeled_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END
 		WHERE id = $1`, fingerprint, labelArg, note, by)
 	if err != nil {
 		return err

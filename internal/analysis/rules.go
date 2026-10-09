@@ -5,6 +5,8 @@ package analysis
 import (
 	"fmt"
 	"regexp"
+	"strings"
+	"sync"
 
 	"redline/internal/store"
 	"redline/internal/triage"
@@ -14,12 +16,31 @@ var (
 	connErr  = regexp.MustCompile(`(?i)\b(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|getaddrinfo|socket hang up|net::ERR_[A-Z_]+)\b[^\n]*`)
 	expected = regexp.MustCompile(`Expected: (2\d\d)\b`)
 	received = regexp.MustCompile(`Received: (5\d\d)\b`)
+	// Nilai yang diperiksa ternyata Promise: hampir selalu karena lupa await (misalnya response.json()).
+	promise = regexp.MustCompile(`(?i)[^\n]*(received:?\s+Promise\b|\[object Promise\])[^\n]*`)
 )
 
 // ApplyRules mengembalikan hasil kalau penyebabnya jelas tanpa AI, atau nil.
 // Aturan sengaja sedikit dan ketat: lebih baik diserahkan ke AI daripada salah yakin.
-func ApplyRules(f *store.Facts) *store.Analysis {
-	msg := f.ErrorMessage
+// Urutan: aturan bawaan yang spesifik, matriks "test tetap + API berubah" (bukti kuat bug backend),
+// aturan yang dipelajari, lalu sisa matriks perubahan. Aturan yang dipelajari hanya melihat teks error,
+// jadi tidak boleh mengalahkan bukti bahwa API-lah yang berubah.
+func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
+	if res := builtinRules(f.ErrorMessage); res != nil {
+		return res
+	}
+	matrix := matrixRules(f)
+	if matrix != nil && matrix.Category == "backend_bug" {
+		return matrix
+	}
+	if res := learnedRules(f.ErrorMessage, learned); res != nil {
+		return res
+	}
+	return matrix
+}
+
+// builtinRules hanya melihat pesan error.
+func builtinRules(msg string) *store.Analysis {
 
 	if m := connErr.FindString(msg); m != "" {
 		return &store.Analysis{
@@ -44,7 +65,46 @@ func ApplyRules(f *store.Facts) *store.Analysis {
 		}
 	}
 
-	// Matriks perubahan: hanya kalau ada pembanding (run lulus terakhir) dan kedua sinyal diketahui.
+	if m := promise.FindString(msg); m != "" {
+		return &store.Analysis{
+			Source:     "rule",
+			Category:   "test_bug",
+			Confidence: "high",
+			Summary: "Test memeriksa sebuah Promise, bukan hasilnya. Hampir pasti ada `await` yang hilang, " +
+				"misalnya `response.json()` tanpa `await` atau `test.step` yang tidak di-await.",
+			Evidence: []string{strings.TrimSpace(m)},
+			NextStep: "Tambahkan `await` di pemanggilan async yang nilainya diperiksa (contoh: `parse(await response.json())`). " +
+				"Jalankan `npm run lint`: aturan playwright/missing-playwright-await menangkap `test.step` atau `expect` yang lupa di-await.",
+		}
+	}
+
+	return nil
+}
+
+// learnedRules mencoba aturan yang sudah disetujui, berurutan. Pola yang tidak valid dilewati.
+func learnedRules(msg string, rules []store.LearnedRule) *store.Analysis {
+	for _, r := range rules {
+		re := compileCached(r.Pattern)
+		if re == nil {
+			continue
+		}
+		if m := re.FindString(msg); m != "" {
+			return &store.Analysis{
+				Source:     "rule",
+				Category:   r.Category,
+				Confidence: "high",
+				Summary:    r.Summary,
+				Evidence: []string{strings.TrimSpace(firstLineOf(m)),
+					fmt.Sprintf("Aturan #%d, dipelajari dari %d kasus terbukti", r.ID, len(r.LearnedFrom))},
+				NextStep: r.NextStep,
+			}
+		}
+	}
+	return nil
+}
+
+// matrixRules: hanya kalau ada pembanding (run lulus terakhir) dan kedua sinyal diketahui.
+func matrixRules(f *store.Facts) *store.Analysis {
 	if f.LastPass == nil {
 		return nil
 	}
@@ -71,6 +131,27 @@ func ApplyRules(f *store.Facts) *store.Analysis {
 		}
 	}
 	return nil
+}
+
+var compiled sync.Map // pola -> *regexp.Regexp (nil kalau tidak valid)
+
+func compileCached(pattern string) *regexp.Regexp {
+	if v, ok := compiled.Load(pattern); ok {
+		return v.(*regexp.Regexp)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		re = nil
+	}
+	compiled.Store(pattern, re)
+	return re
+}
+
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func first(lines []string, n int) []string {
