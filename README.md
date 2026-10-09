@@ -37,13 +37,15 @@ Dua key opsional di `.env`:
 
 ### Cara yang disarankan: reporter Redline
 
-Salin tiga file ini dari project `coba2` ke project Playwright-mu:
+Salin file ini dari project [`playwright-web-api-automation`](https://github.com/ega-septian/playwright-web-api-automation)
+ke project Playwright-mu:
 
 | File | Gunanya |
 |---|---|
 | `reporters/redline.ts` | Mengirim hasil test ke Redline dan mencetak ringkasan |
-| `reporters/source-hash.ts` | Mendeteksi apakah kode test berubah sejak terakhir lulus |
-| `fixtures/redline.ts` | Mencatat bentuk response API (opsional, tapi membuat analisis jauh lebih akurat) |
+| `reporters/source-hash.ts` | Mendeteksi apakah kode test berubah sejak terakhir lulus, dan file apa saja yang dipakai test |
+| `fixtures/redline.ts` | Mencatat bentuk response API dan curl untuk reproduksi (opsional, tapi membuat analisis jauh lebih akurat) |
+| `scripts/redline.mts`, `scripts/sandbox.mts` | CLI: eksperimen (`verify`), aturan (`learn`, `rules`, `approve`), rapor (`score`). Opsional |
 
 Pasang reporter **setelah** reporter JSON di `playwright.config.ts`:
 
@@ -90,6 +92,29 @@ Pengaturan reporter lewat environment variable:
 | `REDLINE=0` | Matikan pengiriman |
 
 Untuk memberi ID test case, pakai tag: `test("...", { tag: "@TC-USR-001" }, ...)`.
+
+CLI (Node 22.6+, dijalankan dari root project Playwright):
+
+```bash
+node scripts/redline.mts verify            # buktikan penyebab kegagalan run terakhir
+node scripts/redline.mts learn             # usulkan aturan dari kasus terbukti
+node scripts/redline.mts approve 3         # aktifkan aturan (atau: reject 3, rules)
+node scripts/redline.mts score             # rapor akurasi tebakan
+```
+
+### Data apa yang dikirim
+
+| Data | Kapan | Catatan |
+|---|---|---|
+| Hasil test, pesan error, potongan kode di sekitar error | setiap run | dari `results.json` |
+| Hash kode test dan daftar file yang di-import | setiap run | isi file tidak dikirim |
+| Bentuk response API | setiap run, kalau memakai fixture | nama field dan tipe saja, **tanpa isi data** |
+| **Isi kode test** (spec + file lokal yang di-import langsung) | hanya untuk test yang gagal | supaya AI bisa membaca kodenya |
+
+Sebelum disimpan, Redline menyamarkan token, password, JWT, dan angka 16 digit di pesan error
+maupun kode. Kalau AI aktif, fakta yang sudah disamarkan inilah yang dikirim ke Claude. Pesan
+error yang sudah disamarkan juga dikirim ke Voyage AI (kalau `VOYAGE_API_KEY` diisi) untuk
+mencari kasus mirip.
 
 ### Tanpa reporter: curl
 
@@ -418,7 +443,9 @@ Supaya database tidak terus membengkak:
 cmd/server/          entrypoint HTTP server
 internal/report/     membaca laporan JSON Playwright
 internal/triage/     penyamaran data, pengelompokan kegagalan dan penyebab
-internal/analysis/   label manual, cache, aturan, lalu AI
+internal/analysis/   label manual, bukti eksperimen, aturan, AI, belajar aturan
+internal/contract/   kontrak OpenAPI: ringkasan per endpoint dan cek kesesuaian response
+internal/embed/      client Voyage AI (embedding untuk kasus mirip)
 internal/llm/        client Claude API
 internal/store/      Postgres: skema, penyimpanan, query, retensi
 internal/api/        HTTP handler
@@ -448,5 +475,11 @@ yang di-skip) dan `run2-fixed.json` (semuanya sudah diperbaiki).
 
 ## Rencana berikutnya
 
-- Perintah `redline ingest` untuk CI, langsung ke database tanpa server
-- Halaman web kecil untuk melihat kegagalan, hasil analisis, dan memberi label
+- **Integrasi ReportPortal.** Redline membaca item "To Investigate", menulis balik defect type,
+  komentar, dan patch yang terbukti, lalu mengambil koreksi tim sebagai label (kasus terbukti).
+  `run_id` bersama dan `testCaseId` dari tag `@TC-` menghubungkan kedua sistem.
+- **Error sebelum test jalan** (syntax, import salah, error TypeScript di file spec). Sekarang
+  hanya disimpan di run, belum dianalisis.
+- **Kontrak hasil pengamatan** untuk API tanpa dokumentasi: disusun dari bentuk response saat test lulus.
+- **Aturan untuk endpoint yang tidak ada di kontrak** (misalnya salah ketik path di test).
+- Perintah `redline ingest` untuk CI, langsung ke database tanpa server.
