@@ -61,6 +61,12 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if cfg.DatabaseSchema != "" {
+		if dbURL, err = store.PrepareSchema(ctx, dbURL, cfg.DatabaseSchema, cfg.DatabaseSchemaReset); err != nil {
+			return err
+		}
+		log.Info("memakai schema database terpisah", "schema", cfg.DatabaseSchema, "reset", cfg.DatabaseSchemaReset)
+	}
 	db, err := store.Open(ctx, dbURL)
 	if err != nil {
 		return err

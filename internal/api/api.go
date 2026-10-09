@@ -114,14 +114,17 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
-	// Embedding kegagalan baru dibuat sekarang, satu request untuk seluruh run, supaya analisis yang
-	// biasanya menyusul tidak perlu memanggil Voyage per kelompok. Gagal di sini tidak menggagalkan ingest.
+	// Embedding kegagalan baru dibuat di background, satu request untuk seluruh run. Ingest tidak menunggu:
+	// Voyage bisa lambat (rate limit akun gratis), dan reporter hanya menunggu beberapa detik.
+	// Analisis yang menyusul menunggu giliran (mutex) lalu memakai hasilnya.
 	if len(res.New)+len(res.Regressed) > 0 && s.Analyzer != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		if _, err := s.Analyzer.EmbedPending(ctx); err != nil {
-			s.Log.Warn("embedding setelah ingest gagal; dicoba lagi saat analisis", "err", err)
-		}
-		cancel()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if _, err := s.Analyzer.EmbedPending(ctx); err != nil {
+				s.Log.Warn("embedding setelah ingest gagal; dicoba lagi saat analisis", "err", err)
+			}
+		}()
 	}
 	writeJSON(w, http.StatusCreated, res)
 }

@@ -28,6 +28,9 @@ func (a *Analyzer) EmbedPending(ctx context.Context) (int, error) {
 	if a.Embed == nil {
 		return 0, nil
 	}
+	// Pemanggil kedua menunggu, lalu biasanya tidak menemukan apa-apa lagi untuk di-embed.
+	a.embedMu.Lock()
+	defer a.embedMu.Unlock()
 	pending, err := a.Store.PendingEmbeddings(ctx, a.EmbedModel, embedBatch)
 	if err != nil || len(pending) == 0 {
 		return 0, err

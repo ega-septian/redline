@@ -12,6 +12,10 @@ import (
 type Config struct {
 	Port        string
 	DatabaseURL string
+	// DatabaseSchema: schema terpisah (misalnya untuk benchmark). Kosong = public.
+	// DatabaseSchemaReset MENGHAPUS isi schema itu saat server start.
+	DatabaseSchema      string
+	DatabaseSchemaReset bool
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
 	// RetentionDays: detail test_results lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
@@ -61,6 +65,9 @@ func Load() (Config, error) {
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		DatabaseURL:   getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
 		MaxReportMB:   maxMB,
+
+		DatabaseSchema:      os.Getenv("DATABASE_SCHEMA"),
+		DatabaseSchemaReset: os.Getenv("DATABASE_SCHEMA_RESET") == "1",
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),

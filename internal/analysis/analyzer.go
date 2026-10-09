@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"redline/internal/llm"
@@ -45,6 +46,7 @@ type Analyzer struct {
 
 	Embed      Embedder // nil = tanpa kasus mirip
 	EmbedModel string
+	embedMu    sync.Mutex // satu pemanggilan Voyage pada satu waktu (rate limit akun gratis rendah)
 }
 
 // Analyze menentukan penyebab satu kelompok kegagalan. Urutannya, dari bukti terkuat:
