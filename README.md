@@ -244,6 +244,31 @@ server macet.
 Hasilnya, semakin lama Redline dipakai, semakin banyak kegagalan yang diputuskan oleh aturan
 dan semakin sedikit biaya AI.
 
+### Kontrak API: siapa yang menyimpang
+
+Untuk test yang baru ditulis, kegagalan "test mengharapkan X, API memberi Y" tidak bisa diputuskan dari
+kode saja: tidak ada acuan siapa yang benar. Kontrak API (OpenAPI) menjadi acuannya:
+
+```
+OPENAPI_SPECS=toolshop=http://localhost:8091/docs     # project Playwright = URL OpenAPI 3 (JSON)
+```
+
+- **Dipotret setiap run.** Kontrak berubah antar versi aplikasi (misalnya sprint1 → sprint2), jadi
+  analisis memakai kontrak **saat test gagal**, bukan kontrak terbaru. Disimpan sekali per isi.
+- **Cek kesesuaian otomatis, tanpa AI.** Bentuk response yang tercatat dicocokkan dengan schema
+  kontrak: status yang tidak terdokumentasi, field yang hilang, atau tipe yang berbeda.
+- **Dimensi ketiga matriks perubahan**, untuk membedakan perubahan yang disengaja dari regresi:
+
+  | Kode test | Response API | Kontrak | Kesimpulan |
+  |---|---|---|---|
+  | sama | berubah | sama | `backend_bug`: regresi |
+  | sama | berubah | berubah, response mengikutinya | `test_bug`: test usang, perubahan disengaja |
+  | sama | berubah | berubah, response tidak mengikutinya | `backend_bug` |
+  | (test baru) | melanggar kontrak | – | `backend_bug` |
+
+Tanpa kontrak, Redline tetap jalan: riwayat (matriks perubahan) menangani regresi, dan sisanya
+diputuskan AI dengan keyakinan lebih rendah.
+
 ### Ingatan: peta kode dan kasus mirip
 
 Setiap analisis AI mendapat dua jenis ingatan:
@@ -278,6 +303,25 @@ Setiap analisis AI mendapat dua jenis ingatan:
   - **Teks yang hampir sama belum tentu penyebabnya sama.** `Received: 500` dan `Received: 422`
     mendapat skor 0.93, padahal yang satu bug server dan yang lain validasi. Karena itu kasus mirip
     tidak pernah memutuskan sendiri; aturan dan eksperimen tetap yang menentukan.
+
+### Benchmark: bug yang sengaja ditanam
+
+Rapor butuh waktu untuk terisi, jadi akurasi juga diukur dengan benchmark di project Playwright
+(`npm run redline:bench`, lihat coba2): bug dengan jawaban yang sudah diketahui ditanam ke salinan
+project, lalu Redline menganalisisnya di server dan schema database terpisah.
+
+Hasil pada 24 bug (12 di test, 9 di backend lewat proxy yang merusak response, 3 environment) dan
+6 kasus upgrade versi, dengan Claude Haiku 5.5:
+
+| Skenario | Awal | Sekarang | Salah tebak |
+|---|---|---|---|
+| Test baru (cold start) | 46% | **92%** | 0 (2 "belum jelas") |
+| Test yang pernah lulus | 88% | **96%** | 0 (1 "belum jelas") |
+| Upgrade versi (test usang vs regresi) | – | **6/6** | 0 |
+
+Yang paling menaikkan angka: kode test dikirim ke AI, kalibrasi agar tidak terlalu sering menjawab
+"belum jelas", kontrak API, dan AI menulis alasannya dulu sebelum memilih kategori. Satu run per
+skenario; hasil AI bisa sedikit berbeda antar run.
 
 ### Rapor: seberapa sering tebakan benar
 
@@ -352,6 +396,8 @@ Skema lengkap, dengan penjelasan setiap kolom, ada di
 | `experiments` | Hasil eksperimen (rerun dan patch), termasuk hipotesis dan patch-nya |
 | `learned_rules` | Aturan yang dipelajari: pola, hasil uji ke data lama, dan siapa yang menyetujui |
 | `predictions` | Riwayat tebakan aturan dan AI, untuk rapor |
+| `source_files` | Kode test untuk test yang gagal (spec + import lokal), sudah disamarkan |
+| `contracts`, `run_contracts` | Potret kontrak API per versi, dan kontrak yang berlaku di setiap run |
 
 File besar seperti trace dan screenshot **tidak** masuk database. Yang disimpan hanya path-nya,
 relatif terhadap project (misalnya `test-results/brand-toolshop/trace.zip`), supaya sama untuk

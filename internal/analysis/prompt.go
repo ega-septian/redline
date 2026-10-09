@@ -11,7 +11,7 @@ import (
 
 // PromptVersion dinaikkan setiap kali prompt atau format fakta berubah,
 // supaya cache lama tidak dipakai untuk prompt baru.
-const PromptVersion = "v5"
+const PromptVersion = "v8"
 
 const toolName = "report_verdict"
 
@@ -46,23 +46,37 @@ Aturan:
    tipe salah, status tidak sesuai), itu backend_bug.
 9. KASUS MIRIP hanya referensi dari masa lalu, bukan bukti. Jangan dikutip sebagai evidence. Pakai hanya kalau
    fakta kasus ini benar-benar sesuai; error yang mirip bisa saja penyebabnya berbeda.
+10. Kalau ada KONTRAK API, itulah acuan utama untuk memutuskan siapa yang menyimpang. Bandingkan yang diharapkan
+   test (status, field, tipe di schema, payload yang dikirim) dan response yang tercatat dengan kontrak:
+   - test mengharapkan atau mengirim sesuatu yang berbeda dari kontrak -> deviates "test", category test_bug
+   - response berbeda dari kontrak (status, field hilang, tipe salah) -> deviates "api", category backend_bug
+   - kontrak tidak mengatur hal yang diperdebatkan (misalnya isi teks pesan) -> putuskan dari fakta lain
+   Tanpa kontrak dan tanpa riwayat lulus, "test mengharapkan X, API memberi Y" sulit diputuskan: pakai confidence low.
+   Kalau kontrak berubah dibanding run lulus terakhir dan response mengikuti kontrak baru, perubahannya disengaja:
+   test yang usang (test_bug). Kalau kontrak tetap tapi response berubah, itu regresi API (backend_bug).
+11. Urutan menjawab: tulis summary dan evidence dulu, lalu deviates (pihak yang menyimpang menurut summary itu),
+   lalu category yang sejalan: test -> test_bug, api -> backend_bug, environment -> environment.
 
 Jawab dengan memanggil tool report_verdict.`
 
 var verdictTool = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "category":   {"type": "string", "enum": ["backend_bug", "test_bug", "environment", "flaky", "unknown"]},
-    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-    "summary":    {"type": "string", "description": "Penjelasan penyebab, maksimal 3 kalimat."},
+    "summary":    {"type": "string", "description": "Tulis lebih dulu: penjelasan penyebab, maksimal 3 kalimat."},
     "evidence":   {"type": "array", "items": {"type": "string"}, "maxItems": 4,
                    "description": "Kutipan persis dari bagian FAKTA yang mendukung kesimpulan."},
+    "deviates":   {"type": "string", "enum": ["test", "api", "environment", "unclear"],
+                   "description": "Pihak yang menyimpang dari perilaku yang benar, sesuai summary (lihat kontrak API kalau ada)."},
+    "category":   {"type": "string", "enum": ["backend_bug", "test_bug", "environment", "flaky", "unknown"],
+                   "description": "Sejalan dengan deviates: test -> test_bug, api -> backend_bug, environment -> environment."},
+    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
     "next_step":  {"type": "string", "description": "Satu langkah konkret berikutnya untuk SDET."}
   },
-  "required": ["category", "confidence", "summary", "evidence", "next_step"]
+  "required": ["summary", "evidence", "deviates", "category", "confidence", "next_step"]
 }`)
 
 type verdict struct {
+	Deviates   string   `json:"deviates"`
 	Category   string   `json:"category"`
 	Confidence string   `json:"confidence"`
 	Summary    string   `json:"summary"`
@@ -93,7 +107,7 @@ func BuildFacts(f *store.Facts) string {
 	fmt.Fprintf(&b, "- Jumlah flaky dalam 20 run terakhir: %d\n", f.FlakyRecent)
 
 	if len(f.CurrentCalls) > 0 {
-		b.WriteString("\nResponse API saat gagal (bentuk saja, tanpa isi):\n")
+		b.WriteString("\nResponse API saat gagal (bentuk saja, tanpa isi; tipe JavaScript: number mencakup integer dan desimal):\n")
 		for _, c := range f.CurrentCalls {
 			fmt.Fprintf(&b, "- %s %s -> %d %s\n", c.Method, c.Path, c.Status, clip(compactJSON(c.Shape), 400))
 		}
@@ -112,6 +126,17 @@ func BuildFacts(f *store.Facts) string {
 		}
 	}
 
+	if f.Contract != "" {
+		fmt.Fprintf(&b, "\nKontrak API (OpenAPI) saat test gagal, untuk endpoint yang dipanggil, * = wajib:\n%s", clip(f.Contract, 4000))
+		b.WriteString("Kesesuaian response dengan kontrak (dicek otomatis):\n")
+		if len(f.ContractViolations) == 0 {
+			b.WriteString("- sesuai kontrak\n")
+		}
+		for _, v := range f.ContractViolations {
+			fmt.Fprintf(&b, "- tidak sesuai: %s\n", v)
+		}
+	}
+
 	b.WriteString("\nMatriks perubahan:\n")
 	if f.LastPass == nil {
 		b.WriteString("- Test ini belum pernah lulus sejak dicatat Redline, jadi tidak ada pembanding.\n")
@@ -121,6 +146,12 @@ func BuildFacts(f *store.Facts) string {
 		fmt.Fprintf(&b, "- Response API: %s\n", f.Response.Verdict)
 		for _, l := range f.Response.Lines {
 			fmt.Fprintf(&b, "  - %s\n", l)
+		}
+		if f.ContractChanged != "" {
+			fmt.Fprintf(&b, "- Kontrak API berubah: %s\n", f.ContractChanged)
+			if f.ContractBefore != "" {
+				fmt.Fprintf(&b, "  Kontrak saat run lulus terakhir:\n%s", indent(clip(f.ContractBefore, 2000), "    "))
+			}
 		}
 		if info := versionInfo(f); info != "" {
 			b.WriteString(info)
@@ -187,6 +218,14 @@ func versionInfo(f *store.Facts) string {
 			orUnknown(f.FirstFail.AppVersion), changed(f.LastPass.AppVersion, f.FirstFail.AppVersion))
 	}
 	return b.String()
+}
+
+func indent(s, pad string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = pad + l
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func changed(before, after string) string {

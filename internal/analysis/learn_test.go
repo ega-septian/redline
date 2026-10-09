@@ -83,3 +83,40 @@ func TestApplyRules_LearnedDoesNotBeatAPIChange(t *testing.T) {
 		t.Fatalf("aturan yang dipelajari (high) didahulukan dari matriks test_bug (medium): %+v", got)
 	}
 }
+
+func TestApplyRules_Contract(t *testing.T) {
+	changed := triage.ResponseDiff{Verdict: triage.ResponseChanged, Lines: []string{"GET /brands: field hilang: [].slug (string)"}}
+	base := func() *store.Facts {
+		return &store.Facts{ErrorMessage: "ZodError", LastPass: &store.RunRef{RunID: 3}, TestChanged: "tidak", Response: changed}
+	}
+
+	// Kontrak ikut berubah dan response sesuai kontrak baru: perubahan disengaja, test usang.
+	f := base()
+	f.ContractChanged = "ya"
+	if got := ApplyRules(f); got == nil || got.Category != "test_bug" || got.Confidence != "high" {
+		t.Errorf("kontrak berubah + response sesuai: mau test_bug (test usang), dapat %+v", got)
+	}
+	// Kontrak berubah tapi response tidak mengikutinya: tetap salah API.
+	f.ContractViolations = []string{"GET /brands: field [].handle ada di kontrak tapi tidak ada di response"}
+	if got := ApplyRules(f); got == nil || got.Category != "backend_bug" {
+		t.Errorf("kontrak berubah + response melanggar: mau backend_bug, dapat %+v", got)
+	}
+	// Kontrak tetap, response berubah: regresi.
+	f = base()
+	f.ContractChanged = "tidak"
+	if got := ApplyRules(f); got == nil || got.Category != "backend_bug" || got.Confidence != "high" {
+		t.Errorf("kontrak tetap + response berubah: mau backend_bug, dapat %+v", got)
+	}
+
+	// Test baru (tanpa riwayat) dan response melanggar kontrak: salah API, tanpa AI.
+	cold := &store.Facts{ErrorMessage: "ZodError", TestChanged: "tidak diketahui",
+		ContractViolations: []string{"POST /brands: status 200 tidak ada di kontrak (yang terdokumentasi: 201, 422)"}}
+	if got := ApplyRules(cold); got == nil || got.Category != "backend_bug" || !strings.Contains(got.Summary, "status 200") {
+		t.Errorf("pelanggaran kontrak: mau backend_bug, dapat %+v", got)
+	}
+	// Kode test sedang berubah: pelanggaran kontrak tidak diputuskan aturan.
+	cold.TestChanged = "ya"
+	if got := ApplyRules(cold); got != nil && got.Category == "backend_bug" {
+		t.Errorf("test yang berubah tidak boleh langsung menyalahkan API: %+v", got)
+	}
+}

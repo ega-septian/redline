@@ -214,3 +214,52 @@ func TestFacts_SourceCode(t *testing.T) {
 		t.Errorf("prompt patch tidak boleh memuat kode dari fakta")
 	}
 }
+
+// fakeContracts mengembalikan dokumen OpenAPI kecil untuk GET /orders.
+type fakeContracts struct{ fetched []string }
+
+func (c *fakeContracts) Fetch(_ context.Context, project string) (string, []byte, error) {
+	c.fetched = append(c.fetched, project)
+	return "http://kontrak/" + project, []byte(`{"openapi": "3.0.0", "paths": {"/orders": {"get": {"responses": {"200": {
+		"description": "ok", "content": {"application/json": {"schema": {"type": "object",
+		"properties": {"status": {"type": "string", "enum": ["PAID", "PENDING"]}}}}}}}}}}}`), nil
+}
+
+func TestAnalyze_ContractAndDeviates(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	contracts := &fakeContracts{}
+	// AI bilang test yang menyimpang, tapi memilih backend_bug: kategori dikoreksi dan keyakinan diturunkan.
+	fake := &fakeLLM{verdict: verdict{Deviates: "test", Category: "backend_bug", Confidence: "high",
+		Summary: "Test mengharapkan PAID.", Evidence: []string{"Kode test berubah: tidak"}}}
+	a := &Analyzer{Store: s, LLM: fake, Contracts: contracts}
+	f, err := s.Facts(ctx, fps["order dibayar"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.SnapshotContracts(ctx, f.FailRunID, []string{f.Group.Project})
+
+	res, _, err := a.Analyze(ctx, fps["order dibayar"], true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Category != "test_bug" || res.Confidence != "low" {
+		t.Errorf("kategori harus mengikuti pihak yang menyimpang: %+v", res)
+	}
+	prompt := fake.lastReq.Messages[0].Content
+	for _, want := range []string{"Kontrak API (OpenAPI) saat test gagal", "enum(PAID, PENDING)", "- sesuai kontrak"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("fakta harus memuat %q:\n%s", want, prompt)
+		}
+	}
+	if len(contracts.fetched) != 1 {
+		t.Errorf("kontrak harus dipotret sekali untuk project run ini: %v", contracts.fetched)
+	}
+
+	// Sejalan: tidak diubah.
+	fake.verdict = verdict{Deviates: "api", Category: "backend_bug", Confidence: "medium", Summary: "API salah.",
+		Evidence: []string{"Kode test berubah: tidak"}}
+	if res, _, _ = a.Analyze(ctx, fps["order dibayar"], true); res.Category != "backend_bug" || res.Confidence != "medium" {
+		t.Errorf("kategori yang sejalan tidak boleh diubah: %+v", res)
+	}
+}

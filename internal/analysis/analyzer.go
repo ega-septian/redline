@@ -31,6 +31,8 @@ type Store interface {
 	PendingEmbeddings(ctx context.Context, model string, limit int) ([]store.GroupError, error)
 	SaveEmbeddings(ctx context.Context, model string, ids []string, vectors [][]float32) error
 	SimilarCases(ctx context.Context, groupID, model string, minSimilarity float64, limit int) ([]store.SimilarCase, error)
+	SaveRunContract(ctx context.Context, runID int64, project, sourceURL, document string) (string, error)
+	RunContract(ctx context.Context, runID int64, project string) (id, document string, err error)
 }
 
 type LLM interface {
@@ -44,7 +46,8 @@ type Analyzer struct {
 	Pricing llm.Pricing
 	Log     *slog.Logger
 
-	Embed      Embedder // nil = tanpa kasus mirip
+	Contracts  Contracts // nil = tanpa kontrak API
+	Embed      Embedder  // nil = tanpa kasus mirip
 	EmbedModel string
 	embedMu    sync.Mutex // satu pemanggilan Voyage pada satu waktu (rate limit akun gratis rendah)
 }
@@ -151,6 +154,14 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 	}
 	if !store.ValidCategory(v.Category) {
 		v.Category = "unknown"
+	}
+	// Kategori harus sejalan dengan pihak yang menyimpang. Kalau bertentangan, pihak yang menyimpang dipakai
+	// (AI menilainya sebelum memilih kategori) dan keyakinan diturunkan.
+	if want, ok := map[string]string{"test": "test_bug", "api": "backend_bug", "environment": "environment"}[v.Deviates]; ok &&
+		v.Category != want && v.Category != "flaky" {
+		a.logger().Warn("kategori AI bertentangan dengan pihak yang menyimpang, dikoreksi",
+			"fingerprint", f.Group.Fingerprint, "deviates", v.Deviates, "category", v.Category)
+		v.Category, v.Confidence = want, "low"
 	}
 	if v.Confidence != "low" && v.Confidence != "medium" && v.Confidence != "high" {
 		v.Confidence = "low"

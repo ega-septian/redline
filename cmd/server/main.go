@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"redline/internal/analysis"
 	"redline/internal/api"
 	"redline/internal/config"
+	"redline/internal/contract"
 	"redline/internal/embed"
 	"redline/internal/llm"
 	"redline/internal/store"
@@ -97,6 +100,14 @@ func run(log *slog.Logger) error {
 		log.Info("analisis AI aktif", "model", cfg.AnthropicModel)
 	} else {
 		log.Info("analisis AI mati (ANTHROPIC_API_KEY kosong); hanya aturan deterministik yang jalan")
+	}
+	if cfg.OpenAPISpecs != "" {
+		specs, err := contract.ParseSpecs(cfg.OpenAPISpecs)
+		if err != nil {
+			return err
+		}
+		analyzer.Contracts = contract.NewRegistry(specs)
+		log.Info("kontrak API aktif", "project", strings.Join(slices.Sorted(maps.Keys(specs)), ","))
 	}
 	if cfg.VoyageAPIKey != "" {
 		analyzer.Embed = embed.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel, cfg.VoyageBaseURL)

@@ -84,7 +84,8 @@ func (a *fakeAnalyzer) Analyze(_ context.Context, fp string, force bool) (*store
 func (a *fakeAnalyzer) ProposeFix(context.Context, string, []analysis.SourceFile, []analysis.Attempt) (*analysis.Fix, error) {
 	return &analysis.Fix{Category: "test_bug", Edits: []analysis.Edit{}}, nil
 }
-func (a *fakeAnalyzer) EmbedPending(context.Context) (int, error) { return 0, nil }
+func (a *fakeAnalyzer) EmbedPending(context.Context) (int, error)          { return 0, nil }
+func (a *fakeAnalyzer) SnapshotContracts(context.Context, int64, []string) {}
 
 func (a *fakeAnalyzer) ProposeRules(context.Context) (*analysis.LearnResult, error) {
 	return nil, analysis.ErrNothingToLearn

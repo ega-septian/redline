@@ -30,6 +30,9 @@ type Config struct {
 	AnthropicModel   string
 	AnthropicBaseURL string
 
+	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
+	OpenAPISpecs string
+
 	// Embedding untuk mencari kasus mirip. Kosongkan VOYAGE_API_KEY untuk mematikannya.
 	VoyageAPIKey  string
 	VoyageModel   string
@@ -72,6 +75,8 @@ func Load() (Config, error) {
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+
+		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),

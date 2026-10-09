@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ type Analyzer interface {
 	ProposeFix(ctx context.Context, fingerprint string, files []analysis.SourceFile, attempts []analysis.Attempt) (*analysis.Fix, error)
 	ProposeRules(ctx context.Context) (*analysis.LearnResult, error)
 	EmbedPending(ctx context.Context) (int, error)
+	SnapshotContracts(ctx context.Context, runID int64, projects []string)
 }
 
 type Server struct {
@@ -114,6 +116,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
+	// Kontrak dipotret di setiap run, termasuk yang lulus semua: run lulus adalah pembanding untuk tahu
+	// apakah kontrak berubah. Tidak di background: analisis yang menyusul harus memakai kontrak run ini.
+	if s.Analyzer != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		s.Analyzer.SnapshotContracts(ctx, res.RunID, projectsOf(rep))
+		cancel()
+	}
 	// Embedding kegagalan baru dibuat di background, satu request untuk seluruh run. Ingest tidak menunggu:
 	// Voyage bisa lambat (rate limit akun gratis), dan reporter hanya menunggu beberapa detik.
 	// Analisis yang menyusul menunggu giliran (mutex) lalu memakai hasilnya.
@@ -127,6 +136,20 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	writeJSON(w, http.StatusCreated, res)
+}
+
+// projectsOf: project Playwright yang muncul di laporan, urut.
+func projectsOf(rep *report.Report) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, o := range rep.Outcomes() {
+		if !seen[o.Project] {
+			seen[o.Project] = true
+			out = append(out, o.Project)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {

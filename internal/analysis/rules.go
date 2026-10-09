@@ -30,13 +30,33 @@ func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
 		return res
 	}
 	matrix := matrixRules(f)
-	if matrix != nil && matrix.Category == "backend_bug" {
+	if matrix != nil && matrix.Confidence == "high" {
 		return matrix
+	}
+	if res := contractRule(f); res != nil {
+		return res
 	}
 	if res := learnedRules(f.ErrorMessage, learned); res != nil {
 		return res
 	}
 	return matrix
+}
+
+// contractRule: response yang melanggar kontrak saat test gagal (status tidak terdokumentasi, field hilang,
+// tipe berbeda) adalah penyimpangan API, selama kode test tidak sedang berubah.
+func contractRule(f *store.Facts) *store.Analysis {
+	if len(f.ContractViolations) == 0 || f.TestChanged == "ya" {
+		return nil
+	}
+	return &store.Analysis{
+		Source:     "rule",
+		Category:   "backend_bug",
+		Confidence: "high",
+		Summary: fmt.Sprintf("Response API tidak sesuai kontrak (OpenAPI) yang berlaku saat test gagal: %s.",
+			f.ContractViolations[0]),
+		Evidence: first(f.ContractViolations, 3),
+		NextStep: "Laporkan ke tim backend beserta bagian kontraknya. Kalau ternyata kontraknya yang usang, minta dokumentasi diperbarui.",
+	}
 }
 
 // builtinRules hanya melihat pesan error.
@@ -109,6 +129,19 @@ func matrixRules(f *store.Facts) *store.Analysis {
 		return nil
 	}
 	switch {
+	case f.TestChanged == "tidak" && f.Response.Verdict == triage.ResponseChanged && f.ContractChanged == "ya" &&
+		len(f.ContractViolations) == 0:
+		// Dimensi ketiga: kontrak ikut berubah dan response mengikuti kontrak baru, jadi perubahannya disengaja.
+		return &store.Analysis{
+			Source:     "rule",
+			Category:   "test_bug",
+			Confidence: "high",
+			Summary: fmt.Sprintf("Kontrak API untuk endpoint ini berubah sejak run lulus terakhir (#%d), dan response sekarang "+
+				"sesuai kontrak baru: %s. Perubahannya disengaja; test belum mengikuti kontrak baru.",
+				f.LastPass.RunID, f.Response.Lines[0]),
+			Evidence: append([]string{"Kode test berubah: tidak", "Kontrak API berubah: ya"}, first(f.Response.Lines, 2)...),
+			NextStep: "Sesuaikan test dan schema dengan kontrak baru. Kalau perubahan kontrak ini tidak disengaja, laporkan ke tim backend.",
+		}
 	case f.TestChanged == "tidak" && f.Response.Verdict == triage.ResponseChanged:
 		return &store.Analysis{
 			Source:     "rule",

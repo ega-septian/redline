@@ -55,6 +55,12 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			return fmt.Errorf("hapus kode test yatim: %w", err)
 		}
 		res.Sources = tag.RowsAffected()
+
+		// Potret kontrak yang tidak dipakai run mana pun lagi (run dihapus).
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM contracts c WHERE NOT EXISTS (SELECT 1 FROM run_contracts r WHERE r.contract_id = c.id)`); err != nil {
+			return fmt.Errorf("hapus kontrak yatim: %w", err)
+		}
 		return nil
 	})
 	return res, err

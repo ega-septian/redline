@@ -54,6 +54,15 @@ type Facts struct {
 	TestChanged  string              `json:"test_changed"`  // "ya" / "tidak" / "tidak diketahui"
 	Response     triage.ResponseDiff `json:"response"`
 
+	// FailRunID: run kemunculan gagal terakhir (yang dianalisis).
+	FailRunID int64 `json:"fail_run_id"`
+
+	// Kontrak API (OpenAPI) saat test gagal, untuk endpoint yang dipanggil. Diisi analyzer dari potret kontrak run.
+	Contract           string   `json:"contract,omitempty"`
+	ContractViolations []string `json:"contract_violations,omitempty"` // bagian response yang tidak sesuai kontrak
+	ContractChanged    string   `json:"contract_changed,omitempty"`    // dibanding run lulus terakhir: ya / tidak / tidak diketahui
+	ContractBefore     string   `json:"contract_before,omitempty"`     // kontrak saat run lulus terakhir, kalau berubah
+
 	// Ingatan:
 	Sources   []SourceFile  `json:"sources"`    // isi kode test pada kemunculan terakhir (spec dulu), sudah disamarkan
 	CodeFiles []string      `json:"code_files"` // file lokal yang dipakai test ini
@@ -88,6 +97,7 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 		return nil, fmt.Errorf("kode test: %w", err)
 	}
 	f.CurrentCalls = decodeCalls(curCalls)
+	f.FailRunID = curRun
 	if f.CodeFiles == nil {
 		f.CodeFiles = []string{}
 	}

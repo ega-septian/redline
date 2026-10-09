@@ -1,0 +1,1308 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Toolshop API",
+        "description": "Toolshop REST API technical description. All endpoints accept `Accept: text/xml` and respond with `application/xml`; the default is `application/json`.",
+        "contact": {
+            "name": "Testsmith",
+            "email": "info@testsmith.io"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "https://api-v1.practicesoftwaretesting.com",
+            "description": "Deployed environment"
+        },
+        {
+            "url": "http://localhost:8091",
+            "description": "Local environment"
+        }
+    ],
+    "paths": {
+        "/brands": {
+            "get": {
+                "tags": [
+                    "Brand"
+                ],
+                "summary": "Retrieve all brands",
+                "description": "Retrieve all brands",
+                "operationId": "getBrands",
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/BrandResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Brand"
+                ],
+                "summary": "Store new brand",
+                "description": "Store new brand",
+                "operationId": "storeBrand",
+                "requestBody": {
+                    "description": "Brand request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BrandRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BrandResponse"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/DuplicateConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            }
+        },
+        "/brands/{id}": {
+            "get": {
+                "tags": [
+                    "Brand"
+                ],
+                "summary": "Retrieve specific brand",
+                "description": "Retrieve specific brand",
+                "operationId": "getBrand",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BrandResponse"
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Brand"
+                ],
+                "summary": "Update specific brand",
+                "description": "Update specific brand",
+                "operationId": "updateBrand",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "requestBody": {
+                    "description": "Brand request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BrandRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "$ref": "#/components/responses/UpdateResponse"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/DuplicateConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Brand"
+                ],
+                "summary": "Delete specific brand",
+                "description": "",
+                "operationId": "deleteBrand",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Successful operation"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/ConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    }
+                }
+            }
+        },
+        "/categories/tree": {
+            "get": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Retrieve all categories (including subcategories)",
+                "description": "Retrieve all categories (including subcategories)",
+                "operationId": "getCategoriesTree",
+                "parameters": [
+                    {
+                        "name": "by_category_slug",
+                        "in": "query",
+                        "description": "Filter root-level categories by slug. Does not match sub-category slugs.",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/CategoryTreeResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    }
+                }
+            }
+        },
+        "/categories": {
+            "get": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Retrieve all categories",
+                "description": "Retrieve all categories",
+                "operationId": "getCategories",
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/CategoryResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Store new category",
+                "description": "Store new category",
+                "operationId": "storeCategory",
+                "requestBody": {
+                    "description": "Category request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CategoryRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CategoryResponse"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/DuplicateConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            }
+        },
+        "/categories/tree/{id}": {
+            "get": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Retrieve specific category (including subcategories)",
+                "description": "Retrieve specific category (including subcategories)",
+                "operationId": "getCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CategoryTreeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    }
+                }
+            }
+        },
+        "/categories/{id}": {
+            "put": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Update specific category",
+                "description": "Update specific category",
+                "operationId": "updateCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "requestBody": {
+                    "description": "Category request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CategoryRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "$ref": "#/components/responses/UpdateResponse"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/DuplicateConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Category"
+                ],
+                "summary": "Delete specific category",
+                "description": "",
+                "operationId": "deleteCategory",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Successful operation"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/ConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    }
+                }
+            }
+        },
+        "/images": {
+            "get": {
+                "tags": [
+                    "Image"
+                ],
+                "summary": "Retrieve all images",
+                "description": "Retrieve all images",
+                "operationId": "getImages",
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ImageResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    }
+                }
+            }
+        },
+        "/products": {
+            "get": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Retrieve all products",
+                "description": "Retrieve all products",
+                "operationId": "getProducts",
+                "parameters": [
+                    {
+                        "name": "by_brand",
+                        "in": "query",
+                        "description": "Comma-separated list of brand ids",
+                        "required": false,
+                        "schema": {
+                            "description": "Comma-separated list of ids, e.g. 1,2,3",
+                            "type": "string",
+                            "example": "1,2,3"
+                        }
+                    },
+                    {
+                        "name": "by_category",
+                        "in": "query",
+                        "description": "Comma-separated list of category ids",
+                        "required": false,
+                        "schema": {
+                            "description": "Comma-separated list of ids, e.g. 1,2,3",
+                            "type": "string",
+                            "example": "1,2,3"
+                        }
+                    },
+                    {
+                        "name": "by_category_slug",
+                        "in": "query",
+                        "description": "Filter products by category slug. Matches the given slug and includes all descendants.",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ProductResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Store new product",
+                "description": "Store new product",
+                "operationId": "storeProduct",
+                "requestBody": {
+                    "description": "Product request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Returns when product is created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "title": "StoreProductResponse",
+                                    "properties": {
+                                        "id": {
+                                            "type": "integer",
+                                            "example": 1
+                                        },
+                                        "name": {
+                                            "type": "string",
+                                            "example": "Lorum ipsum"
+                                        },
+                                        "description": {
+                                            "type": "string",
+                                            "example": "Lorum ipsum"
+                                        },
+                                        "price": {
+                                            "type": "number",
+                                            "example": 9.99
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            }
+        },
+        "/products/{id}": {
+            "get": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Retrieve specific product",
+                "description": "Retrieve specific product",
+                "operationId": "getProduct",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProductResponse"
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Update specific product",
+                "description": "Update specific product",
+                "operationId": "updateProduct",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "description": "Product request object",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "$ref": "#/components/responses/UpdateResponse"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Delete specific product",
+                "description": "",
+                "operationId": "deleteProduct",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Successful operation"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/ConflictResponse"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/UnprocessableEntityResponse"
+                    }
+                }
+            }
+        },
+        "/products/{id}/related": {
+            "get": {
+                "tags": [
+                    "Product"
+                ],
+                "summary": "Retrieve related products",
+                "description": "Retrieve related products",
+                "operationId": "getRelatedProducts",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The id parameter in path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "example": 1
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "headers": {
+                            "Cache-Control": {
+                                "description": "public, max-age=120",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "ETag": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ProductResponse"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "304": {
+                        "description": "Not Modified"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/ItemNotFoundResponse"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/InternalServerErrorResponse"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "BrandRequest": {
+                "title": "BrandRequest",
+                "required": [
+                    "name",
+                    "slug"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "",
+                        "type": "string",
+                        "example": "new brand",
+                        "maxLength": 120
+                    },
+                    "slug": {
+                        "description": "URL part, words separated by hyphen. Must be unique.",
+                        "type": "string",
+                        "example": "new-brand",
+                        "maxLength": 120
+                    }
+                },
+                "type": "object"
+            },
+            "BrandResponse": {
+                "title": "BrandResponse",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "new brand"
+                    },
+                    "slug": {
+                        "type": "string",
+                        "example": "new-brand"
+                    }
+                },
+                "type": "object"
+            },
+            "CategoryRequest": {
+                "title": "CategoryRequest",
+                "required": [
+                    "name",
+                    "slug"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "",
+                        "type": "string",
+                        "example": "new category",
+                        "maxLength": 120
+                    },
+                    "slug": {
+                        "description": "URL part, words separated by hyphen",
+                        "type": "string",
+                        "example": "new-category",
+                        "maxLength": 120
+                    },
+                    "parent_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "CategoryTreeResponse": {
+                "title": "CategoryTreeResponse",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "parent_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "new category"
+                    },
+                    "slug": {
+                        "type": "string",
+                        "example": "new-category"
+                    },
+                    "sub_categories": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CategoryResponse"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "CategoryResponse": {
+                "title": "CategoryResponse",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "parent_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "new category"
+                    },
+                    "slug": {
+                        "type": "string",
+                        "example": "new-category"
+                    }
+                },
+                "type": "object"
+            },
+            "ProductRequest": {
+                "title": "ProductRequest",
+                "required": [
+                    "name",
+                    "price",
+                    "category_id",
+                    "brand_id",
+                    "product_image_id"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 120
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true,
+                        "maxLength": 1250
+                    },
+                    "price": {
+                        "type": "number",
+                        "example": 1.99
+                    },
+                    "category_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "brand_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "product_image_id": {
+                        "type": "integer",
+                        "example": 1
+                    }
+                },
+                "type": "object"
+            },
+            "ProductResponse": {
+                "title": "ProductResponse",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true,
+                        "example": 1
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "new brand"
+                    },
+                    "description": {
+                        "type": "string",
+                        "example": "Lorum ipsum"
+                    },
+                    "price": {
+                        "type": "number",
+                        "example": 9.99
+                    },
+                    "brand": {
+                        "$ref": "#/components/schemas/BrandResponse"
+                    },
+                    "category": {
+                        "$ref": "#/components/schemas/CategoryResponse"
+                    },
+                    "product_image": {
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ImageResponse"
+                            }
+                        ],
+                        "nullable": true
+                    }
+                },
+                "type": "object"
+            },
+            "ImageResponse": {
+                "title": "ImageResponse",
+                "properties": {
+                    "by_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "by_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "source_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "source_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "file_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "title": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "responses": {
+            "UpdateResponse": {
+                "description": "Result of the update",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "UpdateResponse",
+                            "properties": {
+                                "success": {
+                                    "type": "boolean",
+                                    "example": true
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "UnauthorizedResponse": {
+                "description": "Returns when user is not authenticated",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "UnauthorizedResponse",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Unauthorized"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "ItemNotFoundResponse": {
+                "description": "Returns when the resource is not found",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "ItemNotFoundResponse",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Requested item not found"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "ResourceNotFoundResponse": {
+                "description": "Returns when the resource is not found",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "ResourceNotFoundResponse",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Resource not found"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "ConflictResponse": {
+                "description": "Returns when the entity is used elsewhere",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "ConflictResponse",
+                            "properties": {
+                                "success": {
+                                    "type": "boolean",
+                                    "example": false
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "example": "Seems like this brand is used elsewhere."
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "MethodNotAllowedResponse": {
+                "description": "Returns when the method is not allowed for the requested route",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "MethodNotAllowedResponse",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Method is not allowed for the requested route"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            },
+            "UnprocessableEntityResponse": {
+                "description": "Validation error, map of field name to array of error messages",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "description": "Validation error, map of field name to array of error messages",
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "example": {
+                            "name": [
+                                "The name field is required."
+                            ],
+                            "slug": [
+                                "The slug has already been taken."
+                            ]
+                        }
+                    }
+                }
+            },
+            "DuplicateConflictResponse": {
+                "description": "The resource conflicts with an existing one (e.g. unique slug already taken). Body is either a field-level MessageBag (when caught by validation) or a single message (when caught by the Handler from a race / FormRequest bypass).",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "oneOf": [
+                                {
+                                    "description": "Field-level conflict from the unique: validator rule",
+                                    "type": "object",
+                                    "example": {
+                                        "slug": [
+                                            "A brand already exists with this slug."
+                                        ]
+                                    },
+                                    "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                {
+                                    "description": "Generic conflict from the global Handler (race / bypass)",
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Duplicate Entry"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "InternalServerErrorResponse": {
+                "description": "Unexpected server error",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "example": "Something went wrong"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                }
+            }
+        },
+        "parameters": {
+            "AcceptHeader": {
+                "name": "Accept",
+                "in": "header",
+                "required": false,
+                "schema": {
+                    "type": "string",
+                    "default": "application/json",
+                    "enum": [
+                        "application/json",
+                        "text/xml"
+                    ]
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Brand",
+            "description": "Brand"
+        },
+        {
+            "name": "Category",
+            "description": "Category"
+        },
+        {
+            "name": "Image",
+            "description": "Image"
+        },
+        {
+            "name": "Product",
+            "description": "Product"
+        }
+    ]
+}
