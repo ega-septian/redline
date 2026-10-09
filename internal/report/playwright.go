@@ -40,6 +40,8 @@ type Report struct {
 	TestHashes map[string]string `json:"-"`
 	// TestFiles: "file:line" -> file lokal yang dipakai test (spec + import langsung), relatif terhadap project.
 	TestFiles map[string][]string `json:"-"`
+	// Sources: path -> isi file, hanya file yang dipakai test yang gagal. Belum disamarkan.
+	Sources map[string]string `json:"-"`
 }
 
 type Suite struct {
@@ -141,6 +143,7 @@ type upload struct {
 	Playwright json.RawMessage     `json:"playwright"`
 	TestHashes map[string]string   `json:"test_hashes"`
 	TestFiles  map[string][]string `json:"test_files"`
+	Sources    map[string]string   `json:"sources"`
 }
 
 // ParseUpload menerima dua format: bungkus dari reporter Redline
@@ -154,6 +157,7 @@ func ParseUpload(data []byte) (*Report, error) {
 		}
 		rep.TestHashes = u.TestHashes
 		rep.TestFiles = u.TestFiles
+		rep.Sources = u.Sources
 		return rep, nil
 	}
 	return Parse(bytes.NewReader(data))

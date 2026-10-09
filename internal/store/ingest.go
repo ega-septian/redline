@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -100,6 +102,11 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			return fmt.Errorf("simpan run: %w", err)
 		}
 
+		sourceIDs, err := saveSources(ctx, tx, rep.Sources)
+		if err != nil {
+			return err
+		}
+
 		var passed testList
 		for _, o := range outcomes {
 			res.Total++
@@ -155,15 +162,24 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			if codeFiles == nil {
 				codeFiles = []string{}
 			}
+			// Isi kode hanya untuk test yang punya error (gagal atau flaky): itulah yang dianalisis.
+			sources := []string{}
+			if o.ErrorMessage != "" {
+				for _, p := range codeFiles {
+					if id, ok := sourceIDs[p]; ok {
+						sources = append(sources, id)
+					}
+				}
+			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO test_results (run_id, test_key, status, retries, duration_ms,
 					error_message, error_snippet, error_location, group_id, cause_id, test_code_hash,
-					response_shape_id, trace_path, screenshots, code_files)
+					response_shape_id, trace_path, screenshots, code_files, source_ids)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15)`,
+					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15, $16)`,
 				res.RunID, o.Key(), o.Status, o.Retries, o.DurationMs,
 				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, incidentKey, o.SourceHash,
-				calls, o.TracePath, screenshots, codeFiles,
+				calls, o.TracePath, screenshots, codeFiles, sources,
 			); err != nil {
 				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
 			}
@@ -212,7 +228,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			}
 		}
 
-		_, err := tx.Exec(ctx, `UPDATE runs SET total=$2, passed=$3, failed=$4, flaky=$5, skipped=$6 WHERE id=$1`,
+		_, err = tx.Exec(ctx, `UPDATE runs SET total=$2, passed=$3, failed=$4, flaky=$5, skipped=$6 WHERE id=$1`,
 			res.RunID, res.Total, res.Passed, res.Failed, res.Flaky, res.Skipped)
 		return err
 	})
@@ -221,6 +237,36 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	}
 	res.Incidents = incidents.list()
 	return res, nil
+}
+
+// maxSourceBytes: file yang lebih besar dari ini tidak disimpan (bukan file test biasa).
+const maxSourceBytes = 50_000
+
+// saveSources menyimpan isi file kode test (sudah disamarkan) sekali per isi, lalu mengembalikan
+// path -> id. File yang sama di run berikutnya tidak disimpan ulang.
+func saveSources(ctx context.Context, tx pgx.Tx, sources map[string]string) (map[string]string, error) {
+	ids := map[string]string{}
+	var idList, paths, contents []string
+	for p, content := range sources {
+		if p == "" || len(content) > maxSourceBytes {
+			continue
+		}
+		clean := triage.Redact(content)
+		sum := md5.Sum([]byte(p + "\x00" + clean))
+		id := hex.EncodeToString(sum[:])
+		ids[p] = id
+		idList, paths, contents = append(idList, id), append(paths, p), append(contents, clean)
+	}
+	if len(idList) == 0 {
+		return ids, nil
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO source_files (id, path, content)
+		SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+		ON CONFLICT (id) DO NOTHING`, idList, paths, contents); err != nil {
+		return nil, fmt.Errorf("simpan kode test: %w", err)
+	}
+	return ids, nil
 }
 
 // callsJSON menyimpan bentuk response. Path diredaksi (jaga-jaga ada email atau token di path).

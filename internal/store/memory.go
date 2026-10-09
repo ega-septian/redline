@@ -276,3 +276,32 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*Scorebo
 	}
 	return board, rows.Err()
 }
+
+// SourceFile adalah isi satu file kode test.
+type SourceFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// sourceFiles mengambil isi file berdasarkan id, dengan urutan yang sama (file spec dulu).
+func (s *Store) sourceFiles(ctx context.Context, ids []string) ([]SourceFile, error) {
+	out := []SourceFile{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.path, f.content FROM unnest($1::text[]) WITH ORDINALITY AS u(id, ord)
+		JOIN source_files f ON f.id = u.id ORDER BY u.ord`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f SourceFile
+		if err := rows.Scan(&f.Path, &f.Content); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}

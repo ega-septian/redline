@@ -12,11 +12,12 @@ import (
 type PruneResult struct {
 	TestResults int64 `json:"test_results"`
 	Shapes      int64 `json:"response_shapes"`
+	Sources     int64 `json:"source_files"`
 }
 
 // Prune menghapus detail test_results dari run yang lebih tua dari before, kecuali yang
 // masih dibutuhkan analisis: hasil lulus terakhir tiap test (pembanding) serta kemunculan
-// pertama dan terakhir tiap kelompok kegagalan. Bentuk response yang tidak dipakai lagi ikut dihapus.
+// pertama dan terakhir tiap kelompok kegagalan. Bentuk response dan kode test yang tidak dipakai lagi ikut dihapus.
 // runs dan failure_groups tidak disentuh: kecil, dan dirujuk oleh tabel lain.
 func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error) {
 	var res PruneResult
@@ -46,6 +47,14 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			return fmt.Errorf("hapus bentuk response yatim: %w", err)
 		}
 		res.Shapes = tag.RowsAffected()
+
+		tag, err = tx.Exec(ctx, `
+			DELETE FROM source_files f
+			WHERE NOT EXISTS (SELECT 1 FROM test_results t WHERE f.id = ANY(t.source_ids))`)
+		if err != nil {
+			return fmt.Errorf("hapus kode test yatim: %w", err)
+		}
+		res.Sources = tag.RowsAffected()
 		return nil
 	})
 	return res, err

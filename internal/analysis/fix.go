@@ -13,10 +13,7 @@ import (
 )
 
 // SourceFile adalah satu file kode test yang dikirim CLI eksperimen (spec + file lokal yang di-import).
-type SourceFile struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-}
+type SourceFile = store.SourceFile
 
 // Attempt adalah percobaan patch sebelumnya yang belum berhasil, supaya AI tidak mengulang dugaan yang sama.
 type Attempt struct {
@@ -177,7 +174,10 @@ func (a *Analyzer) ProposeFix(ctx context.Context, fingerprint string, files []S
 func fixPrompt(f *store.Facts, files []SourceFile, attempts []Attempt) string {
 	var b strings.Builder
 	b.WriteString("FAKTA:\n\n")
-	b.WriteString(BuildFacts(f))
+	// Kode test tidak diambil dari fakta: CLI mengirim versi terbaru di bagian FILE, dan patch harus cocok dengannya.
+	withoutCode := *f
+	withoutCode.Sources = nil
+	b.WriteString(BuildFacts(&withoutCode))
 	b.WriteString(References(f))
 	b.WriteString("\n\nFILE (kode test saat ini):\n")
 	for _, file := range files {

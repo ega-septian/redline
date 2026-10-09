@@ -11,7 +11,7 @@ import (
 
 // PromptVersion dinaikkan setiap kali prompt atau format fakta berubah,
 // supaya cache lama tidak dipakai untuk prompt baru.
-const PromptVersion = "v4"
+const PromptVersion = "v5"
 
 const toolName = "report_verdict"
 
@@ -33,11 +33,18 @@ Aturan:
    nilai yang berubah (misalnya status "PAID" jadi "PENDING") terlihat dari pesan error, bukan dari bentuk.
    Kalau sinyal "tidak diketahui", jangan berasumsi.
 4. Field tambahan di response bukan breaking change. Field yang hilang atau tipe yang berubah adalah perubahan kontrak.
-5. Kalau ragu, pilih unknown atau confidence low. Salah yakin lebih buruk daripada mengaku tidak tahu.
+5. Kalau ragu, pilih kategori yang PALING MUNGKIN dengan confidence low, lalu sebutkan keraguannya di summary.
+   Pilih unknown hanya kalau fakta benar-benar tidak menunjuk ke kategori mana pun.
+   Salah yakin (confidence high padahal salah) lebih buruk daripada confidence low.
 6. Tulis summary dan next_step dalam bahasa Indonesia, singkat (summary maksimal 3 kalimat).
 7. Peta kode: kalau test lain yang memakai endpoint atau file yang sama LULUS, penyebab condong ke test ini sendiri.
    Kalau semuanya ikut GAGAL, condong ke bagian bersama: schema/helper bersama, atau backend.
-8. KASUS MIRIP hanya referensi dari masa lalu, bukan bukti. Jangan dikutip sebagai evidence. Pakai hanya kalau
+8. Baca KODE TEST sebelum menyalahkan API. Bandingkan apa yang dikirim dan diharapkan test dengan response yang
+   tercatat: path, method, payload, nama field, tipe di schema, status dan pesan yang diharapkan. Kalau test
+   mengirim data yang tidak lengkap, memanggil path yang salah, atau mengharapkan sesuatu yang bertentangan dengan
+   response wajar API, itu test_bug. Kalau kode test masuk akal dan response-lah yang menyimpang (field hilang,
+   tipe salah, status tidak sesuai), itu backend_bug.
+9. KASUS MIRIP hanya referensi dari masa lalu, bukan bukti. Jangan dikutip sebagai evidence. Pakai hanya kalau
    fakta kasus ini benar-benar sesuai; error yang mirip bisa saja penyebabnya berbeda.
 
 Jawab dengan memanggil tool report_verdict.`
@@ -72,7 +79,9 @@ func BuildFacts(f *store.Facts) string {
 		fmt.Fprintf(&b, "Lokasi error: %s\n", f.ErrorLocation)
 	}
 	fmt.Fprintf(&b, "\nPesan error:\n%s\n", clip(f.ErrorMessage, 3000))
-	if f.ErrorSnippet != "" {
+	if len(f.Sources) > 0 {
+		b.WriteString(codeSection(f.Sources))
+	} else if f.ErrorSnippet != "" {
 		fmt.Fprintf(&b, "\nPotongan kode test di sekitar error:\n%s\n", clip(f.ErrorSnippet, 1500))
 	}
 
@@ -115,6 +124,32 @@ func BuildFacts(f *store.Facts) string {
 		}
 		if info := versionInfo(f); info != "" {
 			b.WriteString(info)
+		}
+	}
+	return b.String()
+}
+
+// Batas kode test di prompt: cukup untuk spec + schema/helper, tetap murah.
+const (
+	maxCodePerFile = 6000
+	maxCodeTotal   = 16000
+)
+
+// codeSection menulis kode test dengan nomor baris, supaya cocok dengan lokasi error (file:baris).
+func codeSection(files []store.SourceFile) string {
+	var b strings.Builder
+	b.WriteString("\nKode test (file spec lalu file yang di-import, sudah disamarkan):\n")
+	budget := maxCodeTotal
+	for _, f := range files {
+		if budget <= 0 {
+			fmt.Fprintf(&b, "\n=== %s ===\n(dilewati: batas panjang kode)\n", f.Path)
+			continue
+		}
+		content := clip(f.Content, min(maxCodePerFile, budget))
+		budget -= len(content)
+		fmt.Fprintf(&b, "\n=== %s ===\n", f.Path)
+		for i, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+			fmt.Fprintf(&b, "%4d | %s\n", i+1, line)
 		}
 	}
 	return b.String()

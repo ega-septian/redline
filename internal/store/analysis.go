@@ -55,6 +55,7 @@ type Facts struct {
 	Response     triage.ResponseDiff `json:"response"`
 
 	// Ingatan:
+	Sources   []SourceFile  `json:"sources"`    // isi kode test pada kemunculan terakhir (spec dulu), sudah disamarkan
 	CodeFiles []string      `json:"code_files"` // file lokal yang dipakai test ini
 	CodeMap   []CodeLink    `json:"code_map"`   // test lain di run yang sama dengan endpoint/file yang sama
 	Similar   []SimilarCase `json:"similar"`    // kasus terbukti yang error-nya mirip maknanya (referensi, bukan bukti)
@@ -74,13 +75,17 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 	var curHash string
 	var curCalls []byte
 	var curRun int64
+	var sourceIDs []string
 	if err := s.pool.QueryRow(ctx, `
 		SELECT t.run_id, t.error_message, t.error_snippet, t.error_location, t.test_code_hash,
-		       COALESCE(s.shape, '[]'::jsonb), t.code_files
+		       COALESCE(s.shape, '[]'::jsonb), t.code_files, t.source_ids
 		FROM test_results t LEFT JOIN response_shapes s ON s.id = t.response_shape_id
 		WHERE t.group_id = $1 AND t.status = 'failed' ORDER BY t.run_id DESC LIMIT 1`, fingerprint,
-	).Scan(&curRun, &f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls, &f.CodeFiles); err != nil && err != pgx.ErrNoRows {
+	).Scan(&curRun, &f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls, &f.CodeFiles, &sourceIDs); err != nil && err != pgx.ErrNoRows {
 		return nil, fmt.Errorf("kemunculan terakhir: %w", err)
+	}
+	if f.Sources, err = s.sourceFiles(ctx, sourceIDs); err != nil {
+		return nil, fmt.Errorf("kode test: %w", err)
 	}
 	f.CurrentCalls = decodeCalls(curCalls)
 	if f.CodeFiles == nil {

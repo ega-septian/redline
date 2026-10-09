@@ -173,3 +173,44 @@ func TestScoreboard(t *testing.T) {
 		t.Errorf("filter per kelompok: %+v", one.Entries)
 	}
 }
+
+func TestFacts_SourceCode(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+
+	// Run ketiga membawa isi kode test; hanya test yang gagal yang menyimpan rujukannya.
+	rep := load(t, "run1-bug.json")
+	rep.TestFiles, rep.Sources = map[string][]string{}, map[string]string{
+		"tests/shared.schema.ts": "export const token = \"Bearer abc.def.ghi\";\nexport const Brand = z.object({ id: z.number() });",
+	}
+	for _, o := range rep.Outcomes() {
+		rep.TestFiles[fmt.Sprintf("%s:%d", o.File, o.Line)] = []string{o.File, "tests/shared.schema.ts"}
+		rep.Sources[o.File] = "test(\"" + o.Title + "\", async () => {\n  expect(1).toBe(1);\n});"
+	}
+	if _, err := s.IngestReport(ctx, rep, store.RunMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.Facts(ctx, fps["order dibayar"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Sources) != 2 || f.Sources[1].Path != "tests/shared.schema.ts" {
+		t.Fatalf("kode test salah (spec dulu, lalu import): %+v", f.Sources)
+	}
+	if strings.Contains(f.Sources[1].Content, "abc.def") {
+		t.Errorf("token di kode test harus disamarkan sebelum disimpan: %s", f.Sources[1].Content)
+	}
+	text := BuildFacts(f)
+	for _, want := range []string{"Kode test (file spec", "=== tests/shared.schema.ts ===", "   2 | export const Brand"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("fakta harus memuat %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Potongan kode test di sekitar error") {
+		t.Errorf("kalau kode lengkap ada, potongan tidak perlu dikirim lagi")
+	}
+	// Prompt patch memakai file terbaru dari CLI, jadi kode dari fakta tidak ikut (tidak dobel).
+	if p := fixPrompt(f, []SourceFile{{Path: "x.ts", Content: "baru"}}, nil); strings.Contains(p, "Kode test (file spec") {
+		t.Errorf("prompt patch tidak boleh memuat kode dari fakta")
+	}
+}

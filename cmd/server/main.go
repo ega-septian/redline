@@ -139,8 +139,9 @@ func pruneLoop(ctx context.Context, db *store.Store, days int, log *slog.Logger)
 		before := time.Now().AddDate(0, 0, -days)
 		if res, err := db.Prune(ctx, before); err != nil {
 			log.Error("retensi gagal", "err", err)
-		} else if res.TestResults+res.Shapes > 0 {
-			log.Info("retensi selesai", "hari", days, "test_results", res.TestResults, "response_shapes", res.Shapes)
+		} else if res.TestResults+res.Shapes+res.Sources > 0 {
+			log.Info("retensi selesai", "hari", days, "test_results", res.TestResults, "response_shapes", res.Shapes,
+				"source_files", res.Sources)
 		}
 		select {
 		case <-ctx.Done():
