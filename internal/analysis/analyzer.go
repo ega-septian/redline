@@ -98,6 +98,12 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 		return nil, false, err
 	}
 	res = ApplyRules(facts, learned...)
+	// Aturan yang belum yakin (misalnya "kode test berubah") tidak menghentikan AI: AI membaca kodenya dan bisa
+	// menunjuk kesalahan yang spesifik. Hasil aturan dipakai lagi kalau AI mati atau gagal.
+	var fallback *store.Analysis
+	if res != nil && res.Confidence != "high" && a.LLM != nil {
+		fallback, res = res, nil
+	}
 	if res == nil && !force {
 		// Hanya hasil AI yang diambil dari cache; hasil aturan lama bisa saja sudah tidak berlaku.
 		if hit, err := a.Store.GetAnalysis(ctx, fingerprint, PromptVersion); err == nil && hit.Source == "ai" {
@@ -111,7 +117,11 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 			return nil, false, ErrAIDisabled
 		}
 		if res, err = a.ask(ctx, facts); err != nil {
-			return nil, false, err
+			if fallback == nil {
+				return nil, false, err
+			}
+			a.logger().Warn("AI gagal, memakai hasil aturan", "fingerprint", fingerprint, "err", err)
+			res = fallback
 		}
 	}
 	res.Fingerprint = fingerprint

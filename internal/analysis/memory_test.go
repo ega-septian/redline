@@ -117,9 +117,8 @@ func TestSimilarCases_Embedding(t *testing.T) {
 func TestScoreboard(t *testing.T) {
 	s, fps := setup(t, "order dibayar") // kode test order diubah -> aturan matriks menebak test_bug
 	ctx := context.Background()
-	fake := &fakeLLM{verdict: verdict{Category: "backend_bug", Confidence: "high", Summary: "API salah.",
-		Evidence: []string{"Kode test berubah: tidak"}}}
-	a := &Analyzer{Store: s, LLM: fake}
+	// Tanpa AI, supaya tebakan berasal dari aturan (dengan AI, aturan medium diteruskan ke AI).
+	a := &Analyzer{Store: s}
 
 	// Tebakan: aturan untuk order (test_bug) dan brands (backend_bug); dianalisis dua kali, dicatat sekali.
 	for range 2 {

@@ -137,15 +137,26 @@ func TestAnalyze_MatrixRules(t *testing.T) {
 		t.Errorf("test tetap + response berubah harus backend_bug dari aturan: %+v", brand)
 	}
 
+	if fake.calls != 0 {
+		t.Errorf("aturan yang yakin (high) tidak boleh memanggil AI, calls=%d", fake.calls)
+	}
+
+	// "Kode test berubah" hanya medium: AI tetap dipanggil supaya bisa membaca kodenya.
+	fake.verdict = verdict{Deviates: "test", Category: "test_bug", Confidence: "high",
+		Summary: "Assertion status diubah ke PAID.", Evidence: []string{"Kode test berubah: ya"}}
 	order, _, err := a.Analyze(ctx, fps["order dibayar"], false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if order.Source != "rule" || order.Category != "test_bug" || order.Confidence != "medium" {
-		t.Errorf("test berubah + bentuk response sama harus test_bug: %+v", order)
+	if order.Source != "ai" || order.Category != "test_bug" || fake.calls != 1 {
+		t.Errorf("aturan medium harus diteruskan ke AI: %+v calls=%d", order, fake.calls)
 	}
-	if fake.calls != 0 {
-		t.Errorf("matriks yang jelas tidak boleh memanggil AI, calls=%d", fake.calls)
+
+	// Tanpa AI: hasil aturan medium tetap dipakai.
+	off := &Analyzer{Store: s}
+	if order, _, err = off.Analyze(ctx, fps["order dibayar"], true); err != nil || order.Source != "rule" ||
+		order.Category != "test_bug" || order.Confidence != "medium" {
+		t.Errorf("tanpa AI, aturan medium dipakai: %+v %v", order, err)
 	}
 }
 
@@ -242,7 +253,8 @@ func TestApplyRules(t *testing.T) {
 		"Expected: 201\nReceived: 422":                                                 "", // 4xx bisa salah test atau salah API: serahkan ke AI
 		"Expected: 500\nReceived: 200":                                                 "",
 		"Test timeout of 30000ms exceeded.":                                            "",
-		"ZodError: [\n  {\n    \"message\": \"Invalid input: expected array, received Promise\"\n  }\n]": "test_bug",
+		"ZodError: [\n  {\n    \"message\": \"Invalid input: expected array, received APIResponse\"\n  }\n]": "test_bug",
+		"ZodError: [\n  {\n    \"message\": \"Invalid input: expected array, received Promise\"\n  }\n]":     "test_bug",
 		"Expected: 200\nReceived: Promise {}": "test_bug",
 	}
 	for msg, want := range cases {

@@ -18,9 +18,12 @@ var (
 	received = regexp.MustCompile(`Received: (5\d\d)\b`)
 	// Nilai yang diperiksa ternyata Promise: hampir selalu karena lupa await (misalnya response.json()).
 	promise = regexp.MustCompile(`(?i)[^\n]*(received:?\s+Promise\b|\[object Promise\])[^\n]*`)
+	// Nilai yang diperiksa ternyata objek response Playwright: lupa membaca body (.json() / .text()).
+	apiResponse = regexp.MustCompile(`(?i)[^\n]*received:?\s+APIResponse\b[^\n]*`)
 )
 
-// ApplyRules mengembalikan hasil kalau penyebabnya jelas tanpa AI, atau nil.
+// ApplyRules mengembalikan hasil kalau penyebabnya jelas tanpa AI, atau nil. Hasil berkeyakinan di bawah
+// high (matriks "kode test berubah") hanya dipakai kalau AI mati atau gagal; lihat Analyzer.decide.
 // Aturan sengaja sedikit dan ketat: lebih baik diserahkan ke AI daripada salah yakin.
 // Urutan: aturan bawaan yang spesifik, matriks "test tetap + API berubah" (bukti kuat bug backend),
 // aturan yang dipelajari, lalu sisa matriks perubahan. Aturan yang dipelajari hanya melihat teks error,
@@ -95,6 +98,18 @@ func builtinRules(msg string) *store.Analysis {
 			Evidence: []string{strings.TrimSpace(m)},
 			NextStep: "Tambahkan `await` di pemanggilan async yang nilainya diperiksa (contoh: `parse(await response.json())`). " +
 				"Jalankan `npm run lint`: aturan playwright/missing-playwright-await menangkap `test.step` atau `expect` yang lupa di-await.",
+		}
+	}
+
+	if m := apiResponse.FindString(msg); m != "" {
+		return &store.Analysis{
+			Source:     "rule",
+			Category:   "test_bug",
+			Confidence: "high",
+			Summary: "Test memeriksa objek response Playwright (APIResponse), bukan isi body-nya. " +
+				"Kemungkinan besar lupa membaca body dengan `.json()` atau `.text()`.",
+			Evidence: []string{strings.TrimSpace(m)},
+			NextStep: "Baca body dulu sebelum divalidasi, misalnya `Schema.parse(await response.json())`.",
 		}
 	}
 
