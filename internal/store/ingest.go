@@ -79,7 +79,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 		New: []GroupChange{}, Recurring: []GroupChange{}, Regressed: []GroupChange{},
 		Resolved: []GroupChange{}, FlakyTests: []string{}, Incidents: []Incident{},
 	}
-	incidents := newIncidentSet()
+	incidents := NewIncidentSet()
 	shapes := map[string]bool{} // isi calls JSON unik di run ini
 	shared := s.SharesStatus(meta.Source)
 	res.SharedStatus = shared
@@ -131,17 +131,17 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				var kind, label string
 				incidentKey, kind, label = triage.IncidentKey(normalized, o.Calls)
 				if o.Status == report.StatusFailed {
-					incidents.add(incidentKey, kind, triage.Clean(label))
+					incidents.Add(incidentKey, kind, triage.Clean(label))
 				}
 			}
 			// Hanya kegagalan murni yang membuka/memperbarui kelompok.
 			// Flaky dicatat di test_results saja (group_id tetap disimpan untuk analisis nanti).
 			if o.Status == report.StatusFailed && fingerprint != "" {
-				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.label(incidentKey), shared)
+				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.Label(incidentKey), shared)
 				if err != nil {
 					return err
 				}
-				incidents.member(incidentKey, fingerprint, kind)
+				incidents.Member(incidentKey, fingerprint, kind)
 				switch kind {
 				case "new":
 					res.New = append(res.New, change)
@@ -151,7 +151,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					res.Recurring = append(res.Recurring, change)
 				}
 			}
-			calls := callsJSON(o.Calls)
+			calls := CallsJSON(o.Calls)
 			if calls != "[]" {
 				shapes[calls] = true
 			}
@@ -220,7 +220,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					rows.Close()
 					return err
 				}
-				c.Error = summarize(c.Error)
+				c.Error = Summarize(c.Error)
 				res.Resolved = append(res.Resolved, c)
 			}
 			rows.Close()
@@ -236,12 +236,26 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	if err != nil {
 		return nil, err
 	}
-	res.Incidents = incidents.list()
+	res.Incidents = incidents.List()
 	return res, nil
 }
 
-// maxSourceBytes: file yang lebih besar dari ini tidak disimpan (bukan file test biasa).
-const maxSourceBytes = 50_000
+// MaxSourceBytes: file yang lebih besar dari ini tidak disimpan (bukan file test biasa).
+const MaxSourceBytes = 50_000
+
+// SourceID menyamarkan isi file kode test dan menghitung id-nya (md5 dari path + isi yang sudah disamarkan).
+// File yang sama di run lain mendapat id yang sama, jadi disimpan sekali.
+func SourceID(path, content string) (id, clean string) {
+	clean = triage.Redact(content)
+	sum := md5.Sum([]byte(path + "\x00" + clean))
+	return hex.EncodeToString(sum[:]), clean
+}
+
+// ShapeID menghitung id bentuk response (hasil CallsJSON), supaya bentuk yang sama disimpan sekali.
+func ShapeID(calls string) string {
+	sum := md5.Sum([]byte(calls))
+	return hex.EncodeToString(sum[:])
+}
 
 // saveSources menyimpan isi file kode test (sudah disamarkan) sekali per isi, lalu mengembalikan
 // path -> id. File yang sama di run berikutnya tidak disimpan ulang.
@@ -249,12 +263,10 @@ func saveSources(ctx context.Context, tx pgx.Tx, sources map[string]string) (map
 	ids := map[string]string{}
 	var idList, paths, contents []string
 	for p, content := range sources {
-		if p == "" || len(content) > maxSourceBytes {
+		if p == "" || len(content) > MaxSourceBytes {
 			continue
 		}
-		clean := triage.Redact(content)
-		sum := md5.Sum([]byte(p + "\x00" + clean))
-		id := hex.EncodeToString(sum[:])
+		id, clean := SourceID(p, content)
 		ids[p] = id
 		idList, paths, contents = append(idList, id), append(paths, p), append(contents, clean)
 	}
@@ -270,8 +282,8 @@ func saveSources(ctx context.Context, tx pgx.Tx, sources map[string]string) (map
 	return ids, nil
 }
 
-// callsJSON menyimpan bentuk response. Path diredaksi (jaga-jaga ada email atau token di path).
-func callsJSON(calls []report.HTTPCall) string {
+// CallsJSON menyimpan bentuk response. Path diredaksi (jaga-jaga ada email atau token di path).
+func CallsJSON(calls []report.HTTPCall) string {
 	clean := make([]report.HTTPCall, 0, len(calls))
 	for _, c := range calls {
 		if !json.Valid(c.Shape) {
@@ -292,7 +304,7 @@ func callsJSON(calls []report.HTTPCall) string {
 // shared false: kelompok baru dibuat sebagai local_only dan kelompok yang ada tidak diubah.
 func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
 	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), TestCaseID: o.TestCaseID,
-		Error: summarize(cleanMsg), Incident: incidentKey}
+		Error: Summarize(cleanMsg), Incident: incidentKey}
 
 	var prevStatus string
 	var localOnly bool
@@ -355,9 +367,9 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 	return change, kind, nil
 }
 
-// summarize meringkas pesan error menjadi satu baris: baris pertama, ditambah baris yang
+// Summarize meringkas pesan error menjadi satu baris: baris pertama, ditambah baris yang
 // paling informatif ("Expected: 201", "Received: 500", atau baris diff dari toEqual).
-func summarize(s string) string {
+func Summarize(s string) string {
 	var first string
 	var picked []string
 	for _, line := range strings.Split(s, "\n") {
@@ -396,18 +408,18 @@ func informative(line string) bool {
 	return false
 }
 
-// incidentSet mengumpulkan insiden selama ingest, dengan urutan kemunculan dipertahankan.
-type incidentSet struct {
+// IncidentSet mengumpulkan insiden selama ingest, dengan urutan kemunculan dipertahankan.
+type IncidentSet struct {
 	order []string
 	byKey map[string]*Incident
 	rank  map[string]int // peringkat representative sekarang: 3 regressed, 2 new, 1 recurring
 }
 
-func newIncidentSet() *incidentSet {
-	return &incidentSet{byKey: map[string]*Incident{}, rank: map[string]int{}}
+func NewIncidentSet() *IncidentSet {
+	return &IncidentSet{byKey: map[string]*Incident{}, rank: map[string]int{}}
 }
 
-func (s *incidentSet) add(key, kind, label string) {
+func (s *IncidentSet) Add(key, kind, label string) {
 	if _, ok := s.byKey[key]; ok {
 		return
 	}
@@ -415,7 +427,7 @@ func (s *incidentSet) add(key, kind, label string) {
 	s.byKey[key] = &Incident{Key: key, Kind: kind, Label: label, Fingerprints: []string{}}
 }
 
-func (s *incidentSet) label(key string) string {
+func (s *IncidentSet) Label(key string) string {
 	if inc, ok := s.byKey[key]; ok {
 		return inc.Label
 	}
@@ -423,7 +435,7 @@ func (s *incidentSet) label(key string) string {
 }
 
 // member mencatat satu kelompok kegagalan. kind dari upsertGroup: new, recurring, regressed.
-func (s *incidentSet) member(key, fingerprint, kind string) {
+func (s *IncidentSet) Member(key, fingerprint, kind string) {
 	inc, ok := s.byKey[key]
 	if !ok {
 		return
@@ -441,7 +453,7 @@ func (s *incidentSet) member(key, fingerprint, kind string) {
 }
 
 // list: insiden terbesar dulu; yang sama besar mengikuti urutan kemunculan.
-func (s *incidentSet) list() []Incident {
+func (s *IncidentSet) List() []Incident {
 	out := make([]Incident, 0, len(s.order))
 	for _, k := range s.order {
 		if inc := s.byKey[k]; inc.Tests > 0 {

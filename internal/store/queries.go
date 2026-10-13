@@ -112,7 +112,7 @@ func scanGroup(row pgx.Row) (Group, error) {
 	err := row.Scan(&g.Fingerprint, &g.TestKey, &g.Project, &g.File, &g.Title, &g.Status, &g.SampleError, &g.Cause,
 		&g.Occurrences, &g.Regressions, &g.FirstSeenRun, &g.LastSeenRun, &g.ResolvedRun,
 		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote, &g.LabeledBy, &g.LocalOnly, &g.TestCaseID)
-	g.Summary = summarize(g.SampleError)
+	g.Summary = Summarize(g.SampleError)
 	return g, err
 }
 
