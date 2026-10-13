@@ -30,6 +30,7 @@ type Config struct {
 	Username string
 	Password string
 	Database string // misalnya redline
+	Reset    bool   // kosongkan database saat dibuka (untuk benchmark); ditolak untuk database "neo4j"
 }
 
 type Store struct {
@@ -52,6 +53,9 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if !databaseName.MatchString(cfg.Database) {
 		return nil, fmt.Errorf("nama database Neo4j %q tidak valid: huruf kecil, angka, titik, dan tanda hubung, diawali huruf", cfg.Database)
 	}
+	if cfg.Reset && cfg.Database == "neo4j" {
+		return nil, fmt.Errorf("database bawaan \"neo4j\" tidak boleh dikosongkan; pakai nama lain, misalnya bench-history")
+	}
 	driver, err := neo4j.NewDriverWithContext(cfg.URI, neo4j.BasicAuth(cfg.Username, cfg.Password, ""))
 	if err != nil {
 		return nil, fmt.Errorf("driver Neo4j: %w", err)
@@ -62,7 +66,7 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		driver.Close(ctx)
 		return nil, fmt.Errorf("koneksi Neo4j %s (sudah jalankan `docker compose up -d neo4j`?): %w", cfg.URI, err)
 	}
-	if err := createDatabase(ctx, driver, cfg.Database, false); err != nil {
+	if err := createDatabase(ctx, driver, cfg.Database, cfg.Reset); err != nil {
 		driver.Close(ctx)
 		return nil, err
 	}

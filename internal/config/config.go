@@ -36,6 +36,11 @@ type Config struct {
 	Neo4jUsername string
 	Neo4jPassword string
 	Neo4jDatabase string
+	// Neo4jDatabaseReset MENGHAPUS isi database Neo4j itu saat server start (untuk benchmark).
+	Neo4jDatabaseReset bool
+
+	// Store: tempat data disimpan, "postgres" (default) atau "neo4j".
+	Store string
 
 	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
 	OpenAPISpecs string
@@ -59,6 +64,13 @@ func Load() (Config, error) {
 	retention, err := strconv.Atoi(getenv("RETENTION_DAYS", "30"))
 	if err != nil || retention < 0 {
 		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
+	}
+	store := strings.ToLower(getenv("STORE", "postgres"))
+	if store != "postgres" && store != "neo4j" {
+		return Config{}, fmt.Errorf("STORE harus postgres atau neo4j, dapat %q", store)
+	}
+	if store == "neo4j" && os.Getenv("NEO4J_URI") == "" {
+		return Config{}, fmt.Errorf("STORE=neo4j butuh NEO4J_URI")
 	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
@@ -89,6 +101,9 @@ func Load() (Config, error) {
 		Neo4jUsername: getenv("NEO4J_USERNAME", "neo4j"),
 		Neo4jPassword: os.Getenv("NEO4J_PASSWORD"),
 		Neo4jDatabase: getenv("NEO4J_DATABASE", "redline"),
+
+		Neo4jDatabaseReset: os.Getenv("NEO4J_DATABASE_RESET") == "1",
+		Store:              store,
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),
