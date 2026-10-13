@@ -98,6 +98,12 @@ func (a *Analyzer) facts(ctx context.Context, fingerprint string) (*store.Facts,
 	if err := a.addContract(ctx, f); err != nil {
 		a.logger().Warn("kontrak API tidak bisa dibaca, analisis tanpa kontrak", "project", f.Group.Project, "err", err)
 	}
+	// Pengetahuan graph (KAG): file yang dipakai test sampai import terdalam, dan test lain di run yang sama.
+	if k, err := a.Store.Knowledge(ctx, fingerprint); err == nil {
+		f.Knowledge = k
+	} else if !errors.Is(err, store.ErrNotFound) {
+		a.logger().Warn("pengetahuan graph tidak bisa dibaca, analisis tanpa graph", "err", err)
+	}
 	if a.Embed == nil {
 		return f, nil
 	}

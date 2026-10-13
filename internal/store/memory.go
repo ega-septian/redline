@@ -182,9 +182,10 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			return nil, err
 		}
 		for what, cypher := range map[string]string{
-			"kontrak yatim":  `MATCH (x:Contract) WHERE NOT ()-[:UNDER]->(x) DELETE x RETURN count(*) AS n`,
-			"endpoint yatim": `MATCH (x:Endpoint) WHERE NOT ()-[:CALLED]->(x) DELETE x RETURN count(*) AS n`,
-			"file yatim":     `MATCH (x:File) WHERE NOT ()-[:USED]->(x) DELETE x RETURN count(*) AS n`,
+			"kontrak yatim": `MATCH (x:Contract) WHERE NOT ()-[:UNDER]->(x) DELETE x RETURN count(*) AS n`,
+			// File yang masih ada di graph import (IMPORTS, VERSION) tetap disimpan: itu pengetahuan, bukan sisa.
+			"endpoint yatim": `MATCH (x:Endpoint) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
+			"file yatim":     `MATCH (x:File) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
 		} {
 			if _, err := count(what, cypher, nil); err != nil {
 				return nil, err

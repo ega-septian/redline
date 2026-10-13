@@ -107,6 +107,38 @@ func TestParseUpload(t *testing.T) {
 	}
 }
 
+func TestParseUpload_FileGraph(t *testing.T) {
+	raw, err := os.ReadFile("testdata/run1-bug.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// spec -> helper -> schema; schema juga di-import spec lain. Import yang melingkar tidak boleh membuat macet.
+	files := `{
+		"brands.spec.ts": {"hash": "h1", "imports": ["helpers/brands.ts"]},
+		"helpers/brands.ts": {"hash": "h2", "imports": ["schemas/brand.ts"]},
+		"schemas/brand.ts": {"hash": "h3", "imports": ["schemas/common.ts"]},
+		"schemas/common.ts": {"hash": "h4", "imports": ["schemas/brand.ts"]},
+		"direct.spec.ts": {"hash": "h5", "imports": []}
+	}`
+	rep, err := ParseUpload([]byte(`{"playwright":` + string(raw) + `,"files":` + files + `}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Files["helpers/brands.ts"].Hash != "h2" {
+		t.Fatalf("graph import tidak terbaca: %+v", rep.Files)
+	}
+	got := strings.Join(rep.Dependencies([]string{"brands.spec.ts", "helpers/brands.ts"}), ",")
+	if got != "brands.spec.ts,helpers/brands.ts,schemas/brand.ts,schemas/common.ts" {
+		t.Errorf("import bertingkat: %s", got)
+	}
+	if got := rep.Dependencies([]string{"direct.spec.ts"}); len(got) != 1 {
+		t.Errorf("spec tanpa import: %v", got)
+	}
+	if got := (&Report{}).Dependencies([]string{"a.spec.ts"}); got != nil {
+		t.Errorf("tanpa graph dari reporter: kosong, dapat %v", got)
+	}
+}
+
 func TestOutcomes_FixedRun(t *testing.T) {
 	outs := byTitle(load(t, "run2-fixed.json").Outcomes())
 	for _, title := range []string{"Brand › brands punya slug", "register user", "order dibayar"} {

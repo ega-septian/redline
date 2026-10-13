@@ -23,6 +23,7 @@ type fakeStore struct {
 	label    string
 
 	experiment store.Experiment
+	impact     string
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -66,6 +67,21 @@ func (f *fakeStore) DecideRule(_ context.Context, id int64, status, by string) (
 func (f *fakeStore) Scores(_ context.Context, groupID string, _ int) (*store.Scoreboard, error) {
 	return &store.Scoreboard{Sources: []store.Score{}, Entries: []store.ScoreEntry{
 		{GroupID: groupID, Source: "ai", Predicted: "backend_bug", Truth: "test_bug"}}}, nil
+}
+
+func (f *fakeStore) Knowledge(_ context.Context, fp string) (*store.Knowledge, error) {
+	if fp != "abc" {
+		return nil, store.ErrNotFound
+	}
+	return &store.Knowledge{RunID: 2, PassRunID: 1, Compared: true, Files: []store.FileFact{}, Endpoints: []store.EndpointFact{}}, nil
+}
+func (f *fakeStore) ImpactOfFile(_ context.Context, path string) ([]store.ImpactedTest, error) {
+	f.impact = "file:" + path
+	return []store.ImpactedTest{{TestKey: "api › brands.spec.ts › get", CaseID: "TC-1", RunID: 3}}, nil
+}
+func (f *fakeStore) ImpactOfEndpoint(_ context.Context, endpoint string) ([]store.ImpactedTest, error) {
+	f.impact = "endpoint:" + endpoint
+	return []store.ImpactedTest{}, nil
 }
 
 type fakeAnalyzer struct {
@@ -242,5 +258,33 @@ func TestProposeRules_NothingToLearn(t *testing.T) {
 	rec := do(newServer(&fakeStore{}, 0), "POST", "/api/rules/propose", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "belum ada kasus terbukti") {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestImpact(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+	rec := do(h, "GET", "/api/impact?file=schemas/brand.ts", nil)
+	if rec.Code != 200 || fs.impact != "file:schemas/brand.ts" || !strings.Contains(rec.Body.String(), `"test_case_id": "TC-1"`) {
+		t.Fatalf("impact file: %d %s %s", rec.Code, fs.impact, rec.Body)
+	}
+	rec = do(h, "GET", "/api/impact?endpoint=GET+%2Fbrands%2F1", nil)
+	if rec.Code != 200 || fs.impact != "endpoint:GET /brands/1" || !strings.Contains(rec.Body.String(), `"tests": []`) {
+		t.Fatalf("impact endpoint: %d %s %s", rec.Code, fs.impact, rec.Body)
+	}
+	for _, q := range []string{"", "?file=a.ts&endpoint=GET+/x", "?file=+"} {
+		if rec := do(h, "GET", "/api/impact"+q, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%q harus 400, dapat %d", q, rec.Code)
+		}
+	}
+}
+
+func TestKnowledge(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+	if rec := do(h, "GET", "/api/groups/abc/knowledge", nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"compared": true`) {
+		t.Errorf("knowledge: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, "GET", "/api/groups/tidakada/knowledge", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("kelompok tidak ada harus 404, dapat %d", rec.Code)
 	}
 }

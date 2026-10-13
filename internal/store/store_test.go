@@ -166,3 +166,107 @@ func TestIngest_DedupesResponseShapes(t *testing.T) {
 		t.Errorf("calls kosong tidak boleh disimpan, dapat %d bentuk", n)
 	}
 }
+
+// Graph import KAG: spec -> helper -> schema. Test yang memakai helper bergantung pada schema (dua tingkat),
+// test langsung tidak. Isi file disimpan per versi, dan graph import mengikuti run terbaru.
+func TestIngest_FileGraph(t *testing.T) {
+	ctx := context.Background()
+	s := TestStore(ctx, t, "redlinetest-store")
+	count := func(cypher string, params map[string]any) int64 {
+		t.Helper()
+		res, err := s.query(ctx, cypher, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, _ := res.Records[0].Get("n")
+		return n.(int64)
+	}
+	strs := func(cypher string, params map[string]any) string {
+		t.Helper()
+		res, err := s.query(ctx, cypher, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, _ := res.Records[0].Get("v")
+		out := []string{}
+		for _, x := range v.([]any) {
+			out = append(out, x.(string))
+		}
+		return strings.Join(out, ",")
+	}
+	run := func(schemaHash string, helperImports ...string) int64 {
+		t.Helper()
+		spec := func(file, title string, line int) report.Suite {
+			return report.Suite{Title: file, File: file, Specs: []report.Spec{{Title: title, File: file, Line: line,
+				Tests: []report.Test{{ProjectName: "api", Status: "expected", Results: []report.Result{{Status: "passed"}}}}}}}
+		}
+		rep := &report.Report{Suites: []report.Suite{spec("brands.spec.ts", "get brand via helper", 11),
+			spec("direct.spec.ts", "brand by id without helper", 5)}}
+		rep.TestFiles = map[string][]string{
+			"brands.spec.ts:11": {"brands.spec.ts", "helpers/brands.ts"},
+			"direct.spec.ts:5":  {"direct.spec.ts"},
+		}
+		rep.Files = map[string]report.FileNode{
+			"brands.spec.ts":    {Hash: "spec1", Imports: []string{"helpers/brands.ts"}},
+			"helpers/brands.ts": {Hash: "helper1", Imports: helperImports},
+			"schemas/brand.ts":  {Hash: schemaHash},
+			"schemas/common.ts": {Hash: "common1"},
+			"direct.spec.ts":    {Hash: "direct1"},
+		}
+		r, err := s.IngestReport(ctx, rep, RunMeta{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.RunID
+	}
+
+	run1 := run("schema1", "schemas/brand.ts")
+	deps := `MATCH (:Run {id: $run})-[:HAS]->(r:Result {testKey: $key})-[:DEPENDS_ON]->(f:File)
+		WITH f ORDER BY f.path RETURN collect(f.path) AS v`
+	if got := strs(deps, map[string]any{"run": run1, "key": "api › brands.spec.ts › get brand via helper"}); got != "brands.spec.ts,helpers/brands.ts,schemas/brand.ts" {
+		t.Errorf("test lewat helper bergantung pada schema dua tingkat di bawahnya: %s", got)
+	}
+	if got := strs(deps, map[string]any{"run": run1, "key": "api › direct.spec.ts › brand by id without helper"}); got != "direct.spec.ts" {
+		t.Errorf("test langsung tidak bergantung pada helper: %s", got)
+	}
+
+	// Run 2: isi schema berubah, dan helper sekarang juga meng-import schema lain.
+	run2 := run("schema2", "schemas/brand.ts", "schemas/common.ts")
+	imports := `MATCH (:File {path: 'helpers/brands.ts'})-[:IMPORTS]->(f) WITH f ORDER BY f.path RETURN collect(f.path) AS v`
+	if got := strs(imports, nil); got != "schemas/brand.ts,schemas/common.ts" {
+		t.Errorf("graph import harus mengikuti run terbaru: %s", got)
+	}
+	had := `MATCH (:Run {id: $run})-[:HAD]->(v:FileVersion {path: 'schemas/brand.ts'}) RETURN collect(v.hash) AS v`
+	if a, b := strs(had, map[string]any{"run": run1}), strs(had, map[string]any{"run": run2}); a != "schema1" || b != "schema2" {
+		t.Errorf("isi schema per run: run1=%s run2=%s", a, b)
+	}
+	if n := count(`MATCH (:File {path: 'schemas/brand.ts'})-[:VERSION]->(v) RETURN count(v) AS n`, nil); n != 2 {
+		t.Errorf("dua isi berbeda = dua versi, dapat %d", n)
+	}
+	if n := count(`MATCH (:File {path: 'brands.spec.ts'})-[:VERSION]->(v) RETURN count(v) AS n`, nil); n != 1 {
+		t.Errorf("isi yang sama disimpan sekali, dapat %d versi", n)
+	}
+
+	// Retensi menghapus hasil test lama, tapi graph import tetap utuh (dan tidak membuat retensi gagal).
+	if _, err := s.Prune(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(`MATCH (:File)-[r:IMPORTS]->(:File) RETURN count(r) AS n`, nil); n != 3 {
+		t.Errorf("graph import harus tetap ada setelah retensi, dapat %d hubungan", n)
+	}
+}
+
+func TestEndpointPattern(t *testing.T) {
+	for in, want := range map[string]string{
+		"GET /brands/1":                        "GET /brands/:id",
+		"get /brands/1":                        "GET /brands/:id",
+		"/products/01JC2XKB5M3H9VQ8T7RZ4N6PDW": "/products/:id",
+		"DELETE /users/a1b2c3d4-e5f6-7890-abcd-ef1234567890/roles": "DELETE /users/:id/roles",
+		"POST /users/login": "POST /users/login",
+		" /brands ":         "/brands",
+	} {
+		if got := endpointPattern(in); got != want {
+			t.Errorf("%q: mau %q, dapat %q", in, want, got)
+		}
+	}
+}

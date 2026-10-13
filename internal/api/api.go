@@ -31,6 +31,9 @@ type Store interface {
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
 	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
 	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
+	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
+	ImpactOfFile(ctx context.Context, path string) ([]store.ImpactedTest, error)
+	ImpactOfEndpoint(ctx context.Context, endpoint string) ([]store.ImpactedTest, error)
 }
 
 // Analyzer menentukan penyebab kegagalan (aturan, cache, lalu AI).
@@ -66,6 +69,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
 	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
+	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
+	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	return mux
 }
 
@@ -447,4 +452,44 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// handleKnowledge: GET /api/groups/{fingerprint}/knowledge. Pengetahuan graph (KAG) untuk satu kegagalan:
+// file yang dipakai test sampai import terdalam beserta perubahannya, dan test lain di run yang sama.
+func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
+	k, err := s.Store.Knowledge(r.Context(), r.PathValue("fingerprint"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kelompok tidak ditemukan, atau belum punya kemunculan gagal")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, k)
+}
+
+// handleImpact: test yang terdampak kalau sebuah file atau endpoint berubah.
+//
+//	GET /api/impact?file=schemas/brand.ts          (path lengkap atau akhirannya; import bertingkat ikut dihitung)
+//	GET /api/impact?endpoint=GET /brands/1         (method boleh dihilangkan; ID di path menjadi :id)
+func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
+	file := strings.TrimSpace(r.URL.Query().Get("file"))
+	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
+	if (file == "") == (endpoint == "") {
+		writeError(w, http.StatusBadRequest, "isi salah satu: file=... atau endpoint=...")
+		return
+	}
+	var tests []store.ImpactedTest
+	var err error
+	if file != "" {
+		tests, err = s.Store.ImpactOfFile(r.Context(), file)
+	} else {
+		tests, err = s.Store.ImpactOfEndpoint(r.Context(), endpoint)
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"file": file, "endpoint": endpoint, "tests": tests})
 }

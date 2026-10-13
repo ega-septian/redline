@@ -11,7 +11,7 @@ import (
 
 // PromptVersion dinaikkan setiap kali prompt atau format fakta berubah,
 // supaya cache lama tidak dipakai untuk prompt baru.
-const PromptVersion = "v8"
+const PromptVersion = "v9"
 
 const toolName = "report_verdict"
 
@@ -54,7 +54,12 @@ Aturan:
    Tanpa kontrak dan tanpa riwayat lulus, "test mengharapkan X, API memberi Y" sulit diputuskan: pakai confidence low.
    Kalau kontrak berubah dibanding run lulus terakhir dan response mengikuti kontrak baru, perubahannya disengaja:
    test yang usang (test_bug). Kalau kontrak tetap tapi response berubah, itu regresi API (backend_bug).
-11. Urutan menjawab: tulis summary dan evidence dulu, lalu deviates (pihak yang menyimpang menurut summary itu),
+11. PENGETAHUAN GRAPH menelusuri import sampai yang terdalam, jadi bisa menemukan file yang berubah walaupun
+   "Kode test berubah: tidak" (matriks hanya melihat spec dan import langsungnya). Kalau file yang berubah dipakai
+   test ini, dan test lain yang memanggil endpoint yang sama TANPA file itu lulus, condong ke test_bug. Kalau test
+   lain tanpa file yang berubah juga gagal di endpoint yang sama, condong ke backend_bug. Response yang berubah
+   tetap bukti kuat: perubahan file yang tidak berhubungan tidak membuatnya jadi test_bug.
+12. Urutan menjawab: tulis summary dan evidence dulu, lalu deviates (pihak yang menyimpang menurut summary itu),
    lalu category yang sejalan: test -> test_bug, api -> backend_bug, environment -> environment.
 
 Jawab dengan memanggil tool report_verdict.`
@@ -137,6 +142,10 @@ func BuildFacts(f *store.Facts) string {
 		}
 	}
 
+	if k := f.Knowledge; k != nil && len(k.Files)+len(k.Endpoints) > 0 {
+		b.WriteString(graphSection(k))
+	}
+
 	b.WriteString("\nMatriks perubahan:\n")
 	if f.LastPass == nil {
 		b.WriteString("- Test ini belum pernah lulus sejak dicatat Redline, jadi tidak ada pembanding.\n")
@@ -158,6 +167,59 @@ func BuildFacts(f *store.Facts) string {
 		}
 	}
 	return b.String()
+}
+
+// graphSection menuliskan pengetahuan graph (KAG): file sampai import terdalam beserta perubahannya, dan
+// test lain di run yang sama yang memakai file atau endpoint yang sama.
+func graphSection(k *store.Knowledge) string {
+	var b strings.Builder
+	b.WriteString("\nPengetahuan graph (import bertingkat dan test lain di run yang sama):\n")
+	if k.Compared {
+		fmt.Fprintf(&b, "- Pembanding file: run lulus terakhir #%d\n", k.PassRunID)
+	} else {
+		b.WriteString("- Perubahan file tidak bisa dinilai (tidak ada run lulus dengan graph import).\n")
+	}
+	for _, f := range k.Files {
+		how := "langsung"
+		if !f.Direct {
+			how = "lewat import lain"
+		}
+		state := ""
+		if f.Changed {
+			state = ", BERUBAH sejak lulus terakhir"
+		}
+		fmt.Fprintf(&b, "- File %s (%s%s)\n", f.Path, how, state)
+		if f.Changed {
+			fmt.Fprintf(&b, "  test lain yang memakainya: %s\n", splitText(f.Others))
+		}
+	}
+	for _, e := range k.Endpoints {
+		seen := "pernah lulus sebelumnya"
+		if !e.SeenPassing {
+			seen = "belum pernah dipanggil test yang lulus"
+		}
+		fmt.Fprintf(&b, "- Endpoint %s (%s)\n", e.Key, seen)
+		if len(e.WithChanged.Passed)+len(e.WithChanged.Failed) > 0 {
+			fmt.Fprintf(&b, "  test lain yang memakai file yang berubah: %s\n", splitText(e.WithChanged))
+		}
+		fmt.Fprintf(&b, "  test lain tanpa file yang berubah: %s\n", splitText(e.Without))
+	}
+	return b.String()
+}
+
+// splitText: "lulus 1 (direct.spec.ts › x); gagal 0".
+func splitText(t store.TestSplit) string {
+	part := func(label string, tests []string) string {
+		if len(tests) == 0 {
+			return label + " 0"
+		}
+		names := titles(tests)
+		if len(names) > 4 {
+			names = append(names[:4], fmt.Sprintf("+%d lagi", len(names)-4))
+		}
+		return fmt.Sprintf("%s %d (%s)", label, len(tests), strings.Join(names, ", "))
+	}
+	return part("lulus", t.Passed) + "; " + part("gagal", t.Failed)
 }
 
 // Batas kode test di prompt: cukup untuk spec + schema/helper, tetap murah.

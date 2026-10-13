@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,41 @@ type Report struct {
 	TestFiles map[string][]string `json:"-"`
 	// Sources: path -> isi file, hanya file yang dipakai test yang gagal. Belum disamarkan.
 	Sources map[string]string `json:"-"`
+	// Files: graph import lokal saat run ini, path (relatif seperti TestFiles) -> hash isi dan import langsungnya.
+	// Mencakup semua file yang bisa dicapai dari spec, termasuk import bertingkat.
+	Files map[string]FileNode `json:"-"`
+}
+
+// FileNode adalah satu file lokal dalam graph import: hash isinya (tanpa komentar dan spasi) dan file
+// lokal yang di-import langsung.
+type FileNode struct {
+	Hash    string   `json:"hash"`
+	Imports []string `json:"imports"`
+}
+
+// Dependencies mengembalikan files ditambah semua file yang di-import olehnya, berapa tingkat pun, urut.
+// Kosong kalau reporter tidak mengirim graph import.
+func (r *Report) Dependencies(files []string) []string {
+	if len(r.Files) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	queue := append([]string(nil), files...)
+	for len(queue) > 0 {
+		f := queue[0]
+		queue = queue[1:]
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		queue = append(queue, r.Files[f].Imports...)
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 type Suite struct {
@@ -148,6 +184,7 @@ type upload struct {
 	TestHashes map[string]string   `json:"test_hashes"`
 	TestFiles  map[string][]string `json:"test_files"`
 	Sources    map[string]string   `json:"sources"`
+	Files      map[string]FileNode `json:"files"`
 }
 
 // ParseUpload menerima dua format: bungkus dari reporter Redline
@@ -162,6 +199,7 @@ func ParseUpload(data []byte) (*Report, error) {
 		rep.TestHashes = u.TestHashes
 		rep.TestFiles = u.TestFiles
 		rep.Sources = u.Sources
+		rep.Files = u.Files
 		return rep, nil
 	}
 	return Parse(bytes.NewReader(data))
