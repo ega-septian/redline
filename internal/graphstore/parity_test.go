@@ -23,3 +23,10 @@ func TestParity_Analysis(t *testing.T) {
 		return graphstore.TestStore(context.Background(), t, "redlinetest-parity")
 	})
 }
+
+// TestParity_Proofs menjalankan test eksperimen, rapor, dan aturan yang sama dengan versi Postgres.
+func TestParity_Proofs(t *testing.T) {
+	storetest.RunProofs(t, func(t *testing.T) storetest.ProofBackend {
+		return graphstore.TestStore(context.Background(), t, "redlinetest-parity")
+	})
+}
