@@ -7,15 +7,17 @@ package graphstore
 import (
 	"context"
 	"embed"
-	"errors"
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
+	"redline/internal/store"
 )
 
 //go:embed migrations/*.cypher
@@ -33,6 +35,13 @@ type Config struct {
 type Store struct {
 	driver   neo4j.DriverWithContext
 	database string
+	// StatusSources: source run yang boleh mengubah status kelompok bersama (misalnya "ci"). Kosong = semua.
+	StatusSources []string
+}
+
+// SharesStatus: apakah run dari source ini boleh mengubah status kelompok bersama.
+func (s *Store) SharesStatus(source string) bool {
+	return len(s.StatusSources) == 0 || slices.Contains(s.StatusSources, source)
 }
 
 // Nama database Neo4j: huruf kecil, angka, titik, dan tanda hubung; diawali huruf; 3-63 karakter.
@@ -167,8 +176,8 @@ func statements(body string) []string {
 	return out
 }
 
-// ErrNotFound dikembalikan kalau data yang diminta tidak ada.
-var ErrNotFound = errors.New("not found")
+// ErrNotFound sama dengan store.ErrNotFound, supaya API memperlakukan kedua database dengan cara yang sama.
+var ErrNotFound = store.ErrNotFound
 
 // nextID mengambil nomor berikutnya untuk satu jenis (misalnya "run"), pengganti BIGSERIAL di Postgres.
 // Harus dipanggil di dalam transaksi tulis: MERGE + SET mengunci node :Counter, jadi dua run yang masuk

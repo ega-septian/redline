@@ -2,6 +2,7 @@ package graphstore
 
 import (
 	"context"
+	"io/fs"
 	"strings"
 	"sync"
 	"testing"
@@ -34,12 +35,16 @@ func TestMigrate(t *testing.T) {
 	if err := s.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.query(ctx, `MATCH (m:SchemaMigration) RETURN collect(m.version) AS v`, nil)
+	files, _ := fs.Glob(migrationFS, "migrations/*.cypher")
+	res, err := s.query(ctx, `MATCH (m:SchemaMigration) RETURN m.version AS v ORDER BY v`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := res.Records[0].Get("v"); len(v.([]any)) != 1 || v.([]any)[0] != "001_constraints" {
-		t.Fatalf("migrasi tercatat salah: %v", v)
+	if len(res.Records) != len(files) {
+		t.Fatalf("setiap file migrasi harus tercatat tepat sekali: %d file, %d tercatat", len(files), len(res.Records))
+	}
+	if v, _ := res.Records[0].Get("v"); v != "001_constraints" {
+		t.Fatalf("migrasi pertama salah: %v", v)
 	}
 	res, err = s.query(ctx, `SHOW CONSTRAINTS YIELD name RETURN collect(name) AS names`, nil)
 	if err != nil {
