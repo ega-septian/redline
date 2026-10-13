@@ -22,6 +22,7 @@ import (
 	"redline/internal/config"
 	"redline/internal/contract"
 	"redline/internal/embed"
+	"redline/internal/graphstore"
 	"redline/internal/llm"
 	"redline/internal/store"
 )
@@ -82,6 +83,20 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	db.StatusSources = cfg.StatusSources
+
+	// Neo4j (feature/neo4j, tahap 0): hanya koneksi dan migrasi. Data masih disimpan di Postgres.
+	if cfg.Neo4jURI != "" {
+		graph, err := graphstore.Open(ctx, graphstore.Config{URI: cfg.Neo4jURI, Username: cfg.Neo4jUsername,
+			Password: cfg.Neo4jPassword, Database: cfg.Neo4jDatabase})
+		if err != nil {
+			return err
+		}
+		defer graph.Close(context.Background())
+		if err := graph.Migrate(ctx); err != nil {
+			return err
+		}
+		log.Info("Neo4j terhubung (belum dipakai untuk data)", "uri", cfg.Neo4jURI, "database", cfg.Neo4jDatabase)
+	}
 	if len(cfg.StatusSources) == 0 {
 		log.Info("semua run mengubah status kelompok (STATUS_FROM=all)")
 	} else {

@@ -30,6 +30,13 @@ type Config struct {
 	AnthropicModel   string
 	AnthropicBaseURL string
 
+	// Neo4j (DozerDB), sedang dibangun untuk menggantikan Postgres. Kosong = tidak dipakai.
+	// Selama tahap pengembangan, server hanya terhubung dan menjalankan migrasi; data tetap di Postgres.
+	Neo4jURI      string
+	Neo4jUsername string
+	Neo4jPassword string
+	Neo4jDatabase string
+
 	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
 	OpenAPISpecs string
 
@@ -77,6 +84,11 @@ func Load() (Config, error) {
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
 
 		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
+
+		Neo4jURI:      os.Getenv("NEO4J_URI"),
+		Neo4jUsername: getenv("NEO4J_USERNAME", "neo4j"),
+		Neo4jPassword: os.Getenv("NEO4J_PASSWORD"),
+		Neo4jDatabase: getenv("NEO4J_DATABASE", "redline"),
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),
