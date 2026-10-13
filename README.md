@@ -13,6 +13,9 @@ Every test run is sent to Redline, which:
   Claude is only asked when the rules can't decide.
 - **Proves it when you ask.** It reruns the test, lets the AI patch it in a copy of your project,
   and runs it again. If it passes, the cause is proven, not guessed.
+- **Knows how your tests connect.** Tests, the files they import (however deep) and the endpoints
+  they call are a graph in Neo4j. Redline follows it to see what changed and who else is affected,
+  and can tell you which tests to run before you change a file.
 
 Tokens, passwords, JWTs and 16-digit numbers are redacted before anything is stored or sent to AI.
 
@@ -24,7 +27,7 @@ flowchart TD
     D -->|yes| R[Verdict]
     D -->|no| E{A rule is sure?}
     E -->|yes| R
-    E -->|no| F[Claude reads the facts:<br/>error, test code, API contract,<br/>what changed, similar cases]
+    E -->|no| F[Claude reads the facts:<br/>error, test code, API contract,<br/>what changed, graph knowledge,<br/>similar cases]
     F --> R
     R --> G[Report in the terminal<br/>and redline-report.md]
     G -.->|optional: verify| H[Rerun the test,<br/>then patch it in a copy]
@@ -35,17 +38,19 @@ flowchart TD
 
 ### How accurate is it?
 
-Measured with 24 bugs planted on purpose (12 in test code, 9 in the backend, 3 environment) and
-6 app-upgrade cases, using Claude Haiku 5.5:
+Measured with 24 bugs planted on purpose (12 in test code, 9 in the backend, 3 environment),
+6 app-upgrade cases and 6 cases in shared code, using Claude Haiku 5.5:
 
 | Scenario | Correct | Wrong guesses |
 |---|---|---|
-| Brand-new test, no history | 92% | 0 |
-| Test that passed before | 100% | 0 |
+| Brand-new test, no history | 92–96% | 0 |
+| Test that passed before | 96–100% | 0 |
 | App upgrade: outdated test vs regression | 6/6 | 0 |
+| Shared helper/schema and shared endpoints (3 runs) | 18/18, all decided by rules | 0 |
 
-When Redline isn't sure, it says "unclear" instead of guessing. One run per scenario; AI results can
-vary a little between runs. The benchmark lives in the Playwright project
+When Redline isn't sure, it says "unclear" instead of guessing. The ranges are the spread between
+runs: one case (another brand returned with the same shape) is sometimes left "unclear" by the
+AI. The benchmark lives in the Playwright project
 ([`npm run redline:bench`](https://github.com/ega-septian/playwright-web-api-automation)).
 
 ## Quick start
@@ -142,8 +147,8 @@ It tries the cheapest, most trustworthy source first:
 2. **Proof from an experiment** (see below).
 3. **Rules**, free and instant. For example: server unreachable → environment; expected 2xx but got
    5xx → backend bug; checking a `Promise` or an `APIResponse` instead of its body → test bug
-   (missing `await` or `.json()`); response breaks the API contract → backend bug; plus rules you
-   approved yourself.
+   (missing `await` or `.json()`); response breaks the API contract → backend bug; rules from the
+   knowledge graph (below); plus rules you approved yourself.
 4. **Claude**, with the redacted facts: error, the failed test's source code, response shapes, the
    API contract, what changed since the last pass, and similar proven cases.
 
@@ -154,6 +159,42 @@ The most useful signal is what changed since the test last passed:
 | same | changed | same | **backend bug** (regression) |
 | same | changed | changed the same way | **test bug**: the change was intended, the test is outdated |
 | changed | same | — | **test bug** (Claude explains, since it can read the code) |
+
+### Knowledge graph (KAG)
+
+Similar cases (RAG) find failures whose *error means the same*. The knowledge graph answers questions
+that only show up by following relationships:
+
+- Which files does this test really use, including imports of imports, and which changed since it
+  last passed? (The test-code hash only covers the spec and its direct imports.)
+- Of the other tests that use a changed file, which failed?
+- Of the other tests that call the same endpoint *without* that file, which failed?
+
+```
+brands.spec.ts   ─┐
+products.spec.ts ─┴→ helpers/brands.ts → schemas/brand.ts   ← changed
+direct.spec.ts   → GET /brands/:id (no helper)               ← passes
+```
+
+From that, three rules decide without AI, and only after the response and contract rules, so a
+changed response always wins:
+
+| Graph fact | Verdict |
+|---|---|
+| The endpoint also fails for tests in other specs that use none of the changed code | **backend bug** |
+| The test calls an endpoint no passing test ever called, and only changed code calls it | **test bug** (path typo) |
+| Code the test uses changed, the response did not, and the endpoint passes for tests without that code | **test bug** |
+
+Otherwise these facts go to Claude as a "graph knowledge" section. On the shared-code benchmark this
+moved 15 of 18 decisions from the AI (often low confidence, one "unclear") to rules with high
+confidence and no AI cost. Details and the honest caveats: [`docs/kag.md`](docs/kag.md).
+
+The same graph gives **impact analysis**: which tests depend on a file or call an endpoint.
+
+```bash
+npm run redline -- impact schemas/brand.ts   # in the Playwright project
+# → TC-KAG-01, 02, 03, 04, and a --grep to run only those tests
+```
 
 The contract is snapshotted on every run, so after an upgrade (say sprint 1 → sprint 2) a failure
 is judged against the contract that was live when it failed.
@@ -197,6 +238,7 @@ The patch is a minimal fix that proves the cause, not a code review: always read
 |---|---|
 | Test results, error messages, a code snippet around the error | every run |
 | A hash of each test's code and the list of local files it imports | every run |
+| The local import graph: file paths, a hash of each file's content, and what it imports | every run |
 | Response shapes: field names and types only, **no values** | every run, with the fixture |
 | **The source code of failed tests** (spec plus local imports) | failed tests only |
 
@@ -259,8 +301,10 @@ Tests create and empty their own databases (`redlinetest-*`) on the DozerDB serv
 `docker compose`, so never point them at a server with real data. No real AI calls are made in
 tests. The graph model and its constraints are in [`internal/store/migrations/`](internal/store/migrations/).
 
-Versions: `v0.1.0` stores data in Postgres + pgvector; from `v0.2.0` Redline uses Neo4j only, with
-the same behaviour and the same benchmark results.
+Versions: `v0.1.0` stores data in Postgres + pgvector; `v0.2.0` moves to Neo4j only, with the same
+behaviour and benchmark results; `v0.3.0` adds the knowledge graph (KAG) and impact analysis. KAG
+needs a reporter that sends the import graph (the one in the Playwright project does); without it,
+Redline works as in `v0.2.0`.
 
 ## What's next
 

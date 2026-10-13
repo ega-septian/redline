@@ -120,5 +120,16 @@ confidence, and K02 flips between correct and unclear.
    `GET /api/groups/{id}/knowledge`; in the test project `npm run redline -- impact <file|endpoint>`
    prints the tests and a `--grep` to run only them. On the `kag` data it returns exactly the
    targets above.
-5. Benchmark: `--kag=off` to compare; all targets above.
-6. README, merge, tag `v0.3.0`.
+5. Benchmark (done, without a `--kag=off` flag): the stage 0 baseline was measured on v0.2.0, so
+   the comparison already exists; see "Results after stage 3".
+6. README, merge, tag `v0.3.0` (done).
+
+## Targets: outcome
+
+| Target | Result |
+|---|---|
+| `kag` 18/18 over three runs, no wrong guesses | ✅ 18/18 |
+| K01, K02, K03, K05 decided by rules with high confidence | ✅ (K04 too) |
+| K06 stays backend_bug | ✅ decided by the response rule, as intended |
+| Existing scenarios do not drop | ✅ no new wrong guesses; one AI-variance case (B09), see above |
+| Impact analysis matches the expected tests | ✅ |
