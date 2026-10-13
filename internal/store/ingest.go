@@ -30,7 +30,8 @@ type RunMeta struct {
 type GroupChange struct {
 	Fingerprint string `json:"fingerprint"`
 	TestKey     string `json:"test"`
-	Error       string `json:"error,omitempty"` // ringkasan error (sudah diredaksi)
+	TestCaseID  string `json:"test_case_id,omitempty"` // dari tag @TC-..., kalau ada
+	Error       string `json:"error,omitempty"`        // ringkasan error (sudah diredaksi)
 	Occurrences int    `json:"occurrences"`
 	Incident    string `json:"incident,omitempty"` // key insiden; kosong untuk resolved
 }
@@ -174,12 +175,12 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO test_results (run_id, test_key, status, retries, duration_ms,
 					error_message, error_snippet, error_location, group_id, cause_id, test_code_hash,
-					response_shape_id, trace_path, screenshots, code_files, source_ids)
+					response_shape_id, trace_path, screenshots, code_files, source_ids, test_case_id)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15, $16)`,
+					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15, $16, $17)`,
 				res.RunID, o.Key(), o.Status, o.Retries, o.DurationMs,
 				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, incidentKey, o.SourceHash,
-				calls, o.TracePath, screenshots, codeFiles, sources,
+				calls, o.TracePath, screenshots, codeFiles, sources, o.TestCaseID,
 			); err != nil {
 				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
 			}
@@ -290,7 +291,8 @@ func callsJSON(calls []report.HTTPCall) string {
 // kind: "new", "recurring", atau "regressed".
 // shared false: kelompok baru dibuat sebagai local_only dan kelompok yang ada tidak diubah.
 func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
-	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), Error: summarize(cleanMsg), Incident: incidentKey}
+	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), TestCaseID: o.TestCaseID,
+		Error: summarize(cleanMsg), Incident: incidentKey}
 
 	var prevStatus string
 	var localOnly bool
@@ -299,10 +301,10 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 	if err == pgx.ErrNoRows {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO failure_groups (id, project, file, title, last_error, status, first_seen_run, last_seen_run,
-				cause_id, cause, local_only)
-			VALUES ($1, $2, $3, $4, $5, 'open', $6, $6, $7, $8, $9)
+				cause_id, cause, local_only, test_case_id)
+			VALUES ($1, $2, $3, $4, $5, 'open', $6, $6, $7, $8, $9, $10)
 			ON CONFLICT (id) DO NOTHING`,
-			fingerprint, o.Project, o.File, o.Title, cleanMsg, runID, incidentKey, incidentLabel, !shared)
+			fingerprint, o.Project, o.File, o.Title, cleanMsg, runID, incidentKey, incidentLabel, !shared, o.TestCaseID)
 		if err != nil {
 			return change, "", fmt.Errorf("buat kelompok %s: %w", fingerprint, err)
 		}
@@ -326,8 +328,8 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 			UPDATE failure_groups SET
 				local_only = false, status = 'open', occurrences = 1, regressions = 0,
 				first_seen_run = $2, last_seen_run = $2, last_error = $3, resolved_run = NULL,
-				cause_id = $4, cause = $5
-			WHERE id = $1`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel)
+				cause_id = $4, cause = $5, test_case_id = $6
+			WHERE id = $1`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel, o.TestCaseID)
 		if err != nil {
 			return change, "", fmt.Errorf("jadikan kelompok bersama %s: %w", fingerprint, err)
 		}
@@ -343,9 +345,10 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 			regressions   = regressions + CASE WHEN status = 'resolved' THEN 1 ELSE 0 END,
 			resolved_run  = NULL,
 			cause_id      = $4,
-			cause         = $5
+			cause         = $5,
+			test_case_id  = $6 -- ikut tag terbaru (tag bisa ditambah setelah kelompok dibuat)
 		WHERE id = $1
-		RETURNING occurrences`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel).Scan(&change.Occurrences)
+		RETURNING occurrences`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel, o.TestCaseID).Scan(&change.Occurrences)
 	if err != nil {
 		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
 	}

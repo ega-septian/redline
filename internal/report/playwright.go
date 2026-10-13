@@ -53,10 +53,11 @@ type Suite struct {
 }
 
 type Spec struct {
-	Title string `json:"title"`
-	File  string `json:"file"`
-	Line  int    `json:"line"`
-	Tests []Test `json:"tests"`
+	Title string   `json:"title"`
+	File  string   `json:"file"`
+	Line  int      `json:"line"`
+	Tags  []string `json:"tags"` // tanpa "@", misalnya "TC-BRD-001"
+	Tests []Test   `json:"tests"`
 }
 
 type Test struct {
@@ -112,6 +113,9 @@ type Outcome struct {
 	File    string
 	Title   string // judul lengkap: "describe › nama test"
 	Line    int
+	// TestCaseID: ID test case dari tag @TC-... (kosong kalau tidak ada). Hanya label yang mudah dibaca;
+	// identitas test tetap Key(), karena tag bisa tidak ada, dobel, atau diganti.
+	TestCaseID string
 
 	Status     string
 	Retries    int // jumlah retry yang terjadi
@@ -233,12 +237,24 @@ func walk(out []Outcome, s Suite, titles []string, root bool) []Outcome {
 	return out
 }
 
+// TestCaseID mengambil tag pertama yang diawali "TC-" (dengan atau tanpa "@"), misalnya "TC-BRD-001".
+func TestCaseID(tags []string) string {
+	for _, t := range tags {
+		t = strings.TrimPrefix(strings.TrimSpace(t), "@")
+		if len(t) > 3 && strings.EqualFold(t[:3], "TC-") {
+			return t
+		}
+	}
+	return ""
+}
+
 func toOutcome(spec Spec, t Test, title string) Outcome {
 	o := Outcome{
-		Project: t.ProjectName,
-		File:    spec.File,
-		Title:   title,
-		Line:    spec.Line,
+		Project:    t.ProjectName,
+		File:       spec.File,
+		Title:      title,
+		Line:       spec.Line,
+		TestCaseID: TestCaseID(spec.Tags),
 	}
 	switch t.Status {
 	case "expected":

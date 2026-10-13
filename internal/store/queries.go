@@ -30,6 +30,7 @@ type Run struct {
 type Group struct {
 	Fingerprint  string     `json:"fingerprint"`
 	TestKey      string     `json:"test"`
+	TestCaseID   string     `json:"test_case_id,omitempty"` // dari tag @TC-..., kalau ada
 	Project      string     `json:"project"`
 	File         string     `json:"file"`
 	Title        string     `json:"title"`
@@ -98,7 +99,7 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 const groupSelect = `SELECT g.id, ` + testKeyG + `, g.project, g.file, g.title, g.status, g.last_error, g.cause,
 	g.occurrences, g.regressions, g.first_seen_run, g.last_seen_run, g.resolved_run,
 	fr.created_at, lr.created_at, rr.created_at,
-	coalesce(g.manual_category, ''), g.manual_note, g.labeled_by, g.local_only
+	coalesce(g.manual_category, ''), g.manual_note, g.labeled_by, g.local_only, g.test_case_id
 	FROM failure_groups g
 	JOIN runs fr ON fr.id = g.first_seen_run
 	JOIN runs lr ON lr.id = g.last_seen_run
@@ -110,7 +111,7 @@ func scanGroup(row pgx.Row) (Group, error) {
 	var g Group
 	err := row.Scan(&g.Fingerprint, &g.TestKey, &g.Project, &g.File, &g.Title, &g.Status, &g.SampleError, &g.Cause,
 		&g.Occurrences, &g.Regressions, &g.FirstSeenRun, &g.LastSeenRun, &g.ResolvedRun,
-		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote, &g.LabeledBy, &g.LocalOnly)
+		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote, &g.LabeledBy, &g.LocalOnly, &g.TestCaseID)
 	g.Summary = summarize(g.SampleError)
 	return g, err
 }
