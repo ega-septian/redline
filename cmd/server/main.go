@@ -60,28 +60,11 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dbURL, err := store.WithTimezone(cfg.DatabaseURL, cfg.Timezone)
+	db, closeDB, err := openStore(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
-	if cfg.DatabaseSchema != "" {
-		if dbURL, err = store.PrepareSchema(ctx, dbURL, cfg.DatabaseSchema, cfg.DatabaseSchemaReset); err != nil {
-			return err
-		}
-		log.Info("memakai schema database terpisah", "schema", cfg.DatabaseSchema, "reset", cfg.DatabaseSchemaReset)
-	}
-	db, err := store.Open(ctx, dbURL)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	if err := db.Migrate(ctx); err != nil {
-		return err
-	}
-	if err := db.SetDatabaseTimezone(ctx, cfg.Timezone); err != nil {
-		return err
-	}
-	db.StatusSources = cfg.StatusSources
+	defer closeDB()
 	if len(cfg.StatusSources) == 0 {
 		log.Info("semua run mengubah status kelompok (STATUS_FROM=all)")
 	} else {
@@ -140,6 +123,23 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// openStore membuka database Neo4j, menjalankan migrasi, dan mengembalikan fungsi penutupnya.
+func openStore(ctx context.Context, cfg config.Config, log *slog.Logger) (*store.Store, func(), error) {
+	db, err := store.Open(ctx, store.Config{URI: cfg.Neo4jURI, Username: cfg.Neo4jUsername,
+		Password: cfg.Neo4jPassword, Database: cfg.Neo4jDatabase, Reset: cfg.Neo4jDatabaseReset})
+	if err != nil {
+		return nil, nil, err
+	}
+	closeDB := func() { db.Close(context.Background()) }
+	if err := db.Migrate(ctx); err != nil {
+		closeDB()
+		return nil, nil, err
+	}
+	db.StatusSources = cfg.StatusSources
+	log.Info("database Neo4j", "uri", cfg.Neo4jURI, "database", cfg.Neo4jDatabase, "reset", cfg.Neo4jDatabaseReset)
+	return db, closeDB, nil
 }
 
 // pruneLoop menjalankan retensi saat start lalu setiap 24 jam.

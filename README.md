@@ -54,8 +54,8 @@ You need Go 1.24+ and Docker.
 
 ```bash
 cp .env.example .env
-docker compose up -d     # Postgres with pgvector on port 5433
-go run ./cmd/server      # API on http://localhost:8787, tables are created on start
+docker compose up -d     # Neo4j (DozerDB) on bolt://localhost:7688, browser on http://localhost:7475
+go run ./cmd/server      # API on http://localhost:8787, the database and constraints are created on start
 ```
 
 Everything below is optional; Redline works without it, just with less insight:
@@ -178,10 +178,11 @@ The patch is a minimal fix that proves the cause, not a code review: always read
 
 ## Learning
 
-- **Similar cases.** Error messages are turned into embeddings (Voyage AI, stored with pgvector), so
+- **Similar cases.** Error messages are turned into embeddings (Voyage AI, stored in Neo4j), so
   a new failure can be matched with past *proven* cases that mean the same thing, even with
   different wording. These are given to Claude as references, never as proof.
-- **Code map.** Redline knows which files and endpoints each test uses. "Three other tests on
+- **Code map.** Redline knows which files and endpoints each test uses, stored as graph edges:
+  `(:Result)-[:CALLED]->(:Endpoint)` and `(:Result)-[:USED]->(:File)`. "Three other tests on
   `GET /brands` passed" points at this test; "every test using this schema failed" points at the
   shared schema or the backend.
 - **Learned rules.** `learn` turns proven cases into regex rules. Each rule is checked against past
@@ -242,19 +243,22 @@ internal/analysis/   rules, AI, experiments, learning
 internal/contract/   OpenAPI summaries and response checks
 internal/embed/      Voyage AI client
 internal/llm/        Claude client
-internal/store/      Postgres: schema, queries, retention
+internal/store/      Neo4j (DozerDB): graph model, queries, retention
 internal/api/        HTTP handlers
 ```
 
 ```bash
-go test ./...    # tests that need Postgres are skipped
+go test ./...    # tests that need Neo4j are skipped
 
-REDLINE_TEST_DATABASE_URL="postgres://redline:redline@localhost:5433/redline_test?sslmode=disable" go test ./...
+REDLINE_TEST_NEO4J_URI=bolt://localhost:7688 go test ./...
 ```
 
-`docker compose` creates the `redline_test` database. Each test package recreates its own schema
-there, so never point it at your real database. No real AI calls are made in tests. The schema,
-with a comment on every column, is in [`internal/store/migrations/`](internal/store/migrations/).
+Tests create and empty their own databases (`redlinetest-*`) on the DozerDB server from
+`docker compose`, so never point them at a server with real data. No real AI calls are made in
+tests. The graph model and its constraints are in [`internal/store/migrations/`](internal/store/migrations/).
+
+Versions: `v0.1.0` stores data in Postgres + pgvector; from `v0.2.0` Redline uses Neo4j only, with
+the same behaviour and the same benchmark results.
 
 ## What's next
 

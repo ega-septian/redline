@@ -10,15 +10,10 @@ import (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
-	// DatabaseSchema: schema terpisah (misalnya untuk benchmark). Kosong = public.
-	// DatabaseSchemaReset MENGHAPUS isi schema itu saat server start.
-	DatabaseSchema      string
-	DatabaseSchemaReset bool
+	Port string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
-	// RetentionDays: detail test_results lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
+	// RetentionDays: detail hasil test lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
 	RetentionDays int
 	// StatusSources: source run yang boleh mengubah status kelompok bersama. Kosong = semua.
 	StatusSources []string
@@ -29,6 +24,14 @@ type Config struct {
 	AnthropicAPIKey  string
 	AnthropicModel   string
 	AnthropicBaseURL string
+
+	// Database: Neo4j (DozerDB). Default cocok dengan docker-compose.yml.
+	Neo4jURI      string
+	Neo4jUsername string
+	Neo4jPassword string
+	Neo4jDatabase string
+	// Neo4jDatabaseReset MENGHAPUS isi database Neo4j itu saat server start (untuk benchmark).
+	Neo4jDatabaseReset bool
 
 	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
 	OpenAPISpecs string
@@ -66,17 +69,20 @@ func Load() (Config, error) {
 		RetentionDays: retention,
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
-		DatabaseURL:   getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
 		MaxReportMB:   maxMB,
-
-		DatabaseSchema:      os.Getenv("DATABASE_SCHEMA"),
-		DatabaseSchemaReset: os.Getenv("DATABASE_SCHEMA_RESET") == "1",
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
 
 		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
+
+		Neo4jURI:      getenv("NEO4J_URI", "bolt://localhost:7688"),
+		Neo4jUsername: getenv("NEO4J_USERNAME", "neo4j"),
+		Neo4jPassword: getenv("NEO4J_PASSWORD", "redline-local"),
+		Neo4jDatabase: getenv("NEO4J_DATABASE", "redline"),
+
+		Neo4jDatabaseReset: os.Getenv("NEO4J_DATABASE_RESET") == "1",
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),

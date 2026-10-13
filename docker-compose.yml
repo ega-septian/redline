@@ -1,21 +1,22 @@
 services:
-  db:
-    image: pgvector/pgvector:pg16 # Postgres 16 + pgvector (embedding kasus mirip)
-    container_name: redline-db
+  neo4j:
+    # DozerDB = Neo4j Community + multi-database. Satu server untuk data Redline (database redline), go test (redlinetest-*), dan benchmark (bench-*).
+    image: graphstack/dozerdb:5.26.27.0
+    container_name: redline-neo4j
     environment:
-      POSTGRES_USER: redline
-      POSTGRES_PASSWORD: redline
-      POSTGRES_DB: redline
+      NEO4J_AUTH: neo4j/redline-local # hanya untuk lokal
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512M
     ports:
-      - "5433:5432" # 5432 sudah dipakai Carikan
+      - "7688:7687" # Bolt (driver); 7687 sudah dipakai Neo4j lain
+      - "7475:7474" # Neo4j Browser; 7474 sudah dipakai Neo4j lain
     volumes:
-      - redline-db:/var/lib/postgresql/data
-      - ./scripts/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+      - redline-neo4j:/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U redline -d redline"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p redline-local 'RETURN 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
 volumes:
-  redline-db:
+  redline-neo4j:

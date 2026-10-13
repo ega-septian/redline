@@ -10,7 +10,7 @@ func TestSummarize(t *testing.T) {
 		"ZodError: [\n  {\n    \"expected\": \"array\",\n    \"message\": \"Invalid input: expected array, received Promise\"\n  }\n]": `ZodError: [ | "message": "Invalid input: expected array, received Promise"`,
 	}
 	for in, want := range cases {
-		if got := summarize(in); got != want {
+		if got := Summarize(in); got != want {
 			t.Errorf("summarize:\n got  %q\n want %q", got, want)
 		}
 	}
