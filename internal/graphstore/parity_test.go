@@ -30,3 +30,10 @@ func TestParity_Proofs(t *testing.T) {
 		return graphstore.TestStore(context.Background(), t, "redlinetest-parity")
 	})
 }
+
+// TestParity_Memory menjalankan test kontrak, kasus mirip, dan retensi yang sama dengan versi Postgres.
+func TestParity_Memory(t *testing.T) {
+	storetest.RunMemory(t, func(t *testing.T) storetest.MemoryBackend {
+		return graphstore.TestStore(context.Background(), t, "redlinetest-parity")
+	})
+}

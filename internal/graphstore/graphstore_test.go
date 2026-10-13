@@ -6,8 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
+	"redline/internal/report"
+	"redline/internal/store"
 )
 
 func TestStatements(t *testing.T) {
@@ -100,5 +104,21 @@ func TestNextID_Concurrent(t *testing.T) {
 	}
 	if len(seen) != n {
 		t.Errorf("mau %d id unik, dapat %d", n, len(seen))
+	}
+}
+
+// Waktu mulai dengan offset zona laptop dibaca Go sebagai zona "Local", yang ditolak Neo4j.
+func TestIngest_LocalStartTime(t *testing.T) {
+	ctx := context.Background()
+	s := TestStore(ctx, t, "redlinetest-graph")
+	start := time.Date(2026, 10, 13, 9, 0, 0, 0, time.Local)
+	rep := &report.Report{}
+	rep.Stats.StartTime = start
+	if _, err := s.IngestReport(ctx, rep, store.RunMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ListRuns(ctx, 1)
+	if err != nil || len(runs) != 1 || runs[0].StartedAt == nil || !runs[0].StartedAt.Equal(start) {
+		t.Fatalf("waktu mulai harus tersimpan apa adanya: %+v %v", runs, err)
 	}
 }

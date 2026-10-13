@@ -40,7 +40,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta store
 		res.RunID = runID
 		var started any
 		if !rep.Stats.StartTime.IsZero() {
-			started = rep.Stats.StartTime
+			started = rep.Stats.StartTime.UTC() // Neo4j tidak mengenal zona waktu "Local" milik Go
 		}
 		reportErrors := []string{}
 		for _, e := range rep.Errors {

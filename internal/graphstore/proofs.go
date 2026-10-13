@@ -388,22 +388,25 @@ func (s *Store) DecideRule(ctx context.Context, id int64, status, by string) (st
 	return toRule(node), nil
 }
 
-// ConfirmedCases mengembalikan kasus terbukti terbaru: label manual, atau patch yang lulus untuk kelompok
-// tanpa label (label manual menang atas eksperimen).
+// confirmedCasesCypher: kasus yang penyebabnya sudah terbukti, sebagai subquery CALL { ... }.
+// Label manual menang atas eksperimen (patch yang lulus, yang terbaru).
+const confirmedCasesCypher = `
+	CALL {
+		MATCH (f:Failure) WHERE f.manualCategory IS NOT NULL
+		RETURN f.id AS id, f.lastError AS error, f.manualCategory AS category, 'human' AS source,
+		       f.manualNote AS reason, f.lastSeenRun AS lastSeen
+		UNION ALL
+		MATCH (f:Failure) WHERE f.manualCategory IS NULL
+		MATCH (e:Experiment {groupId: f.id, kind: 'patch', outcome: 'passed'})
+		WITH f, e ORDER BY e.id DESC
+		WITH f, collect(e)[0] AS e
+		RETURN f.id AS id, f.lastError AS error, e.category AS category, 'experiment' AS source,
+		       e.hypothesis AS reason, f.lastSeenRun AS lastSeen
+	}`
+
+// ConfirmedCases mengembalikan kasus terbukti terbaru.
 func (s *Store) ConfirmedCases(ctx context.Context, limit int) ([]store.Case, error) {
-	res, err := s.query(ctx, `
-		CALL {
-			MATCH (f:Failure) WHERE f.manualCategory IS NOT NULL
-			RETURN f.id AS id, f.lastError AS error, f.manualCategory AS category, 'human' AS source,
-			       f.manualNote AS reason, f.lastSeenRun AS lastSeen
-			UNION ALL
-			MATCH (f:Failure) WHERE f.manualCategory IS NULL
-			MATCH (e:Experiment {groupId: f.id, kind: 'patch', outcome: 'passed'})
-			WITH f, e ORDER BY e.id DESC
-			WITH f, collect(e)[0] AS e
-			RETURN f.id AS id, f.lastError AS error, e.category AS category, 'experiment' AS source,
-			       e.hypothesis AS reason, f.lastSeenRun AS lastSeen
-		}
+	res, err := s.query(ctx, confirmedCasesCypher+`
 		RETURN id, error, category, source, reason ORDER BY lastSeen DESC LIMIT $limit`,
 		map[string]any{"limit": limit})
 	if err != nil {
@@ -411,11 +414,14 @@ func (s *Store) ConfirmedCases(ctx context.Context, limit int) ([]store.Case, er
 	}
 	out := []store.Case{}
 	for _, rec := range res.Records {
-		p := rec.AsMap()
-		out = append(out, store.Case{GroupID: str(p, "id"), Error: str(p, "error"), Category: str(p, "category"),
-			Source: str(p, "source"), Reason: str(p, "reason")})
+		out = append(out, toCase(rec.AsMap()))
 	}
 	return out, nil
+}
+
+func toCase(p map[string]any) store.Case {
+	return store.Case{GroupID: str(p, "id"), Error: str(p, "error"), Category: str(p, "category"),
+		Source: str(p, "source"), Reason: str(p, "reason")}
 }
 
 // RecentGroupErrors mengembalikan pesan error kelompok terbaru (maksimal limit).
