@@ -1,3 +1,7 @@
 .env
 /bin/
 .DS_Store
+
+# Semua varian .env berisi rahasia (misalnya .env.supabase), kecuali contohnya
+.env.*
+!.env.example
