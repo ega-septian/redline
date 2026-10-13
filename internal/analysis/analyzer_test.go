@@ -39,19 +39,8 @@ func (f *fakeLLM) CreateMessage(_ context.Context, req llm.Request) (*llm.Respon
 // di antara kedua run (sidik jarinya dibuat berbeda); test lain sidik jarinya sama.
 func setup(t *testing.T, changed ...string) (*store.Store, map[string]string) {
 	t.Helper()
-	url := os.Getenv("REDLINE_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("REDLINE_TEST_DATABASE_URL tidak diset; test database dilewati")
-	}
 	ctx := context.Background()
-	s, err := store.Open(ctx, store.TestSchema(ctx, t, url, "analysis_test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
-	if err := s.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	s := store.TestStore(ctx, t, "redlinetest-analysis")
 
 	isChanged := map[string]bool{}
 	for _, c := range changed {

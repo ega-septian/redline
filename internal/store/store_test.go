@@ -1,7 +1,8 @@
-package graphstore
+package store
 
 import (
 	"context"
+	"encoding/base64"
 	"io/fs"
 	"strings"
 	"sync"
@@ -11,7 +12,6 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"redline/internal/report"
-	"redline/internal/store"
 )
 
 func TestStatements(t *testing.T) {
@@ -33,7 +33,7 @@ func TestOpen_InvalidName(t *testing.T) {
 
 func TestMigrate(t *testing.T) {
 	ctx := context.Background()
-	s := TestStore(ctx, t, "redlinetest-graphstore")
+	s := TestStore(ctx, t, "redlinetest-store")
 
 	// Migrasi aman dijalankan ulang, dan tercatat sekali.
 	if err := s.Migrate(ctx); err != nil {
@@ -76,7 +76,7 @@ func TestMigrate(t *testing.T) {
 
 func TestNextID_Concurrent(t *testing.T) {
 	ctx := context.Background()
-	s := TestStore(ctx, t, "redlinetest-graphstore-ids")
+	s := TestStore(ctx, t, "redlinetest-store-ids")
 
 	const n = 20
 	ids := make(chan int64, n)
@@ -114,11 +114,55 @@ func TestIngest_LocalStartTime(t *testing.T) {
 	start := time.Date(2026, 10, 13, 9, 0, 0, 0, time.Local)
 	rep := &report.Report{}
 	rep.Stats.StartTime = start
-	if _, err := s.IngestReport(ctx, rep, store.RunMeta{}); err != nil {
+	if _, err := s.IngestReport(ctx, rep, RunMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := s.ListRuns(ctx, 1)
 	if err != nil || len(runs) != 1 || runs[0].StartedAt == nil || !runs[0].StartedAt.Equal(start) {
 		t.Fatalf("waktu mulai harus tersimpan apa adanya: %+v %v", runs, err)
+	}
+}
+
+// Bentuk response disimpan sekali per isi: 10 run x 3 test dengan 2 bentuk berbeda = 2 node :Shape.
+func TestIngest_DedupesResponseShapes(t *testing.T) {
+	ctx := context.Background()
+	s := TestStore(ctx, t, "redlinetest-store")
+	spec := func(title, calls string) report.Spec {
+		r := report.Result{Status: "passed"}
+		if calls != "" {
+			r.Attachments = []report.Attachment{{Name: "redline-http", ContentType: "application/json",
+				Body: base64.StdEncoding.EncodeToString([]byte(calls))}}
+		}
+		return report.Spec{Title: title, File: "shop.spec.ts", Line: len(title),
+			Tests: []report.Test{{ProjectName: "api", Status: "expected", Results: []report.Result{r}}}}
+	}
+	ingest := func(specs ...report.Spec) {
+		t.Helper()
+		rep := &report.Report{Suites: []report.Suite{{Title: "shop.spec.ts", File: "shop.spec.ts", Specs: specs}}}
+		if _, err := s.IngestReport(ctx, rep, RunMeta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shapes := func() int64 {
+		t.Helper()
+		res, err := s.query(ctx, `MATCH (x:Shape) RETURN count(x) AS n`, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, _ := res.Records[0].Get("n")
+		return n.(int64)
+	}
+	brands := `[{"method":"GET","path":"/brands","status":200,"shape":[{"id":"number","name":"string"}]}]`
+	login := `[{"method":"POST","path":"/users/login","status":200,"shape":{"token":"string"}}]`
+
+	for range 10 {
+		ingest(spec("brands", brands), spec("brands lagi", brands), spec("login", login))
+	}
+	if n := shapes(); n != 2 {
+		t.Errorf("mau 2 bentuk unik, dapat %d", n)
+	}
+	ingest(spec("tanpa fixture", "")) // test tanpa fixture Redline tidak membuat bentuk kosong
+	if n := shapes(); n != 2 {
+		t.Errorf("calls kosong tidak boleh disimpan, dapat %d bentuk", n)
 	}
 }

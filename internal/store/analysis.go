@@ -2,232 +2,243 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
+	"slices"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"redline/internal/report"
 	"redline/internal/triage"
 )
 
-// Categories adalah kategori penyebab kegagalan yang dipakai aturan, AI, dan label manual.
-var Categories = []string{"backend_bug", "test_bug", "environment", "flaky", "unknown"}
-
-func ValidCategory(c string) bool {
-	for _, x := range Categories {
-		if x == c {
-			return true
-		}
-	}
-	return false
-}
-
-// RunRef adalah ringkasan satu run untuk keperluan bukti.
-type RunRef struct {
-	RunID      int64     `json:"run_id"`
-	At         time.Time `json:"at"`
-	Source     string    `json:"source"`
-	CommitSHA  string    `json:"commit"`
-	AppVersion string    `json:"app_version"`
-}
-
-// Facts adalah semua bukti tentang satu kelompok kegagalan. Hanya fakta dari database,
-// tanpa tafsiran; inilah yang dikirim ke aturan dan ke AI.
-type Facts struct {
-	Group         Group  `json:"group"`
-	ErrorMessage  string `json:"error_message"` // kemunculan terakhir, sudah diredaksi
-	ErrorSnippet  string `json:"error_snippet"`
-	ErrorLocation string `json:"error_location"`
-
-	// LastPass: run terakhir test ini lulus sebelum kegagalan sekarang (nil = belum pernah lulus).
-	LastPass *RunRef `json:"last_pass"`
-	// FirstFail: run pertama gagal dengan error ini setelah LastPass.
-	FirstFail RunRef `json:"first_fail"`
-
-	RecentStatuses []string `json:"recent_statuses"` // status test ini di 10 run terakhir, lama -> baru
-	FlakyRecent    int      `json:"flaky_recent"`    // berapa kali flaky di 20 run terakhir
-
-	// Sinyal perubahan dibanding LastPass (tanpa git):
-	CurrentCalls []report.HTTPCall   `json:"current_calls"` // bentuk response saat gagal
-	TestChanged  string              `json:"test_changed"`  // "ya" / "tidak" / "tidak diketahui"
-	Response     triage.ResponseDiff `json:"response"`
-
-	// FailRunID: run kemunculan gagal terakhir (yang dianalisis).
-	FailRunID int64 `json:"fail_run_id"`
-
-	// Kontrak API (OpenAPI) saat test gagal, untuk endpoint yang dipanggil. Diisi analyzer dari potret kontrak run.
-	Contract           string   `json:"contract,omitempty"`
-	ContractViolations []string `json:"contract_violations,omitempty"` // bagian response yang tidak sesuai kontrak
-	ContractChanged    string   `json:"contract_changed,omitempty"`    // dibanding run lulus terakhir: ya / tidak / tidak diketahui
-	ContractBefore     string   `json:"contract_before,omitempty"`     // kontrak saat run lulus terakhir, kalau berubah
-
-	// Ingatan:
-	Sources   []SourceFile  `json:"sources"`    // isi kode test pada kemunculan terakhir (spec dulu), sudah disamarkan
-	CodeFiles []string      `json:"code_files"` // file lokal yang dipakai test ini
-	CodeMap   []CodeLink    `json:"code_map"`   // test lain di run yang sama dengan endpoint/file yang sama
-	Similar   []SimilarCase `json:"similar"`    // kasus terbukti yang error-nya mirip maknanya (referensi, bukan bukti)
-}
-
-// Facts mengumpulkan bukti untuk satu kelompok kegagalan.
+// Facts mengumpulkan bukti untuk satu kelompok kegagalan, yaitu:
+// kemunculan gagal terakhir, kode test, peta kode, pembanding run lulus terakhir, dan riwayat status.
 func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
-	g, err := scanGroup(s.pool.QueryRow(ctx, groupSelect+` WHERE g.id = $1`, fingerprint))
-	if err == pgx.ErrNoRows {
-		return nil, ErrNotFound
-	}
+	res, err := s.query(ctx, `MATCH (f:Failure {id: $id})`+failureReturn, map[string]any{"id": fingerprint})
 	if err != nil {
 		return nil, err
 	}
-	f := &Facts{Group: g, RecentStatuses: []string{}}
+	if len(res.Records) == 0 {
+		return nil, ErrNotFound
+	}
+	g := toGroup(res.Records[0])
+	f := &Facts{Group: g, RecentStatuses: []string{}, CodeFiles: []string{}, Similar: []SimilarCase{}}
 
-	var curHash string
-	var curCalls []byte
-	var curRun int64
-	var sourceIDs []string
-	if err := s.pool.QueryRow(ctx, `
-		SELECT t.run_id, t.error_message, t.error_snippet, t.error_location, t.test_code_hash,
-		       COALESCE(s.shape, '[]'::jsonb), t.code_files, t.source_ids
-		FROM test_results t LEFT JOIN response_shapes s ON s.id = t.response_shape_id
-		WHERE t.group_id = $1 AND t.status = 'failed' ORDER BY t.run_id DESC LIMIT 1`, fingerprint,
-	).Scan(&curRun, &f.ErrorMessage, &f.ErrorSnippet, &f.ErrorLocation, &curHash, &curCalls, &f.CodeFiles, &sourceIDs); err != nil && err != pgx.ErrNoRows {
+	// Kemunculan gagal terakhir: pesan error, kode test, dan bentuk response saat itu.
+	res, err = s.query(ctx, `
+		MATCH (r:Result {groupId: $id, status: 'failed'})
+		WITH r ORDER BY r.runId DESC LIMIT 1
+		OPTIONAL MATCH (r)-[:RETURNED]->(shape:Shape)
+		RETURN r, shape.shape AS shape`, map[string]any{"id": fingerprint})
+	if err != nil {
 		return nil, fmt.Errorf("kemunculan terakhir: %w", err)
+	}
+	var curHash string
+	var sourceIDs []string
+	if len(res.Records) > 0 {
+		node, _ := res.Records[0].Get("r")
+		p := node.(neo4j.Node).Props
+		f.FailRunID = i64(p, "runId")
+		f.ErrorMessage, f.ErrorSnippet, f.ErrorLocation = str(p, "errorMessage"), str(p, "errorSnippet"), str(p, "errorLocation")
+		curHash, f.CodeFiles, sourceIDs = str(p, "testCodeHash"), strs(p, "codeFiles"), strs(p, "sourceIds")
+		shape, _ := res.Records[0].Get("shape")
+		f.CurrentCalls = decode(shape)
+	} else {
+		f.CurrentCalls = []report.HTTPCall{}
 	}
 	if f.Sources, err = s.sourceFiles(ctx, sourceIDs); err != nil {
 		return nil, fmt.Errorf("kode test: %w", err)
-	}
-	f.CurrentCalls = DecodeCalls(curCalls)
-	f.FailRunID = curRun
-	if f.CodeFiles == nil {
-		f.CodeFiles = []string{}
 	}
 
 	endpoints := []string{}
 	for _, c := range f.CurrentCalls {
 		endpoints = append(endpoints, c.Method+" "+c.Path)
 	}
-	if f.CodeMap, err = s.codeMap(ctx, curRun, g.TestKey, endpoints, f.CodeFiles); err != nil {
+	if f.CodeMap, err = s.codeMap(ctx, f.FailRunID, g.TestKey, endpoints, f.CodeFiles); err != nil {
 		return nil, fmt.Errorf("peta kode: %w", err)
 	}
-	f.Similar = []SimilarCase{} // diisi analyzer kalau embedding aktif
 
-	const runRef = `r.id, r.created_at, r.source, r.commit_sha, r.app_version`
-	var lp RunRef
-	var passHash string
-	var passCalls []byte
-	err = s.pool.QueryRow(ctx, `
-		SELECT `+runRef+`, t.test_code_hash, COALESCE(s.shape, '[]'::jsonb)
-		FROM test_results t JOIN runs r ON r.id = t.run_id LEFT JOIN response_shapes s ON s.id = t.response_shape_id
-		WHERE t.test_key = $1 AND t.status = 'passed' AND r.id < $2
-		ORDER BY r.id DESC LIMIT 1`, g.TestKey, g.LastSeenRun,
-	).Scan(&lp.RunID, &lp.At, &lp.Source, &lp.CommitSHA, &lp.AppVersion, &passHash, &passCalls)
-	switch {
-	case err == nil:
-		f.LastPass = &lp
-	case err != pgx.ErrNoRows:
+	// Pembanding: run terakhir test ini lulus sebelum kegagalan sekarang.
+	res, err = s.query(ctx, `
+		MATCH (r:Result {testKey: $key, status: 'passed'}) WHERE r.runId < $before
+		WITH r ORDER BY r.runId DESC LIMIT 1
+		MATCH (run:Run {id: r.runId})
+		OPTIONAL MATCH (r)-[:RETURNED]->(shape:Shape)
+		RETURN run, r.testCodeHash AS hash, shape.shape AS shape`,
+		map[string]any{"key": g.TestKey, "before": g.LastSeenRun})
+	if err != nil {
 		return nil, fmt.Errorf("lulus terakhir: %w", err)
 	}
+	var passHash string
+	passCalls := []report.HTTPCall{}
+	if len(res.Records) > 0 {
+		ref := runRef(res.Records[0])
+		f.LastPass = &ref
+		hash, _ := res.Records[0].Get("hash")
+		passHash, _ = hash.(string)
+		shape, _ := res.Records[0].Get("shape")
+		passCalls = decode(shape)
+	}
 	f.TestChanged = triage.CompareHash(passHash, curHash)
-	f.Response = triage.DiffCalls(DecodeCalls(passCalls), f.CurrentCalls)
+	f.Response = triage.DiffCalls(passCalls, f.CurrentCalls)
 
 	after := int64(0)
 	if f.LastPass != nil {
 		after = f.LastPass.RunID
 	}
-	if err := s.pool.QueryRow(ctx, `
-		SELECT `+runRef+` FROM test_results t JOIN runs r ON r.id = t.run_id
-		WHERE t.group_id = $1 AND t.status = 'failed' AND r.id > $2
-		ORDER BY r.id ASC LIMIT 1`, fingerprint, after,
-	).Scan(&f.FirstFail.RunID, &f.FirstFail.At, &f.FirstFail.Source, &f.FirstFail.CommitSHA, &f.FirstFail.AppVersion); err != nil {
+	res, err = s.query(ctx, `
+		MATCH (r:Result {groupId: $id, status: 'failed'}) WHERE r.runId > $after
+		WITH r ORDER BY r.runId ASC LIMIT 1
+		MATCH (run:Run {id: r.runId}) RETURN run`, map[string]any{"id": fingerprint, "after": after})
+	if err != nil {
 		return nil, fmt.Errorf("gagal pertama: %w", err)
 	}
+	if len(res.Records) == 0 {
+		return nil, fmt.Errorf("gagal pertama: tidak ada kemunculan gagal untuk %s", fingerprint)
+	}
+	f.FirstFail = runRef(res.Records[0])
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT status FROM (
-			SELECT run_id, status FROM test_results WHERE test_key = $1 ORDER BY run_id DESC LIMIT 10
-		) x ORDER BY run_id ASC`, g.TestKey)
+	res, err = s.query(ctx, `
+		MATCH (r:Result {testKey: $key}) WITH r ORDER BY r.runId DESC
+		WITH collect(r.status) AS statuses
+		RETURN statuses[0..10] AS recent, size([st IN statuses[0..20] WHERE st = 'flaky']) AS flaky`,
+		map[string]any{"key": g.TestKey})
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var st string
-		if err := rows.Scan(&st); err != nil {
-			rows.Close()
-			return nil, err
+	if len(res.Records) > 0 {
+		recent, _ := res.Records[0].Get("recent")
+		for _, st := range recent.([]any) {
+			f.RecentStatuses = append(f.RecentStatuses, st.(string))
 		}
-		f.RecentStatuses = append(f.RecentStatuses, st)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE status = 'flaky') FROM (
-			SELECT status FROM test_results WHERE test_key = $1 ORDER BY run_id DESC LIMIT 20
-		) x`, g.TestKey).Scan(&f.FlakyRecent); err != nil {
-		return nil, err
+		slices.Reverse(f.RecentStatuses) // lama -> baru
+		flaky, _ := res.Records[0].Get("flaky")
+		f.FlakyRecent = int(flaky.(int64))
 	}
 	return f, nil
 }
 
-// DecodeCalls membaca kembali bentuk response yang disimpan (hasil CallsJSON).
-func DecodeCalls(raw []byte) []report.HTTPCall {
-	var calls []report.HTTPCall
-	if len(raw) == 0 || json.Unmarshal(raw, &calls) != nil {
-		return []report.HTTPCall{}
+func runRef(rec *neo4j.Record) RunRef {
+	node, _ := rec.Get("run")
+	p := node.(neo4j.Node).Props
+	return RunRef{RunID: i64(p, "id"), At: local(p["createdAt"]), Source: str(p, "source"),
+		CommitSHA: str(p, "commit"), AppVersion: str(p, "appVersion")}
+}
+
+func decode(shape any) []report.HTTPCall {
+	if s, ok := shape.(string); ok {
+		return DecodeCalls([]byte(s))
 	}
-	return calls
+	return []report.HTTPCall{}
 }
 
-// Analysis adalah hasil analisis satu kelompok kegagalan.
-type Analysis struct {
-	Fingerprint   string        `json:"fingerprint"`
-	PromptVersion string        `json:"prompt_version"`
-	Source        string        `json:"source"` // rule, ai, human (label manual) atau experiment (bukti eksperimen); dua terakhir tidak disimpan di tabel ini
-	Model         string        `json:"model,omitempty"`
-	Category      string        `json:"category"`
-	Confidence    string        `json:"confidence"`
-	Summary       string        `json:"summary"`
-	Evidence      []string      `json:"evidence"`
-	NextStep      string        `json:"next_step"`
-	Patch         string        `json:"patch,omitempty"`   // diff yang terbukti membuat test lulus (source experiment)
-	Similar       []SimilarCase `json:"similar,omitempty"` // kasus terbukti yang mirip; dihitung ulang, tidak disimpan
-	InputTokens   int           `json:"input_tokens"`      // hanya untuk analisis baru; tidak disimpan
-	OutputTokens  int           `json:"output_tokens"`     // hanya untuk analisis baru; tidak disimpan
-	CostUSD       float64       `json:"cost_usd"`
-	CreatedAt     time.Time     `json:"created_at"`
+// sourceFiles mengambil isi file kode test berdasarkan id, dengan urutan yang sama (file spec dulu).
+func (s *Store) sourceFiles(ctx context.Context, ids []string) ([]SourceFile, error) {
+	out := []SourceFile{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	res, err := s.query(ctx, `MATCH (f:SourceFile) WHERE f.id IN $ids RETURN f.id AS id, f.path AS path, f.content AS content`,
+		map[string]any{"ids": ids})
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]SourceFile{}
+	for _, rec := range res.Records {
+		id, _ := rec.Get("id")
+		path, _ := rec.Get("path")
+		content, _ := rec.Get("content")
+		byID[id.(string)] = SourceFile{Path: path.(string), Content: content.(string)}
+	}
+	for _, id := range ids {
+		if f, ok := byID[id]; ok {
+			out = append(out, f)
+		}
+	}
+	return out, nil
 }
 
+// codeMap: untuk setiap endpoint yang dipanggil dan file yang dipakai test ini, hitung test LAIN di run yang
+// sama yang ikut memakainya, lulus atau gagal. Di graph cukup mengikuti hubungan CALLED dan USED.
+func (s *Store) codeMap(ctx context.Context, runID int64, testKey string, endpoints, files []string) ([]CodeLink, error) {
+	out := []CodeLink{}
+	for _, q := range []struct {
+		kind, cypher string
+		names        []string
+	}{
+		{"endpoint", `MATCH (:Run {id: $runId})-[:HAS]->(r:Result)-[:CALLED]->(n:Endpoint) WHERE n.key IN $names AND r.testKey <> $key
+			RETURN n.key AS name,
+			       count(DISTINCT CASE WHEN r.status IN ['passed', 'flaky'] THEN r.testKey END) AS passed,
+			       count(DISTINCT CASE WHEN r.status = 'failed' THEN r.testKey END) AS failed
+			ORDER BY name`, endpoints},
+		{"file", `MATCH (:Run {id: $runId})-[:HAS]->(r:Result)-[:USED]->(n:File) WHERE n.path IN $names AND r.testKey <> $key
+			RETURN n.path AS name,
+			       count(CASE WHEN r.status IN ['passed', 'flaky'] THEN 1 END) AS passed,
+			       count(CASE WHEN r.status = 'failed' THEN 1 END) AS failed
+			ORDER BY name`, files},
+	} {
+		if len(q.names) == 0 {
+			continue
+		}
+		res, err := s.query(ctx, q.cypher, map[string]any{"runId": runID, "key": testKey, "names": q.names})
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range res.Records {
+			name, _ := rec.Get("name")
+			passed, _ := rec.Get("passed")
+			failed, _ := rec.Get("failed")
+			out = append(out, CodeLink{Kind: q.kind, Name: name.(string), Passed: int(passed.(int64)), Failed: int(failed.(int64))})
+		}
+	}
+	return out, nil
+}
+
+// SaveAnalysis menyimpan hasil analisis per (kelompok, versi prompt); versi yang sama ditimpa.
 func (s *Store) SaveAnalysis(ctx context.Context, a Analysis) error {
 	if a.Evidence == nil {
 		a.Evidence = []string{}
 	}
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO analyses (group_id, prompt_version, source, model, category, confidence, summary,
-			evidence, next_step, cost_usd, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
-		ON CONFLICT (group_id, prompt_version) DO UPDATE SET
-			source = EXCLUDED.source, model = EXCLUDED.model, category = EXCLUDED.category,
-			confidence = EXCLUDED.confidence, summary = EXCLUDED.summary, evidence = EXCLUDED.evidence,
-			next_step = EXCLUDED.next_step, cost_usd = EXCLUDED.cost_usd, created_at = now()`,
-		a.Fingerprint, a.PromptVersion, a.Source, a.Model, a.Category, a.Confidence, a.Summary,
-		a.Evidence, a.NextStep, a.CostUSD)
-	return err
+	res, err := s.query(ctx, `
+		MATCH (f:Failure {id: $groupId})
+		MERGE (a:Analysis {id: $id})
+		SET a.groupId = $groupId, a.promptVersion = $promptVersion, a.source = $source, a.model = $model,
+			a.category = $category, a.confidence = $confidence, a.summary = $summary, a.evidence = $evidence,
+			a.nextStep = $nextStep, a.costUSD = $costUSD, a.createdAt = datetime()
+		MERGE (f)-[:ANALYZED]->(a)
+		RETURN count(a) AS n`,
+		map[string]any{"id": a.Fingerprint + "|" + a.PromptVersion, "groupId": a.Fingerprint,
+			"promptVersion": a.PromptVersion, "source": a.Source, "model": a.Model, "category": a.Category,
+			"confidence": a.Confidence, "summary": a.Summary, "evidence": a.Evidence, "nextStep": a.NextStep,
+			"costUSD": a.CostUSD})
+	if err != nil {
+		return err
+	}
+	// count() selalu menghasilkan satu baris; 0 berarti kelompoknya tidak ada.
+	if n, _ := res.Records[0].Get("n"); n.(int64) == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (Analysis, error) {
-	var a Analysis
-	err := s.pool.QueryRow(ctx, `
-		SELECT group_id, prompt_version, source, model, category, confidence, summary, evidence,
-			next_step, cost_usd::float8, created_at
-		FROM analyses WHERE group_id = $1 AND prompt_version = $2`, fingerprint, promptVersion,
-	).Scan(&a.Fingerprint, &a.PromptVersion, &a.Source, &a.Model, &a.Category, &a.Confidence, &a.Summary,
-		&a.Evidence, &a.NextStep, &a.CostUSD, &a.CreatedAt)
-	if err == pgx.ErrNoRows {
+	res, err := s.query(ctx, `MATCH (a:Analysis {id: $id}) RETURN a`,
+		map[string]any{"id": fingerprint + "|" + promptVersion})
+	if err != nil {
+		return Analysis{}, err
+	}
+	if len(res.Records) == 0 {
 		return Analysis{}, ErrNotFound
 	}
-	return a, err
+	node, _ := res.Records[0].Get("a")
+	p := node.(neo4j.Node).Props
+	cost, _ := p["costUSD"].(float64)
+	return Analysis{
+		Fingerprint: str(p, "groupId"), PromptVersion: str(p, "promptVersion"), Source: str(p, "source"),
+		Model: str(p, "model"), Category: str(p, "category"), Confidence: str(p, "confidence"),
+		Summary: str(p, "summary"), Evidence: strs(p, "evidence"), NextStep: str(p, "nextStep"),
+		CostUSD: cost, CreatedAt: local(p["createdAt"]),
+	}, nil
 }
 
 // SetLabel menyimpan label manual beserta siapa yang memberinya. label kosong menghapus label.
@@ -238,14 +249,16 @@ func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by strin
 	} else {
 		note, by = "", ""
 	}
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE failure_groups SET manual_category = $2, manual_note = $3, labeled_by = $4,
-			labeled_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END
-		WHERE id = $1`, fingerprint, labelArg, note, by)
+	res, err := s.query(ctx, `
+		MATCH (f:Failure {id: $id})
+		SET f.manualCategory = $label, f.manualNote = $note, f.labeledBy = $by,
+			f.labeledAt = CASE WHEN $label IS NULL THEN null ELSE datetime() END
+		RETURN count(f) AS n`, map[string]any{"id": fingerprint, "label": labelArg, "note": note, "by": by})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	// count() selalu menghasilkan satu baris; 0 berarti kelompoknya tidak ada.
+	if n, _ := res.Records[0].Get("n"); n.(int64) == 0 {
 		return ErrNotFound
 	}
 	return nil

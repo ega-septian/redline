@@ -1,4 +1,4 @@
-package storetest
+package store_test
 
 import (
 	"context"
@@ -9,33 +9,15 @@ import (
 	"redline/internal/store"
 )
 
-// ProofBackend menambah eksperimen, tebakan dan rapor, serta aturan yang dipelajari.
-type ProofBackend interface {
-	AnalysisBackend
-	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
-	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
-	LatestProof(ctx context.Context, groupID string) (store.Experiment, error)
-	SavePrediction(ctx context.Context, a store.Analysis) error
-	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
-	SaveRule(ctx context.Context, r store.LearnedRule) (int64, error)
-	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
-	ActiveRules(ctx context.Context) ([]store.LearnedRule, error)
-	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
-	ConfirmedCases(ctx context.Context, limit int) ([]store.Case, error)
-	RecentGroupErrors(ctx context.Context, limit int) ([]store.GroupError, error)
+// TestProofs: eksperimen, rapor tebakan, aturan yang dipelajari, dan kasus terbukti.
+func TestProofs(t *testing.T) {
+	t.Run("Experiments", func(t *testing.T) { testExperiments(t, newStore(t)) })
+	t.Run("Scoreboard", func(t *testing.T) { testScoreboard(t, newStore(t)) })
+	t.Run("Rules", func(t *testing.T) { testRules(t, newStore(t)) })
+	t.Run("ConfirmedCases", func(t *testing.T) { testConfirmedCases(t, newStore(t)) })
 }
 
-type ProofFactory func(t *testing.T) ProofBackend
-
-// RunProofs menjalankan test eksperimen, rapor, dan aturan terhadap satu implementasi.
-func RunProofs(t *testing.T, newBackend ProofFactory) {
-	t.Run("Experiments", func(t *testing.T) { testExperiments(t, newBackend(t)) })
-	t.Run("Scoreboard", func(t *testing.T) { testScoreboard(t, newBackend(t)) })
-	t.Run("Rules", func(t *testing.T) { testRules(t, newBackend(t)) })
-	t.Run("ConfirmedCases", func(t *testing.T) { testConfirmedCases(t, newBackend(t)) })
-}
-
-func testExperiments(t *testing.T, b ProofBackend) {
+func testExperiments(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	fp := fps["order dibayar"]
@@ -88,7 +70,7 @@ func testExperiments(t *testing.T, b ProofBackend) {
 	}
 }
 
-func testScoreboard(t *testing.T, b ProofBackend) {
+func testScoreboard(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	order, brands, register := fps["order dibayar"], fps["brands punya slug"], fps["register user"]
@@ -150,7 +132,7 @@ func testScoreboard(t *testing.T, b ProofBackend) {
 	}
 }
 
-func testRules(t *testing.T, b ProofBackend) {
+func testRules(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	r1, err := b.SaveRule(ctx, store.LearnedRule{Pattern: `received Promise`, Category: "test_bug", Summary: "Lupa await.",
 		NextStep: "Tambah await.", LearnedFrom: []string{"a", "b"}, Hits: 2, AlsoMatches: 1, CostUSD: 0.0003})
@@ -202,7 +184,7 @@ func testRules(t *testing.T, b ProofBackend) {
 	}
 }
 
-func testConfirmedCases(t *testing.T, b ProofBackend) {
+func testConfirmedCases(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	order, brands, register := fps["order dibayar"], fps["brands punya slug"], fps["register user"]

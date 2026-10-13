@@ -1,4 +1,4 @@
-package graphstore
+package store
 
 import (
 	"context"
@@ -9,14 +9,13 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"redline/internal/store"
 	"redline/internal/triage"
 )
 
 // ---------- eksperimen ----------
 
 // SaveExperiment menyimpan hasil eksperimen. Teks disamarkan dulu seperti pesan error.
-func (s *Store) SaveExperiment(ctx context.Context, e store.Experiment) (int64, error) {
+func (s *Store) SaveExperiment(ctx context.Context, e Experiment) (int64, error) {
 	if e.Category == "" {
 		e.Category = "unknown"
 	}
@@ -66,10 +65,10 @@ func notFoundUnless(err error) error {
 	return ErrNotFound
 }
 
-func toExperiment(node any) store.Experiment {
+func toExperiment(node any) Experiment {
 	p := node.(neo4j.Node).Props
 	cost, _ := p["costUSD"].(float64)
-	return store.Experiment{
+	return Experiment{
 		ID: i64(p, "id"), GroupID: str(p, "groupId"), Kind: str(p, "kind"), Outcome: str(p, "outcome"),
 		Category: str(p, "category"), Hypothesis: str(p, "hypothesis"), Patch: str(p, "patch"), Detail: str(p, "detail"),
 		Runs: int(i64(p, "runs")), Passes: int(i64(p, "passes")), CostUSD: cost, RunBy: str(p, "runBy"),
@@ -78,13 +77,13 @@ func toExperiment(node any) store.Experiment {
 }
 
 // ListExperiments mengembalikan eksperimen satu kelompok, terbaru dulu.
-func (s *Store) ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error) {
+func (s *Store) ListExperiments(ctx context.Context, groupID string) ([]Experiment, error) {
 	res, err := s.query(ctx, `MATCH (e:Experiment {groupId: $id}) RETURN e ORDER BY e.id DESC LIMIT 20`,
 		map[string]any{"id": groupID})
 	if err != nil {
 		return nil, err
 	}
-	out := []store.Experiment{}
+	out := []Experiment{}
 	for _, rec := range res.Records {
 		node, _ := rec.Get("e")
 		out = append(out, toExperiment(node))
@@ -102,13 +101,13 @@ const provenCypher = `
 	RETURN f.id AS groupId, e ORDER BY groupId, (e.kind = 'patch') DESC, e.id DESC`
 
 // LatestProof mengembalikan bukti terkuat untuk satu kelompok, atau ErrNotFound.
-func (s *Store) LatestProof(ctx context.Context, groupID string) (store.Experiment, error) {
+func (s *Store) LatestProof(ctx context.Context, groupID string) (Experiment, error) {
 	res, err := s.query(ctx, `MATCH (f:Failure {id: $id})`+provenCypher+` LIMIT 1`, map[string]any{"id": groupID})
 	if err != nil {
-		return store.Experiment{}, err
+		return Experiment{}, err
 	}
 	if len(res.Records) == 0 {
-		return store.Experiment{}, ErrNotFound
+		return Experiment{}, ErrNotFound
 	}
 	node, _ := res.Records[0].Get("e")
 	return toExperiment(node), nil
@@ -118,7 +117,7 @@ func (s *Store) LatestProof(ctx context.Context, groupID string) (store.Experime
 
 // SavePrediction mencatat tebakan aturan atau AI untuk rapor. Tebakan yang sama berturut-turut
 // (kategori sama dengan tebakan terakhir dari sumber yang sama) tidak dicatat ulang.
-func (s *Store) SavePrediction(ctx context.Context, a store.Analysis) error {
+func (s *Store) SavePrediction(ctx context.Context, a Analysis) error {
 	if a.Source != "rule" && a.Source != "ai" {
 		return nil
 	}
@@ -157,9 +156,9 @@ type truth struct {
 	at                 *time.Time
 }
 
-// Scores menilai tebakan terakhir tiap sumber yang dibuat SEBELUM jawabannya terbukti, sama seperti versi
-// Postgres. Jawaban: label manual, kalau tidak ada: bukti eksperimen terkuat. groupID kosong = semua kelompok.
-func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error) {
+// Scores menilai tebakan terakhir tiap sumber yang dibuat SEBELUM jawabannya terbukti.
+// Jawaban: label manual, kalau tidak ada: bukti eksperimen terkuat. groupID kosong = semua kelompok.
+func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*Scoreboard, error) {
 	params := map[string]any{"id": groupID}
 	truths := map[string]truth{}
 
@@ -206,7 +205,7 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*store.S
 		truths[gid.(string)] = truth{category: category, by: "eksperimen", test: tests[gid.(string)], at: &at}
 	}
 
-	board := &store.Scoreboard{Sources: []store.Score{{Source: "rule"}, {Source: "ai"}}, Entries: []store.ScoreEntry{}}
+	board := &Scoreboard{Sources: []Score{{Source: "rule"}, {Source: "ai"}}, Entries: []ScoreEntry{}}
 	if len(truths) == 0 {
 		return board, nil
 	}
@@ -219,7 +218,7 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*store.S
 	if err != nil {
 		return nil, err
 	}
-	entries := []store.ScoreEntry{}
+	entries := []ScoreEntry{}
 	seen := map[string]bool{}
 	for _, rec := range res.Records {
 		node, _ := rec.Get("p")
@@ -230,7 +229,7 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*store.S
 			continue // hanya tebakan terakhir sebelum jawaban terbukti
 		}
 		seen[gid+" "+source] = true
-		entries = append(entries, store.ScoreEntry{GroupID: gid, Test: t.test, Source: source,
+		entries = append(entries, ScoreEntry{GroupID: gid, Test: t.test, Source: source,
 			Predicted: str(p, "category"), Confidence: str(p, "confidence"), Truth: t.category, TruthBy: t.by,
 			Correct: str(p, "category") == t.category, ProvenAt: t.at})
 	}
@@ -249,7 +248,7 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*store.S
 		return a.Source < b.Source
 	})
 
-	bySource := map[string]*store.Score{"rule": &board.Sources[0], "ai": &board.Sources[1]}
+	bySource := map[string]*Score{"rule": &board.Sources[0], "ai": &board.Sources[1]}
 	for _, e := range entries {
 		sc := bySource[e.Source]
 		if e.Predicted == "unknown" {
@@ -290,10 +289,10 @@ func (s *Store) testKeys(ctx context.Context, groupID string) (map[string]string
 
 // ---------- aturan yang dipelajari ----------
 
-func toRule(node any) store.LearnedRule {
+func toRule(node any) LearnedRule {
 	p := node.(neo4j.Node).Props
 	cost, _ := p["costUSD"].(float64)
-	r := store.LearnedRule{
+	r := LearnedRule{
 		ID: i64(p, "id"), Pattern: str(p, "pattern"), Category: str(p, "category"), Summary: str(p, "summary"),
 		NextStep: str(p, "nextStep"), Status: str(p, "status"), LearnedFrom: strs(p, "learnedFrom"),
 		Hits: int(i64(p, "hits")), AlsoMatches: int(i64(p, "alsoMatches")), CostUSD: cost,
@@ -307,7 +306,7 @@ func toRule(node any) store.LearnedRule {
 }
 
 // SaveRule menyimpan usulan aturan baru (status proposed). Pola + kategori yang sama: ErrDuplicate.
-func (s *Store) SaveRule(ctx context.Context, r store.LearnedRule) (int64, error) {
+func (s *Store) SaveRule(ctx context.Context, r LearnedRule) (int64, error) {
 	if r.LearnedFrom == nil {
 		r.LearnedFrom = []string{}
 	}
@@ -331,7 +330,7 @@ func (s *Store) SaveRule(ctx context.Context, r store.LearnedRule) (int64, error
 	})
 	var neoErr *neo4j.Neo4jError
 	if errors.As(err, &neoErr) && neoErr.Code == "Neo.ClientError.Schema.ConstraintValidationFailed" {
-		return 0, store.ErrDuplicate // dua usulan yang sama masuk bersamaan
+		return 0, ErrDuplicate // dua usulan yang sama masuk bersamaan
 	}
 	if err != nil {
 		return 0, err
@@ -343,17 +342,17 @@ func duplicateUnless(err error) error {
 	if err != nil {
 		return nil
 	}
-	return store.ErrDuplicate
+	return ErrDuplicate
 }
 
 // ListRules mengembalikan aturan dengan status tertentu (kosong = semua), terbaru dulu.
-func (s *Store) ListRules(ctx context.Context, status string) ([]store.LearnedRule, error) {
+func (s *Store) ListRules(ctx context.Context, status string) ([]LearnedRule, error) {
 	res, err := s.query(ctx, `MATCH (r:Rule) WHERE $status = '' OR r.status = $status
 		RETURN r ORDER BY r.id DESC LIMIT 200`, map[string]any{"status": status})
 	if err != nil {
 		return nil, err
 	}
-	out := []store.LearnedRule{}
+	out := []LearnedRule{}
 	for _, rec := range res.Records {
 		node, _ := rec.Get("r")
 		out = append(out, toRule(node))
@@ -362,7 +361,7 @@ func (s *Store) ListRules(ctx context.Context, status string) ([]store.LearnedRu
 }
 
 // ActiveRules mengembalikan aturan yang sudah disetujui, yang lama dulu supaya hasil stabil.
-func (s *Store) ActiveRules(ctx context.Context) ([]store.LearnedRule, error) {
+func (s *Store) ActiveRules(ctx context.Context) ([]LearnedRule, error) {
 	rules, err := s.ListRules(ctx, "active")
 	if err != nil {
 		return nil, err
@@ -372,17 +371,17 @@ func (s *Store) ActiveRules(ctx context.Context) ([]store.LearnedRule, error) {
 }
 
 // DecideRule mengaktifkan atau menolak aturan. status: active / rejected / proposed.
-func (s *Store) DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error) {
+func (s *Store) DecideRule(ctx context.Context, id int64, status, by string) (LearnedRule, error) {
 	res, err := s.query(ctx, `
 		MATCH (r:Rule {id: $id})
 		SET r.status = $status, r.decidedBy = $by,
 			r.decidedAt = CASE WHEN $status = 'proposed' THEN null ELSE datetime() END
 		RETURN r`, map[string]any{"id": id, "status": status, "by": by})
 	if err != nil {
-		return store.LearnedRule{}, err
+		return LearnedRule{}, err
 	}
 	if len(res.Records) == 0 {
-		return store.LearnedRule{}, ErrNotFound
+		return LearnedRule{}, ErrNotFound
 	}
 	node, _ := res.Records[0].Get("r")
 	return toRule(node), nil
@@ -405,36 +404,36 @@ const confirmedCasesCypher = `
 	}`
 
 // ConfirmedCases mengembalikan kasus terbukti terbaru.
-func (s *Store) ConfirmedCases(ctx context.Context, limit int) ([]store.Case, error) {
+func (s *Store) ConfirmedCases(ctx context.Context, limit int) ([]Case, error) {
 	res, err := s.query(ctx, confirmedCasesCypher+`
 		RETURN id, error, category, source, reason ORDER BY lastSeen DESC LIMIT $limit`,
 		map[string]any{"limit": limit})
 	if err != nil {
 		return nil, err
 	}
-	out := []store.Case{}
+	out := []Case{}
 	for _, rec := range res.Records {
 		out = append(out, toCase(rec.AsMap()))
 	}
 	return out, nil
 }
 
-func toCase(p map[string]any) store.Case {
-	return store.Case{GroupID: str(p, "id"), Error: str(p, "error"), Category: str(p, "category"),
+func toCase(p map[string]any) Case {
+	return Case{GroupID: str(p, "id"), Error: str(p, "error"), Category: str(p, "category"),
 		Source: str(p, "source"), Reason: str(p, "reason")}
 }
 
 // RecentGroupErrors mengembalikan pesan error kelompok terbaru (maksimal limit).
-func (s *Store) RecentGroupErrors(ctx context.Context, limit int) ([]store.GroupError, error) {
+func (s *Store) RecentGroupErrors(ctx context.Context, limit int) ([]GroupError, error) {
 	res, err := s.query(ctx, `MATCH (f:Failure) RETURN f.id AS id, f.lastError AS error
 		ORDER BY f.lastSeenRun DESC LIMIT $limit`, map[string]any{"limit": limit})
 	if err != nil {
 		return nil, err
 	}
-	out := []store.GroupError{}
+	out := []GroupError{}
 	for _, rec := range res.Records {
 		p := rec.AsMap()
-		out = append(out, store.GroupError{GroupID: str(p, "id"), Error: str(p, "error")})
+		out = append(out, GroupError{GroupID: str(p, "id"), Error: str(p, "error")})
 	}
 	return out, nil
 }

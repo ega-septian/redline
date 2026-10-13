@@ -2,121 +2,75 @@ package store
 
 import (
 	"context"
-	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-type Run struct {
-	ID                int64      `json:"id"`
-	CreatedAt         time.Time  `json:"created_at"`
-	StartedAt         *time.Time `json:"started_at"`
-	DurationMs        int        `json:"duration_ms"`
-	Source            string     `json:"source"`
-	TriggeredBy       string     `json:"triggered_by"`
-	CIURL             string     `json:"ci_url"`
-	Branch            string     `json:"branch"`
-	CommitSHA         string     `json:"commit"`
-	AppVersion        string     `json:"app_version"`
-	PlaywrightVersion string     `json:"playwright_version"`
-	Total             int        `json:"total"`
-	Passed            int        `json:"passed"`
-	Failed            int        `json:"failed"`
-	Flaky             int        `json:"flaky"`
-	Skipped           int        `json:"skipped"`
-	ReportErrors      []string   `json:"report_errors"`
-}
-
-type Group struct {
-	Fingerprint  string     `json:"fingerprint"`
-	TestKey      string     `json:"test"`
-	TestCaseID   string     `json:"test_case_id,omitempty"` // dari tag @TC-..., kalau ada
-	Project      string     `json:"project"`
-	File         string     `json:"file"`
-	Title        string     `json:"title"`
-	Status       string     `json:"status"`
-	Summary      string     `json:"summary"`
-	SampleError  string     `json:"sample_error,omitempty"` // pesan error terakhir
-	Cause        string     `json:"cause,omitempty"`        // penyebab yang bisa dibaca
-	Occurrences  int        `json:"occurrences"`
-	Regressions  int        `json:"regressions"`
-	FirstSeenRun int64      `json:"first_seen_run"`
-	LastSeenRun  int64      `json:"last_seen_run"`
-	ResolvedRun  *int64     `json:"resolved_run"`
-	FirstSeenAt  time.Time  `json:"first_seen_at"`
-	LastSeenAt   time.Time  `json:"last_seen_at"`
-	ResolvedAt   *time.Time `json:"resolved_at"`
-	HumanLabel   string     `json:"human_label,omitempty"` // kategori dari label manual
-	HumanNote    string     `json:"human_note,omitempty"`
-	LabeledBy    string     `json:"labeled_by,omitempty"`
-	LocalOnly    bool       `json:"local_only"` // hanya terlihat di run lokal; tidak masuk daftar tim
-}
-
-// Occurrence adalah satu kemunculan kegagalan di satu run.
-type Occurrence struct {
-	RunID         int64     `json:"run_id"`
-	RunCreatedAt  time.Time `json:"run_created_at"`
-	Source        string    `json:"source"`
-	Branch        string    `json:"branch"`
-	CommitSHA     string    `json:"commit"`
-	AppVersion    string    `json:"app_version"`
-	Status        string    `json:"status"`
-	Retries       int       `json:"retries"`
-	ErrorLocation string    `json:"error_location"`
-	ErrorSnippet  string    `json:"error_snippet"`
-	TracePath     string    `json:"trace_path"`
-	Screenshots   []string  `json:"screenshots"`
-}
-
-const runColumns = `id, created_at, started_at, duration_ms, source, triggered_by, ci_url, branch, commit_sha,
-	app_version, playwright_version, total, passed, failed, flaky, skipped, report_errors`
-
+// ListRuns mengembalikan run terbaru dulu.
 func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+runColumns+` FROM runs ORDER BY id DESC LIMIT $1`, limit)
+	res, err := s.query(ctx, `MATCH (r:Run) RETURN r ORDER BY r.id DESC LIMIT $limit`, map[string]any{"limit": limit})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	runs := []Run{}
-	for rows.Next() {
-		var r Run
-		if err := rows.Scan(&r.ID, &r.CreatedAt, &r.StartedAt, &r.DurationMs, &r.Source, &r.TriggeredBy, &r.CIURL,
-			&r.Branch, &r.CommitSHA,
-			&r.AppVersion, &r.PlaywrightVersion, &r.Total, &r.Passed, &r.Failed, &r.Flaky, &r.Skipped,
-			&r.ReportErrors); err != nil {
-			return nil, err
+	for _, rec := range res.Records {
+		node, _ := rec.Get("r")
+		p := node.(neo4j.Node).Props
+		r := Run{
+			ID: i64(p, "id"), CreatedAt: local(p["createdAt"]), DurationMs: int(i64(p, "durationMs")),
+			Source: str(p, "source"), TriggeredBy: str(p, "triggeredBy"), CIURL: str(p, "ciURL"),
+			Branch: str(p, "branch"), CommitSHA: str(p, "commit"), AppVersion: str(p, "appVersion"),
+			PlaywrightVersion: str(p, "playwrightVersion"), Total: int(i64(p, "total")), Passed: int(i64(p, "passed")),
+			Failed: int(i64(p, "failed")), Flaky: int(i64(p, "flaky")), Skipped: int(i64(p, "skipped")),
+			ReportErrors: strs(p, "reportErrors"),
+		}
+		if v, ok := p["startedAt"]; ok && v != nil {
+			t := local(v)
+			r.StartedAt = &t
 		}
 		runs = append(runs, r)
 	}
-	return runs, rows.Err()
+	return runs, nil
 }
 
-// groupSelect: kolom kelompok kegagalan, dengan waktu diambil dari run terkait.
-// Tambahkan WHERE/ORDER BY dengan alias g.
-const groupSelect = `SELECT g.id, ` + testKeyG + `, g.project, g.file, g.title, g.status, g.last_error, g.cause,
-	g.occurrences, g.regressions, g.first_seen_run, g.last_seen_run, g.resolved_run,
-	fr.created_at, lr.created_at, rr.created_at,
-	coalesce(g.manual_category, ''), g.manual_note, g.labeled_by, g.local_only, g.test_case_id
-	FROM failure_groups g
-	JOIN runs fr ON fr.id = g.first_seen_run
-	JOIN runs lr ON lr.id = g.last_seen_run
-	LEFT JOIN runs rr ON rr.id = g.resolved_run`
+// failureReturn: kolom kelompok kegagalan beserta waktu dari run terkait. Dipakai setelah MATCH (f:Failure).
+const failureReturn = `
+	OPTIONAL MATCH (fr:Run {id: f.firstSeenRun})
+	OPTIONAL MATCH (lr:Run {id: f.lastSeenRun})
+	OPTIONAL MATCH (rr:Run {id: f.resolvedRun})
+	RETURN f, fr.createdAt AS firstAt, lr.createdAt AS lastAt, rr.createdAt AS resolvedAt`
 
-const testKeyG = `g.project || ' › ' || g.file || ' › ' || g.title`
-
-func scanGroup(row pgx.Row) (Group, error) {
-	var g Group
-	err := row.Scan(&g.Fingerprint, &g.TestKey, &g.Project, &g.File, &g.Title, &g.Status, &g.SampleError, &g.Cause,
-		&g.Occurrences, &g.Regressions, &g.FirstSeenRun, &g.LastSeenRun, &g.ResolvedRun,
-		&g.FirstSeenAt, &g.LastSeenAt, &g.ResolvedAt, &g.HumanLabel, &g.HumanNote, &g.LabeledBy, &g.LocalOnly, &g.TestCaseID)
+func toGroup(rec *neo4j.Record) Group {
+	node, _ := rec.Get("f")
+	p := node.(neo4j.Node).Props
+	g := Group{
+		Fingerprint: str(p, "id"), Project: str(p, "project"), File: str(p, "file"), Title: str(p, "title"),
+		TestCaseID: str(p, "caseId"), Status: str(p, "status"), SampleError: str(p, "lastError"),
+		Cause: str(p, "cause"), Occurrences: int(i64(p, "occurrences")), Regressions: int(i64(p, "regressions")),
+		FirstSeenRun: i64(p, "firstSeenRun"), LastSeenRun: i64(p, "lastSeenRun"),
+		HumanLabel: str(p, "manualCategory"), HumanNote: str(p, "manualNote"), LabeledBy: str(p, "labeledBy"),
+		LocalOnly: p["localOnly"] == true,
+	}
+	g.TestKey = g.Project + " › " + g.File + " › " + g.Title
 	g.Summary = Summarize(g.SampleError)
-	return g, err
+	if v, ok := p["resolvedRun"]; ok && v != nil {
+		id := v.(int64)
+		g.ResolvedRun = &id
+	}
+	firstAt, _ := rec.Get("firstAt")
+	lastAt, _ := rec.Get("lastAt")
+	g.FirstSeenAt, g.LastSeenAt = local(firstAt), local(lastAt)
+	if resolvedAt, _ := rec.Get("resolvedAt"); resolvedAt != nil {
+		t := local(resolvedAt)
+		g.ResolvedAt = &t
+	}
+	return g
 }
 
-// ListGroups mengembalikan kelompok kegagalan bersama (tanpa local_only).
+// ListGroups mengembalikan kelompok kegagalan bersama (tanpa localOnly).
 // statuses kosong = open + regressed (yang perlu dikerjakan).
 func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([]Group, error) {
 	if len(statuses) == 0 {
@@ -125,51 +79,71 @@ func (s *Store) ListGroups(ctx context.Context, statuses []string, limit int) ([
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, groupSelect+`
-		WHERE g.status = ANY($1) AND NOT g.local_only ORDER BY g.last_seen_run DESC LIMIT $2`, statuses, limit)
+	res, err := s.query(ctx, `
+		MATCH (f:Failure) WHERE f.status IN $statuses AND NOT f.localOnly
+		WITH f ORDER BY f.lastSeenRun DESC LIMIT $limit`+failureReturn+`
+		ORDER BY f.lastSeenRun DESC`, map[string]any{"statuses": statuses, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	groups := []Group{}
-	for rows.Next() {
-		g, err := scanGroup(rows)
-		if err != nil {
-			return nil, err
-		}
+	for _, rec := range res.Records {
+		g := toGroup(rec)
 		g.SampleError = "" // daftar cukup ringkasan
 		groups = append(groups, g)
 	}
-	return groups, rows.Err()
+	return groups, nil
 }
 
-// GetGroup mengembalikan satu kelompok beserta kemunculan terakhirnya.
+// GetGroup mengembalikan satu kelompok beserta 20 kemunculan terakhirnya.
 func (s *Store) GetGroup(ctx context.Context, fingerprint string) (Group, []Occurrence, error) {
-	g, err := scanGroup(s.pool.QueryRow(ctx, groupSelect+` WHERE g.id = $1`, fingerprint))
-	if err == pgx.ErrNoRows {
+	res, err := s.query(ctx, `MATCH (f:Failure {id: $id})`+failureReturn, map[string]any{"id": fingerprint})
+	if err != nil {
+		return Group{}, nil, err
+	}
+	if len(res.Records) == 0 {
 		return Group{}, nil, ErrNotFound
 	}
+	g := toGroup(res.Records[0])
+
+	res, err = s.query(ctx, `
+		MATCH (r:Result {groupId: $id}) MATCH (run:Run {id: r.runId})
+		RETURN run, r ORDER BY run.id DESC LIMIT 20`, map[string]any{"id": fingerprint})
 	if err != nil {
 		return Group{}, nil, err
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT r.id, r.created_at, r.source, r.branch, r.commit_sha, r.app_version,
-		       t.status, t.retries, t.error_location, t.error_snippet, t.trace_path, t.screenshots
-		FROM test_results t JOIN runs r ON r.id = t.run_id
-		WHERE t.group_id = $1
-		ORDER BY r.id DESC LIMIT 20`, fingerprint)
-	if err != nil {
-		return Group{}, nil, err
-	}
-	defer rows.Close()
 	occ := []Occurrence{}
-	for rows.Next() {
-		var o Occurrence
-		if err := rows.Scan(&o.RunID, &o.RunCreatedAt, &o.Source, &o.Branch, &o.CommitSHA, &o.AppVersion,
-			&o.Status, &o.Retries, &o.ErrorLocation, &o.ErrorSnippet, &o.TracePath, &o.Screenshots); err != nil {
-			return Group{}, nil, err
-		}
-		occ = append(occ, o)
+	for _, rec := range res.Records {
+		runNode, _ := rec.Get("run")
+		resultNode, _ := rec.Get("r")
+		run, r := runNode.(neo4j.Node).Props, resultNode.(neo4j.Node).Props
+		occ = append(occ, Occurrence{
+			RunID: i64(run, "id"), RunCreatedAt: local(run["createdAt"]), Source: str(run, "source"),
+			Branch: str(run, "branch"), CommitSHA: str(run, "commit"), AppVersion: str(run, "appVersion"),
+			Status: str(r, "status"), Retries: int(i64(r, "retries")), ErrorLocation: str(r, "errorLocation"),
+			ErrorSnippet: str(r, "errorSnippet"), TracePath: str(r, "tracePath"), Screenshots: strs(r, "screenshots"),
+		})
 	}
-	return g, occ, rows.Err()
+	return g, occ, nil
+}
+
+func str(p map[string]any, k string) string {
+	v, _ := p[k].(string)
+	return v
+}
+
+func i64(p map[string]any, k string) int64 {
+	v, _ := p[k].(int64)
+	return v
+}
+
+func strs(p map[string]any, k string) []string {
+	out := []string{}
+	list, _ := p[k].([]any)
+	for _, v := range list {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

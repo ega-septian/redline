@@ -1,4 +1,4 @@
-package storetest
+package store_test
 
 import (
 	"context"
@@ -13,24 +13,12 @@ import (
 	"redline/internal/triage"
 )
 
-// AnalysisBackend menambah bagian yang dipakai analisis: fakta, hasil analisis, dan label manual.
-type AnalysisBackend interface {
-	Backend
-	Facts(ctx context.Context, fingerprint string) (*store.Facts, error)
-	SaveAnalysis(ctx context.Context, a store.Analysis) error
-	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
-	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
-}
-
-// AnalysisFactory membuat backend kosong (semua source mengubah status).
-type AnalysisFactory func(t *testing.T) AnalysisBackend
-
-// RunAnalysis menjalankan test fakta, hasil analisis, dan label terhadap satu implementasi.
-func RunAnalysis(t *testing.T, newBackend AnalysisFactory) {
-	t.Run("FactsChangeSignals", func(t *testing.T) { testFactsSignals(t, newBackend(t)) })
-	t.Run("FactsCodeMapAndSources", func(t *testing.T) { testFactsCodeMap(t, newBackend(t)) })
-	t.Run("Analyses", func(t *testing.T) { testAnalyses(t, newBackend(t)) })
-	t.Run("Labels", func(t *testing.T) { testLabels(t, newBackend(t)) })
+// TestAnalysis: fakta untuk analisis, hasil analisis, dan label manual.
+func TestAnalysis(t *testing.T) {
+	t.Run("FactsChangeSignals", func(t *testing.T) { testFactsSignals(t, newStore(t)) })
+	t.Run("FactsCodeMapAndSources", func(t *testing.T) { testFactsCodeMap(t, newStore(t)) })
+	t.Run("Analyses", func(t *testing.T) { testAnalyses(t, newStore(t)) })
+	t.Run("Labels", func(t *testing.T) { testLabels(t, newStore(t)) })
 }
 
 // withHashes memberi sidik jari kode test; judul di changed mendapat sidik jari yang berbeda.
@@ -51,7 +39,7 @@ func withHashes(rep *report.Report, changed ...string) *report.Report {
 }
 
 // lulus lalu gagal: run2-fixed (semua lulus) lalu run1-bug. Mengembalikan id kelompok per judul test.
-func passThenFail(t *testing.T, b Backend, changed ...string) (map[string]string, *store.IngestResult, *store.IngestResult) {
+func passThenFail(t *testing.T, b *store.Store, changed ...string) (map[string]string, *store.IngestResult, *store.IngestResult) {
 	t.Helper()
 	pass := ingest(t, b, withHashes(loadReport(t, "run2-fixed.json")), store.RunMeta{CommitSHA: "c1", AppVersion: "v1"})
 	fail := ingest(t, b, withHashes(loadReport(t, "run1-bug.json"), changed...), store.RunMeta{CommitSHA: "c1", AppVersion: "v2"})
@@ -62,7 +50,7 @@ func passThenFail(t *testing.T, b Backend, changed ...string) (map[string]string
 	return fps, pass, fail
 }
 
-func testFactsSignals(t *testing.T, b AnalysisBackend) {
+func testFactsSignals(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, pass, fail := passThenFail(t, b, "order dibayar")
 
@@ -112,7 +100,7 @@ func passedWithCalls(title, calls string) report.Spec {
 	return spec
 }
 
-func testFactsCodeMap(t *testing.T, b AnalysisBackend) {
+func testFactsCodeMap(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	brands := `[{"method":"GET","path":"/brands","status":200,"shape":[{"id":"number"}]}]`
 	brandsBroken := `[{"method":"GET","path":"/brands","status":500,"shape":{"message":"string"}}]`
@@ -181,7 +169,7 @@ func testFactsCodeMap(t *testing.T, b AnalysisBackend) {
 	}
 }
 
-func testAnalyses(t *testing.T, b AnalysisBackend) {
+func testAnalyses(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	fp := fps["order dibayar"]
@@ -218,7 +206,7 @@ func testAnalyses(t *testing.T, b AnalysisBackend) {
 	}
 }
 
-func testLabels(t *testing.T, b AnalysisBackend) {
+func testLabels(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	fp := fps["register user"]

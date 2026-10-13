@@ -22,7 +22,6 @@ import (
 	"redline/internal/config"
 	"redline/internal/contract"
 	"redline/internal/embed"
-	"redline/internal/graphstore"
 	"redline/internal/llm"
 	"redline/internal/store"
 )
@@ -126,60 +125,25 @@ func run(log *slog.Logger) error {
 	return httpSrv.Shutdown(shutdownCtx)
 }
 
-// dataStore adalah semua yang dibutuhkan server dari database. Dipenuhi oleh Postgres (store) dan Neo4j (graphstore).
-type dataStore interface {
-	api.Store
-	analysis.Store
-	Prune(ctx context.Context, before time.Time) (store.PruneResult, error)
-}
-
-// openStore membuka database sesuai STORE, menjalankan migrasi, dan mengembalikan fungsi penutupnya.
-func openStore(ctx context.Context, cfg config.Config, log *slog.Logger) (dataStore, func(), error) {
-	if cfg.Store == "neo4j" {
-		db, err := graphstore.Open(ctx, graphstore.Config{URI: cfg.Neo4jURI, Username: cfg.Neo4jUsername,
-			Password: cfg.Neo4jPassword, Database: cfg.Neo4jDatabase, Reset: cfg.Neo4jDatabaseReset})
-		if err != nil {
-			return nil, nil, err
-		}
-		closeDB := func() { db.Close(context.Background()) }
-		if err := db.Migrate(ctx); err != nil {
-			closeDB()
-			return nil, nil, err
-		}
-		db.StatusSources = cfg.StatusSources
-		log.Info("data disimpan di Neo4j", "uri", cfg.Neo4jURI, "database", cfg.Neo4jDatabase, "reset", cfg.Neo4jDatabaseReset)
-		return db, closeDB, nil
-	}
-
-	dbURL, err := store.WithTimezone(cfg.DatabaseURL, cfg.Timezone)
+// openStore membuka database Neo4j, menjalankan migrasi, dan mengembalikan fungsi penutupnya.
+func openStore(ctx context.Context, cfg config.Config, log *slog.Logger) (*store.Store, func(), error) {
+	db, err := store.Open(ctx, store.Config{URI: cfg.Neo4jURI, Username: cfg.Neo4jUsername,
+		Password: cfg.Neo4jPassword, Database: cfg.Neo4jDatabase, Reset: cfg.Neo4jDatabaseReset})
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.DatabaseSchema != "" {
-		if dbURL, err = store.PrepareSchema(ctx, dbURL, cfg.DatabaseSchema, cfg.DatabaseSchemaReset); err != nil {
-			return nil, nil, err
-		}
-		log.Info("memakai schema database terpisah", "schema", cfg.DatabaseSchema, "reset", cfg.DatabaseSchemaReset)
-	}
-	db, err := store.Open(ctx, dbURL)
-	if err != nil {
-		return nil, nil, err
-	}
+	closeDB := func() { db.Close(context.Background()) }
 	if err := db.Migrate(ctx); err != nil {
-		db.Close()
-		return nil, nil, err
-	}
-	if err := db.SetDatabaseTimezone(ctx, cfg.Timezone); err != nil {
-		db.Close()
+		closeDB()
 		return nil, nil, err
 	}
 	db.StatusSources = cfg.StatusSources
-	log.Info("data disimpan di Postgres")
-	return db, db.Close, nil
+	log.Info("database Neo4j", "uri", cfg.Neo4jURI, "database", cfg.Neo4jDatabase, "reset", cfg.Neo4jDatabaseReset)
+	return db, closeDB, nil
 }
 
 // pruneLoop menjalankan retensi saat start lalu setiap 24 jam.
-func pruneLoop(ctx context.Context, db dataStore, days int, log *slog.Logger) {
+func pruneLoop(ctx context.Context, db *store.Store, days int, log *slog.Logger) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {

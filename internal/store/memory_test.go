@@ -1,4 +1,4 @@
-package storetest
+package store_test
 
 import (
 	"context"
@@ -11,30 +11,16 @@ import (
 	"redline/internal/store"
 )
 
-// MemoryBackend menambah kontrak per run, embedding untuk kasus mirip, dan retensi.
-type MemoryBackend interface {
-	ProofBackend
-	SaveRunContract(ctx context.Context, runID int64, project, sourceURL, document string) (string, error)
-	RunContract(ctx context.Context, runID int64, project string) (id, document string, err error)
-	PendingEmbeddings(ctx context.Context, model string, limit int) ([]store.GroupError, error)
-	SaveEmbeddings(ctx context.Context, model string, ids []string, vectors [][]float32) error
-	SimilarCases(ctx context.Context, groupID, model string, minSimilarity float64, limit int) ([]store.SimilarCase, error)
-	Prune(ctx context.Context, before time.Time) (store.PruneResult, error)
-	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
+// TestMemory: kontrak per run, embedding dan kasus mirip, serta retensi.
+func TestMemory(t *testing.T) {
+	t.Run("Contracts", func(t *testing.T) { testContracts(t, newStore(t)) })
+	t.Run("Embeddings", func(t *testing.T) { testEmbeddings(t, newStore(t)) })
+	t.Run("SimilarCases", func(t *testing.T) { testSimilarCases(t, newStore(t)) })
+	t.Run("PruneKeepsWhatAnalysisNeeds", func(t *testing.T) { testPruneKeeps(t, newStore(t)) })
+	t.Run("PruneRemovesOrphans", func(t *testing.T) { testPruneOrphans(t, newStore(t)) })
 }
 
-type MemoryFactory func(t *testing.T) MemoryBackend
-
-// RunMemory menjalankan test kontrak, kasus mirip, dan retensi terhadap satu implementasi.
-func RunMemory(t *testing.T, newBackend MemoryFactory) {
-	t.Run("Contracts", func(t *testing.T) { testContracts(t, newBackend(t)) })
-	t.Run("Embeddings", func(t *testing.T) { testEmbeddings(t, newBackend(t)) })
-	t.Run("SimilarCases", func(t *testing.T) { testSimilarCases(t, newBackend(t)) })
-	t.Run("PruneKeepsWhatAnalysisNeeds", func(t *testing.T) { testPruneKeeps(t, newBackend(t)) })
-	t.Run("PruneRemovesOrphans", func(t *testing.T) { testPruneOrphans(t, newBackend(t)) })
-}
-
-func testContracts(t *testing.T, b MemoryBackend) {
+func testContracts(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	run1 := ingest(t, b, shopReport(passedTest("a")), store.RunMeta{}).RunID
 	run2 := ingest(t, b, shopReport(passedTest("a")), store.RunMeta{}).RunID
@@ -67,7 +53,7 @@ func testContracts(t *testing.T, b MemoryBackend) {
 	}
 }
 
-func testEmbeddings(t *testing.T, b MemoryBackend) {
+func testEmbeddings(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	order := fps["order dibayar"]
@@ -99,7 +85,7 @@ func testEmbeddings(t *testing.T, b MemoryBackend) {
 	}
 }
 
-func testSimilarCases(t *testing.T, b MemoryBackend) {
+func testSimilarCases(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	fps, _, _ := passThenFail(t, b)
 	order, brands, register := fps["order dibayar"], fps["brands punya slug"], fps["register user"]
@@ -150,7 +136,7 @@ func testSimilarCases(t *testing.T, b MemoryBackend) {
 }
 
 // cutoff: waktu sesudah run terakhir yang sudah ada, menurut jam database (bukan jam laptop).
-func cutoff(t *testing.T, b MemoryBackend) time.Time {
+func cutoff(t *testing.T, b *store.Store) time.Time {
 	t.Helper()
 	runs, err := b.ListRuns(context.Background(), 1)
 	if err != nil || len(runs) == 0 {
@@ -160,7 +146,7 @@ func cutoff(t *testing.T, b MemoryBackend) time.Time {
 	return runs[0].CreatedAt.Add(time.Millisecond)
 }
 
-func testPruneKeeps(t *testing.T, b MemoryBackend) {
+func testPruneKeeps(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	ok := `[{"method":"GET","path":"/brands","status":200,"shape":[{"id":"number","slug":"string"}]}]`
 	broken := `[{"method":"GET","path":"/brands","status":200,"shape":[{"id":"number"}]}]`
@@ -212,7 +198,7 @@ func testPruneKeeps(t *testing.T, b MemoryBackend) {
 	}
 }
 
-func testPruneOrphans(t *testing.T, b MemoryBackend) {
+func testPruneOrphans(t *testing.T, b *store.Store) {
 	ctx := context.Background()
 	msg := "expect(received).toBe(expected)\nExpected: 200\nReceived: 500"
 	run := func(version string) {

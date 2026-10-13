@@ -10,15 +10,10 @@ import (
 )
 
 type Config struct {
-	Port        string
-	DatabaseURL string
-	// DatabaseSchema: schema terpisah (misalnya untuk benchmark). Kosong = public.
-	// DatabaseSchemaReset MENGHAPUS isi schema itu saat server start.
-	DatabaseSchema      string
-	DatabaseSchemaReset bool
+	Port string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
-	// RetentionDays: detail test_results lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
+	// RetentionDays: detail hasil test lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
 	RetentionDays int
 	// StatusSources: source run yang boleh mengubah status kelompok bersama. Kosong = semua.
 	StatusSources []string
@@ -30,17 +25,13 @@ type Config struct {
 	AnthropicModel   string
 	AnthropicBaseURL string
 
-	// Neo4j (DozerDB), sedang dibangun untuk menggantikan Postgres. Kosong = tidak dipakai.
-	// Selama tahap pengembangan, server hanya terhubung dan menjalankan migrasi; data tetap di Postgres.
+	// Database: Neo4j (DozerDB). Default cocok dengan docker-compose.yml.
 	Neo4jURI      string
 	Neo4jUsername string
 	Neo4jPassword string
 	Neo4jDatabase string
 	// Neo4jDatabaseReset MENGHAPUS isi database Neo4j itu saat server start (untuk benchmark).
 	Neo4jDatabaseReset bool
-
-	// Store: tempat data disimpan, "postgres" (default) atau "neo4j".
-	Store string
 
 	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
 	OpenAPISpecs string
@@ -65,13 +56,6 @@ func Load() (Config, error) {
 	if err != nil || retention < 0 {
 		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
 	}
-	store := strings.ToLower(getenv("STORE", "postgres"))
-	if store != "postgres" && store != "neo4j" {
-		return Config{}, fmt.Errorf("STORE harus postgres atau neo4j, dapat %q", store)
-	}
-	if store == "neo4j" && os.Getenv("NEO4J_URI") == "" {
-		return Config{}, fmt.Errorf("STORE=neo4j butuh NEO4J_URI")
-	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
 		for _, s := range strings.Split(from, ",") {
@@ -85,11 +69,7 @@ func Load() (Config, error) {
 		RetentionDays: retention,
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
-		DatabaseURL:   getenv("DATABASE_URL", "postgres://redline:redline@localhost:5433/redline?sslmode=disable"),
 		MaxReportMB:   maxMB,
-
-		DatabaseSchema:      os.Getenv("DATABASE_SCHEMA"),
-		DatabaseSchemaReset: os.Getenv("DATABASE_SCHEMA_RESET") == "1",
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
@@ -97,13 +77,12 @@ func Load() (Config, error) {
 
 		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
 
-		Neo4jURI:      os.Getenv("NEO4J_URI"),
+		Neo4jURI:      getenv("NEO4J_URI", "bolt://localhost:7688"),
 		Neo4jUsername: getenv("NEO4J_USERNAME", "neo4j"),
-		Neo4jPassword: os.Getenv("NEO4J_PASSWORD"),
+		Neo4jPassword: getenv("NEO4J_PASSWORD", "redline-local"),
 		Neo4jDatabase: getenv("NEO4J_DATABASE", "redline"),
 
 		Neo4jDatabaseReset: os.Getenv("NEO4J_DATABASE_RESET") == "1",
-		Store:              store,
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),

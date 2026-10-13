@@ -2,74 +2,22 @@ package store
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"redline/internal/report"
 	"redline/internal/triage"
 )
 
-// RunMeta adalah informasi tambahan tentang run. Semuanya opsional.
-type RunMeta struct {
-	Source      string `json:"source"`       // local / ci
-	TriggeredBy string `json:"triggered_by"` // siapa yang menjalankan: user, atau ci:<actor>
-	CIURL       string `json:"ci_url"`       // halaman run CI (log + artifact)
-	Branch      string `json:"branch"`
-	CommitSHA   string `json:"commit"`
-	AppVersion  string `json:"app_version"`
-}
-
-// GroupChange adalah kelompok kegagalan yang statusnya berubah karena run ini.
-type GroupChange struct {
-	Fingerprint string `json:"fingerprint"`
-	TestKey     string `json:"test"`
-	TestCaseID  string `json:"test_case_id,omitempty"` // dari tag @TC-..., kalau ada
-	Error       string `json:"error,omitempty"`        // ringkasan error (sudah diredaksi)
-	Occurrences int    `json:"occurrences"`
-	Incident    string `json:"incident,omitempty"` // key insiden; kosong untuk resolved
-}
-
-// Incident adalah kegagalan beberapa test di run ini yang penyebabnya sama.
-type Incident struct {
-	Key   string `json:"key"`
-	Kind  string `json:"kind"` // connection, http, error
-	Label string `json:"label"`
-	Tests int    `json:"tests"`
-	// Representative: fingerprint yang cukup dianalisis mewakili seluruh insiden
-	// (regressed lebih dulu, lalu new, lalu recurring).
-	Representative string   `json:"representative"`
-	Fingerprints   []string `json:"fingerprints"`
-}
-
-// IngestResult adalah ringkasan setelah satu laporan disimpan.
-type IngestResult struct {
-	RunID   int64 `json:"run_id"`
-	Total   int   `json:"total"`
-	Passed  int   `json:"passed"`
-	Failed  int   `json:"failed"`
-	Flaky   int   `json:"flaky"`
-	Skipped int   `json:"skipped"`
-
-	New        []GroupChange `json:"new"`       // kegagalan yang belum pernah terlihat
-	Recurring  []GroupChange `json:"recurring"` // masih gagal dengan error yang sama
-	Regressed  []GroupChange `json:"regressed"` // pernah beres, sekarang gagal lagi
-	Resolved   []GroupChange `json:"resolved"`  // dulu gagal, sekarang lulus
-	FlakyTests []string      `json:"flaky_tests"`
-	Incidents  []Incident    `json:"incidents"` // kegagalan run ini, dikelompokkan per penyebab, terbesar dulu
-	// SharedStatus false: run ini (misalnya lokal) tidak mengubah status bersama;
-	// New/Recurring/Regressed/Resolved hanya pratinjau.
-	SharedStatus bool `json:"shared_status"`
-}
-
-// IngestReport menyimpan satu laporan Playwright dan memperbarui status kelompok kegagalan.
-// Semuanya dalam satu transaksi: kalau ada yang gagal, tidak ada yang tersimpan.
+// IngestReport menyimpan satu laporan Playwright dan memperbarui status kelompok kegagalan, dengan aturan
+// yang sama persis seperti versi Postgres di v0.1.0. Semuanya dalam satu transaksi.
+//
+// Graph yang dibuat:
+//
+//	(:Run)-[:HAS]->(:Result)-[:OF]->(:Test)   (:Result)-[:RETURNED]->(:Shape)
+//	(:Failure)-[:OF]->(:Test)                 (:SourceFile) disimpan sekali per isi
 func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMeta) (*IngestResult, error) {
 	if meta.Source == "" {
 		meta.Source = "local"
@@ -80,42 +28,49 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 		Resolved: []GroupChange{}, FlakyTests: []string{}, Incidents: []Incident{},
 	}
 	incidents := NewIncidentSet()
-	shapes := map[string]bool{} // isi calls JSON unik di run ini
 	shared := s.SharesStatus(meta.Source)
 	res.SharedStatus = shared
 
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		var started *time.Time
+	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		runID, err := nextID(ctx, tx, "run")
+		if err != nil {
+			return nil, fmt.Errorf("nomor run: %w", err)
+		}
+		res.RunID = runID
+		var started any
 		if !rep.Stats.StartTime.IsZero() {
-			started = &rep.Stats.StartTime
+			started = rep.Stats.StartTime.UTC() // Neo4j tidak mengenal zona waktu "Local" milik Go
 		}
 		reportErrors := []string{}
 		for _, e := range rep.Errors {
 			reportErrors = append(reportErrors, triage.Clean(e.Message))
 		}
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO runs (started_at, duration_ms, source, triggered_by, ci_url, branch, commit_sha, app_version,
-				playwright_version, report_errors)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-			started, int(rep.Stats.Duration), meta.Source, meta.TriggeredBy, meta.CIURL, meta.Branch, meta.CommitSHA,
-			meta.AppVersion, rep.Config.Version, reportErrors,
-		).Scan(&res.RunID); err != nil {
-			return fmt.Errorf("simpan run: %w", err)
+		if _, err := tx.Run(ctx, `
+			CREATE (:Run {id: $id, createdAt: datetime(), startedAt: $startedAt, durationMs: $durationMs,
+				source: $source, triggeredBy: $triggeredBy, ciURL: $ciURL, branch: $branch, commit: $commit,
+				appVersion: $appVersion, playwrightVersion: $playwrightVersion, reportErrors: $reportErrors,
+				total: 0, passed: 0, failed: 0, flaky: 0, skipped: 0})`,
+			map[string]any{
+				"id": runID, "startedAt": started, "durationMs": int64(rep.Stats.Duration), "source": meta.Source,
+				"triggeredBy": meta.TriggeredBy, "ciURL": meta.CIURL, "branch": meta.Branch, "commit": meta.CommitSHA,
+				"appVersion": meta.AppVersion, "playwrightVersion": rep.Config.Version, "reportErrors": reportErrors,
+			}); err != nil {
+			return nil, fmt.Errorf("simpan run: %w", err)
 		}
 
 		sourceIDs, err := saveSources(ctx, tx, rep.Sources)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		var passed testList
+		passedKeys := []string{}
 		for _, o := range outcomes {
 			res.Total++
 			fingerprint, cleanMsg, incidentKey := "", "", ""
 			switch o.Status {
 			case report.StatusPassed:
 				res.Passed++
-				passed.add(o)
+				passedKeys = append(passedKeys, o.Key())
 			case report.StatusSkipped:
 				res.Skipped++
 			case report.StatusFlaky:
@@ -134,12 +89,12 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					incidents.Add(incidentKey, kind, triage.Clean(label))
 				}
 			}
-			// Hanya kegagalan murni yang membuka/memperbarui kelompok.
-			// Flaky dicatat di test_results saja (group_id tetap disimpan untuk analisis nanti).
+			// Hanya kegagalan murni yang membuka/memperbarui kelompok; flaky hanya dicatat di hasil test.
 			if o.Status == report.StatusFailed && fingerprint != "" {
-				change, kind, err := upsertGroup(ctx, tx, res.RunID, o, fingerprint, cleanMsg, incidentKey, incidents.Label(incidentKey), shared)
+				change, kind, err := upsertFailure(ctx, tx, runID, o, fingerprint, cleanMsg, incidentKey,
+					incidents.Label(incidentKey), shared)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				incidents.Member(incidentKey, fingerprint, kind)
 				switch kind {
@@ -151,87 +106,22 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					res.Recurring = append(res.Recurring, change)
 				}
 			}
-			calls := CallsJSON(o.Calls)
-			if calls != "[]" {
-				shapes[calls] = true
-			}
-			screenshots := o.Screenshots
-			if screenshots == nil {
-				screenshots = []string{}
-			}
-			codeFiles := o.CodeFiles
-			if codeFiles == nil {
-				codeFiles = []string{}
-			}
-			// Isi kode hanya untuk test yang punya error (gagal atau flaky): itulah yang dianalisis.
-			sources := []string{}
-			if o.ErrorMessage != "" {
-				for _, p := range codeFiles {
-					if id, ok := sourceIDs[p]; ok {
-						sources = append(sources, id)
-					}
-				}
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO test_results (run_id, test_key, status, retries, duration_ms,
-					error_message, error_snippet, error_location, group_id, cause_id, test_code_hash,
-					response_shape_id, trace_path, screenshots, code_files, source_ids, test_case_id)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-					CASE WHEN $12::jsonb = '[]'::jsonb THEN '' ELSE md5($12::jsonb::text) END, $13, $14, $15, $16, $17)`,
-				res.RunID, o.Key(), o.Status, o.Retries, o.DurationMs,
-				cleanMsg, triage.Clean(o.ErrorSnippet), o.ErrorLocation, fingerprint, incidentKey, o.SourceHash,
-				calls, o.TracePath, screenshots, codeFiles, sources, o.TestCaseID,
-			); err != nil {
-				return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
+			if err := saveResult(ctx, tx, runID, o, fingerprint, cleanMsg, incidentKey, sourceIDs); err != nil {
+				return nil, err
 			}
 		}
 
-		// Satu query untuk semua bentuk unik; yang sudah ada dari run sebelumnya dilewati.
-		if len(shapes) > 0 {
-			list := make([]string, 0, len(shapes))
-			for c := range shapes {
-				list = append(list, c)
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO response_shapes (id, shape)
-				SELECT md5(c::jsonb::text), c::jsonb FROM unnest($1::text[]) AS c
-				ON CONFLICT (id) DO NOTHING`, list); err != nil {
-				return fmt.Errorf("simpan bentuk response: %w", err)
-			}
+		resolved, err := resolvePassed(ctx, tx, runID, passedKeys, shared)
+		if err != nil {
+			return nil, err
 		}
+		res.Resolved = resolved
 
-		// Test yang lulus bersih menutup semua kelompok kegagalannya yang masih terbuka.
-		// Run yang tidak mengubah status bersama hanya menampilkan pratinjaunya.
-		if len(passed.project) > 0 {
-			const match = `(project, file, title) IN (SELECT * FROM unnest($2::text[], $3::text[], $4::text[]))
-				AND status IN ('open', 'regressed') AND last_seen_run <> $1`
-			query := `UPDATE failure_groups SET status = 'resolved', resolved_run = $1
-				WHERE ` + match + ` RETURNING id, ` + testKeySQL + `, last_error, occurrences`
-			if !shared {
-				query = `SELECT id, ` + testKeySQL + `, last_error, occurrences FROM failure_groups WHERE ` + match
-			}
-			rows, err := tx.Query(ctx, query, res.RunID, passed.project, passed.file, passed.title)
-			if err != nil {
-				return fmt.Errorf("tutup kelompok yang sudah lulus: %w", err)
-			}
-			for rows.Next() {
-				var c GroupChange
-				if err := rows.Scan(&c.Fingerprint, &c.TestKey, &c.Error, &c.Occurrences); err != nil {
-					rows.Close()
-					return err
-				}
-				c.Error = Summarize(c.Error)
-				res.Resolved = append(res.Resolved, c)
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return err
-			}
-		}
-
-		_, err = tx.Exec(ctx, `UPDATE runs SET total=$2, passed=$3, failed=$4, flaky=$5, skipped=$6 WHERE id=$1`,
-			res.RunID, res.Total, res.Passed, res.Failed, res.Flaky, res.Skipped)
-		return err
+		_, err = tx.Run(ctx, `MATCH (r:Run {id: $id})
+			SET r.total = $total, r.passed = $passed, r.failed = $failed, r.flaky = $flaky, r.skipped = $skipped`,
+			map[string]any{"id": runID, "total": res.Total, "passed": res.Passed, "failed": res.Failed,
+				"flaky": res.Flaky, "skipped": res.Skipped})
+		return nil, err
 	})
 	if err != nil {
 		return nil, err
@@ -240,92 +130,142 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 	return res, nil
 }
 
-// MaxSourceBytes: file yang lebih besar dari ini tidak disimpan (bukan file test biasa).
-const MaxSourceBytes = 50_000
-
-// SourceID menyamarkan isi file kode test dan menghitung id-nya (md5 dari path + isi yang sudah disamarkan).
-// File yang sama di run lain mendapat id yang sama, jadi disimpan sekali.
-func SourceID(path, content string) (id, clean string) {
-	clean = triage.Redact(content)
-	sum := md5.Sum([]byte(path + "\x00" + clean))
-	return hex.EncodeToString(sum[:]), clean
-}
-
-// ShapeID menghitung id bentuk response (hasil CallsJSON), supaya bentuk yang sama disimpan sekali.
-func ShapeID(calls string) string {
-	sum := md5.Sum([]byte(calls))
-	return hex.EncodeToString(sum[:])
-}
-
-// saveSources menyimpan isi file kode test (sudah disamarkan) sekali per isi, lalu mengembalikan
-// path -> id. File yang sama di run berikutnya tidak disimpan ulang.
-func saveSources(ctx context.Context, tx pgx.Tx, sources map[string]string) (map[string]string, error) {
+// saveSources menyimpan isi file kode test (sudah disamarkan) sekali per isi, lalu mengembalikan path -> id.
+func saveSources(ctx context.Context, tx neo4j.ManagedTransaction, sources map[string]string) (map[string]string, error) {
 	ids := map[string]string{}
-	var idList, paths, contents []string
+	rows := []map[string]any{}
 	for p, content := range sources {
 		if p == "" || len(content) > MaxSourceBytes {
 			continue
 		}
 		id, clean := SourceID(p, content)
 		ids[p] = id
-		idList, paths, contents = append(idList, id), append(paths, p), append(contents, clean)
+		rows = append(rows, map[string]any{"id": id, "path": p, "content": clean})
 	}
-	if len(idList) == 0 {
+	if len(rows) == 0 {
 		return ids, nil
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO source_files (id, path, content)
-		SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
-		ON CONFLICT (id) DO NOTHING`, idList, paths, contents); err != nil {
+	if _, err := tx.Run(ctx, `UNWIND $rows AS row
+		MERGE (f:SourceFile {id: row.id}) ON CREATE SET f.path = row.path, f.content = row.content`,
+		map[string]any{"rows": rows}); err != nil {
 		return nil, fmt.Errorf("simpan kode test: %w", err)
 	}
 	return ids, nil
 }
 
-// CallsJSON menyimpan bentuk response. Path diredaksi (jaga-jaga ada email atau token di path).
-func CallsJSON(calls []report.HTTPCall) string {
-	clean := make([]report.HTTPCall, 0, len(calls))
-	for _, c := range calls {
-		if !json.Valid(c.Shape) {
-			c.Shape = json.RawMessage("null")
-		}
-		c.Path = triage.Clean(c.Path)
-		clean = append(clean, c)
-	}
-	b, err := json.Marshal(clean)
+// saveResult menyimpan hasil satu test di run ini, beserta test-nya dan bentuk response-nya.
+func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o report.Outcome,
+	fingerprint, cleanMsg, incidentKey string, sourceIDs map[string]string) error {
+	id, err := nextID(ctx, tx, "result")
 	if err != nil {
-		return "[]"
+		return err
 	}
-	return string(b)
+	codeFiles := o.CodeFiles
+	if codeFiles == nil {
+		codeFiles = []string{}
+	}
+	// Isi kode hanya untuk test yang punya error (gagal atau flaky): itulah yang dianalisis.
+	sources := []string{}
+	if o.ErrorMessage != "" {
+		for _, p := range codeFiles {
+			if sid, ok := sourceIDs[p]; ok {
+				sources = append(sources, sid)
+			}
+		}
+	}
+	screenshots := o.Screenshots
+	if screenshots == nil {
+		screenshots = []string{}
+	}
+	calls := CallsJSON(o.Calls)
+	shapeID := ""
+	if calls != "[]" {
+		shapeID = ShapeID(calls)
+	}
+	if _, err := tx.Run(ctx, `
+		MATCH (run:Run {id: $runId})
+		MERGE (t:Test {key: $key}) ON CREATE SET t.project = $project, t.file = $file, t.title = $title
+		SET t.caseId = $caseId
+		CREATE (run)-[:HAS]->(r:Result {id: $id, runId: $runId, testKey: $key, status: $status, retries: $retries,
+			durationMs: $durationMs, errorMessage: $errorMessage, errorSnippet: $errorSnippet,
+			errorLocation: $errorLocation, groupId: $groupId, causeId: $causeId, testCodeHash: $testCodeHash,
+			shapeId: $shapeId, tracePath: $tracePath, screenshots: $screenshots, codeFiles: $codeFiles,
+			sourceIds: $sourceIds, caseId: $caseId})-[:OF]->(t)
+		WITH r
+		OPTIONAL MATCH (f:Failure {id: $groupId})
+		FOREACH (_ IN CASE WHEN f IS NULL THEN [] ELSE [1] END | CREATE (r)-[:IN_GROUP]->(f))`,
+		map[string]any{
+			"runId": runID, "id": id, "key": o.Key(), "project": o.Project, "file": o.File, "title": o.Title,
+			"caseId": o.TestCaseID, "status": o.Status, "retries": o.Retries, "durationMs": o.DurationMs,
+			"errorMessage": cleanMsg, "errorSnippet": triage.Clean(o.ErrorSnippet), "errorLocation": o.ErrorLocation,
+			"groupId": fingerprint, "causeId": incidentKey, "testCodeHash": o.SourceHash, "shapeId": shapeID,
+			"tracePath": o.TracePath, "screenshots": screenshots, "codeFiles": codeFiles, "sourceIds": sources,
+		}); err != nil {
+		return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
+	}
+	// Peta kode: endpoint yang dipanggil dan file yang dipakai test ini, sebagai hubungan graph.
+	endpoints := []string{}
+	for _, c := range DecodeCalls([]byte(calls)) {
+		endpoints = append(endpoints, c.Method+" "+c.Path)
+	}
+	if len(endpoints)+len(codeFiles) > 0 {
+		if _, err := tx.Run(ctx, `
+			MATCH (r:Result {id: $id})
+			FOREACH (key IN $endpoints | MERGE (e:Endpoint {key: key}) MERGE (r)-[:CALLED]->(e))
+			FOREACH (path IN $files | MERGE (f:File {path: path}) MERGE (r)-[:USED]->(f))`,
+			map[string]any{"id": id, "endpoints": endpoints, "files": codeFiles}); err != nil {
+			return fmt.Errorf("simpan peta kode: %w", err)
+		}
+	}
+	if shapeID != "" {
+		if _, err := tx.Run(ctx, `
+			MERGE (s:Shape {id: $shapeId}) ON CREATE SET s.shape = $calls
+			WITH s MATCH (r:Result {id: $id}) CREATE (r)-[:RETURNED]->(s)`,
+			map[string]any{"shapeId": shapeID, "calls": calls, "id": id}); err != nil {
+			return fmt.Errorf("simpan bentuk response: %w", err)
+		}
+	}
+	return nil
 }
 
-// upsertGroup membuat kelompok baru atau memperbarui yang sudah ada.
-// kind: "new", "recurring", atau "regressed".
-// shared false: kelompok baru dibuat sebagai local_only dan kelompok yang ada tidak diubah.
-func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
+// upsertFailure membuat kelompok baru atau memperbarui yang sudah ada. kind: new, recurring, atau regressed.
+// shared false: kelompok baru dibuat sebagai localOnly dan kelompok yang ada tidak diubah.
+func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o report.Outcome,
+	fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
 	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), TestCaseID: o.TestCaseID,
 		Error: Summarize(cleanMsg), Incident: incidentKey}
 
-	var prevStatus string
-	var localOnly bool
-	err := tx.QueryRow(ctx, `SELECT status, local_only, occurrences FROM failure_groups WHERE id = $1 FOR UPDATE`,
-		fingerprint).Scan(&prevStatus, &localOnly, &change.Occurrences)
-	if err == pgx.ErrNoRows {
-		_, err = tx.Exec(ctx, `
-			INSERT INTO failure_groups (id, project, file, title, last_error, status, first_seen_run, last_seen_run,
-				cause_id, cause, local_only, test_case_id)
-			VALUES ($1, $2, $3, $4, $5, 'open', $6, $6, $7, $8, $9, $10)
-			ON CONFLICT (id) DO NOTHING`,
-			fingerprint, o.Project, o.File, o.Title, cleanMsg, runID, incidentKey, incidentLabel, !shared, o.TestCaseID)
-		if err != nil {
+	// SET ke nilai yang sama mengunci node (pengganti SELECT ... FOR UPDATE), supaya dua run yang masuk
+	// bersamaan tidak sama-sama mengira kelompok ini belum ada atau masih resolved.
+	cur, err := tx.Run(ctx, `MATCH (f:Failure {id: $id}) SET f.status = f.status
+		RETURN f.status AS status, f.localOnly AS localOnly, f.occurrences AS occurrences`,
+		map[string]any{"id": fingerprint})
+	if err != nil {
+		return change, "", err
+	}
+	if !cur.Next(ctx) {
+		if err := cur.Err(); err != nil {
+			return change, "", err
+		}
+		if _, err := tx.Run(ctx, `
+			MERGE (t:Test {key: $key}) ON CREATE SET t.project = $project, t.file = $file, t.title = $title
+			CREATE (f:Failure {id: $id, project: $project, file: $file, title: $title, lastError: $lastError,
+				status: 'open', occurrences: 1, regressions: 0, firstSeenRun: $runId, lastSeenRun: $runId,
+				causeId: $causeId, cause: $cause, manualNote: '', labeledBy: '', localOnly: $localOnly,
+				caseId: $caseId})-[:OF]->(t)`,
+			map[string]any{"key": o.Key(), "project": o.Project, "file": o.File, "title": o.Title, "id": fingerprint,
+				"lastError": cleanMsg, "runId": runID, "causeId": incidentKey, "cause": incidentLabel,
+				"localOnly": !shared, "caseId": o.TestCaseID}); err != nil {
 			return change, "", fmt.Errorf("buat kelompok %s: %w", fingerprint, err)
 		}
 		change.Occurrences = 1
 		return change, "new", nil
 	}
-	if err != nil {
-		return change, "", err
-	}
+	rec := cur.Record()
+	prevStatus, _ := rec.Get("status")
+	localOnly, _ := rec.Get("localOnly")
+	occ, _ := rec.Get("occurrences")
+	change.Occurrences = int(occ.(int64))
 
 	kind := "recurring"
 	if prevStatus == "resolved" {
@@ -334,145 +274,74 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, runID int64, o report.Outcome, 
 	if !shared {
 		return change, kind, nil
 	}
-	if localOnly {
+	params := map[string]any{"id": fingerprint, "runId": runID, "lastError": cleanMsg, "causeId": incidentKey,
+		"cause": incidentLabel, "caseId": o.TestCaseID}
+	if localOnly == true {
 		// Pertama kali terlihat di run yang mengubah status: mulai sebagai kelompok bersama yang baru.
-		_, err = tx.Exec(ctx, `
-			UPDATE failure_groups SET
-				local_only = false, status = 'open', occurrences = 1, regressions = 0,
-				first_seen_run = $2, last_seen_run = $2, last_error = $3, resolved_run = NULL,
-				cause_id = $4, cause = $5, test_case_id = $6
-			WHERE id = $1`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel, o.TestCaseID)
-		if err != nil {
+		if _, err := tx.Run(ctx, `MATCH (f:Failure {id: $id})
+			SET f.localOnly = false, f.status = 'open', f.occurrences = 1, f.regressions = 0,
+				f.firstSeenRun = $runId, f.lastSeenRun = $runId, f.lastError = $lastError, f.resolvedRun = null,
+				f.causeId = $causeId, f.cause = $cause, f.caseId = $caseId`, params); err != nil {
 			return change, "", fmt.Errorf("jadikan kelompok bersama %s: %w", fingerprint, err)
 		}
 		change.Occurrences = 1
 		return change, "new", nil
 	}
-	err = tx.QueryRow(ctx, `
-		UPDATE failure_groups SET
-			occurrences   = occurrences + 1,
-			last_seen_run = $2,
-			last_error    = $3,
-			status        = CASE WHEN status = 'resolved' THEN 'regressed' ELSE status END,
-			regressions   = regressions + CASE WHEN status = 'resolved' THEN 1 ELSE 0 END,
-			resolved_run  = NULL,
-			cause_id      = $4,
-			cause         = $5,
-			test_case_id  = $6 -- ikut tag terbaru (tag bisa ditambah setelah kelompok dibuat)
-		WHERE id = $1
-		RETURNING occurrences`, fingerprint, runID, cleanMsg, incidentKey, incidentLabel, o.TestCaseID).Scan(&change.Occurrences)
+	upd, err := tx.Run(ctx, `MATCH (f:Failure {id: $id})
+		WITH f, f.status = 'resolved' AS wasResolved
+		SET f.occurrences = f.occurrences + 1, f.lastSeenRun = $runId, f.lastError = $lastError,
+			f.status = CASE WHEN wasResolved THEN 'regressed' ELSE f.status END,
+			f.regressions = f.regressions + CASE WHEN wasResolved THEN 1 ELSE 0 END,
+			f.resolvedRun = null, f.causeId = $causeId, f.cause = $cause, f.caseId = $caseId
+		RETURN f.occurrences AS occurrences`, params)
 	if err != nil {
 		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
 	}
+	r, err := upd.Single(ctx)
+	if err != nil {
+		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
+	}
+	n, _ := r.Get("occurrences")
+	change.Occurrences = int(n.(int64))
 	return change, kind, nil
 }
 
-// Summarize meringkas pesan error menjadi satu baris: baris pertama, ditambah baris yang
-// paling informatif ("Expected: 201", "Received: 500", atau baris diff dari toEqual).
-func Summarize(s string) string {
-	var first string
-	var picked []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.Join(strings.Fields(line), " ")
-		if line == "" {
-			continue
-		}
-		if first == "" {
-			first = line
-			continue
-		}
-		if len(picked) < 3 && informative(line) {
-			picked = append(picked, line)
-		}
+// resolvePassed: test yang lulus bersih menutup kelompok kegagalannya yang masih terbuka.
+// Run yang tidak mengubah status bersama hanya menampilkan pratinjaunya.
+func resolvePassed(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, keys []string, shared bool) ([]GroupChange, error) {
+	out := []GroupChange{}
+	if len(keys) == 0 {
+		return out, nil
 	}
-	out := strings.Join(append([]string{first}, picked...), " | ")
-	if r := []rune(out); len(r) > 240 {
-		out = string(r[:240]) + "…"
+	set := ""
+	if shared {
+		set = "SET f.status = 'resolved', f.resolvedRun = $runId"
 	}
-	return out
+	cur, err := tx.Run(ctx, `UNWIND $keys AS key
+		MATCH (f:Failure)-[:OF]->(:Test {key: key})
+		WHERE f.status IN ['open', 'regressed'] AND f.lastSeenRun <> $runId
+		`+set+`
+		RETURN f.id AS id, key, f.lastError AS lastError, f.occurrences AS occurrences`,
+		map[string]any{"keys": keys, "runId": runID})
+	if err != nil {
+		return nil, fmt.Errorf("tutup kelompok yang sudah lulus: %w", err)
+	}
+	for cur.Next(ctx) {
+		rec := cur.Record()
+		id, _ := rec.Get("id")
+		key, _ := rec.Get("key")
+		lastError, _ := rec.Get("lastError")
+		occ, _ := rec.Get("occurrences")
+		out = append(out, GroupChange{Fingerprint: id.(string), TestKey: key.(string),
+			Error: Summarize(lastError.(string)), Occurrences: int(occ.(int64))})
+	}
+	return out, cur.Err()
 }
 
-func informative(line string) bool {
-	if strings.HasPrefix(line, "Expected") || strings.HasPrefix(line, "Received") {
-		return true
+// local mengubah waktu dari Neo4j ke zona waktu server (TIMEZONE).
+func local(v any) time.Time {
+	if t, ok := v.(time.Time); ok {
+		return t.In(time.Local)
 	}
-	// ZodError mencetak JSON; baris "message" berisi alasannya.
-	if strings.HasPrefix(line, `"message":`) {
-		return true
-	}
-	// Baris diff toEqual: "- \"status\": \"PAID\"," tapi bukan header "- Expected - 1".
-	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "+ ") {
-		rest := line[2:]
-		return !strings.HasPrefix(rest, "Expected") && !strings.HasPrefix(rest, "Received")
-	}
-	return false
-}
-
-// IncidentSet mengumpulkan insiden selama ingest, dengan urutan kemunculan dipertahankan.
-type IncidentSet struct {
-	order []string
-	byKey map[string]*Incident
-	rank  map[string]int // peringkat representative sekarang: 3 regressed, 2 new, 1 recurring
-}
-
-func NewIncidentSet() *IncidentSet {
-	return &IncidentSet{byKey: map[string]*Incident{}, rank: map[string]int{}}
-}
-
-func (s *IncidentSet) Add(key, kind, label string) {
-	if _, ok := s.byKey[key]; ok {
-		return
-	}
-	s.order = append(s.order, key)
-	s.byKey[key] = &Incident{Key: key, Kind: kind, Label: label, Fingerprints: []string{}}
-}
-
-func (s *IncidentSet) Label(key string) string {
-	if inc, ok := s.byKey[key]; ok {
-		return inc.Label
-	}
-	return ""
-}
-
-// member mencatat satu kelompok kegagalan. kind dari upsertGroup: new, recurring, regressed.
-func (s *IncidentSet) Member(key, fingerprint, kind string) {
-	inc, ok := s.byKey[key]
-	if !ok {
-		return
-	}
-	inc.Tests++
-	inc.Fingerprints = append(inc.Fingerprints, fingerprint)
-	r := map[string]int{"regressed": 3, "new": 2}[kind]
-	if r == 0 {
-		r = 1
-	}
-	if r > s.rank[key] {
-		s.rank[key] = r
-		inc.Representative = fingerprint
-	}
-}
-
-// list: insiden terbesar dulu; yang sama besar mengikuti urutan kemunculan.
-func (s *IncidentSet) List() []Incident {
-	out := make([]Incident, 0, len(s.order))
-	for _, k := range s.order {
-		if inc := s.byKey[k]; inc.Tests > 0 {
-			out = append(out, *inc)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Tests > out[j].Tests })
-	return out
-}
-
-// testKeySQL menyusun test_key ("project › file › judul") dari kolom failure_groups,
-// sama dengan report.Outcome.Key().
-const testKeySQL = `project || ' › ' || file || ' › ' || title`
-
-// testList mengumpulkan test sebagai tiga array sejajar, untuk dicocokkan dengan unnest di SQL.
-type testList struct{ project, file, title []string }
-
-func (l *testList) add(o report.Outcome) {
-	l.project = append(l.project, o.Project)
-	l.file = append(l.file, o.File)
-	l.title = append(l.title, o.Title)
+	return time.Time{}
 }
