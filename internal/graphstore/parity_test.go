@@ -16,3 +16,10 @@ func TestParity_Ingest(t *testing.T) {
 		return s
 	})
 }
+
+// TestParity_Analysis menjalankan test fakta, analisis, dan label yang sama dengan versi Postgres.
+func TestParity_Analysis(t *testing.T) {
+	storetest.RunAnalysis(t, func(t *testing.T) storetest.AnalysisBackend {
+		return graphstore.TestStore(context.Background(), t, "redlinetest-parity")
+	})
+}

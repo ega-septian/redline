@@ -204,6 +204,20 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 		}); err != nil {
 		return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
 	}
+	// Peta kode: endpoint yang dipanggil dan file yang dipakai test ini, sebagai hubungan graph.
+	endpoints := []string{}
+	for _, c := range store.DecodeCalls([]byte(calls)) {
+		endpoints = append(endpoints, c.Method+" "+c.Path)
+	}
+	if len(endpoints)+len(codeFiles) > 0 {
+		if _, err := tx.Run(ctx, `
+			MATCH (r:Result {id: $id})
+			FOREACH (key IN $endpoints | MERGE (e:Endpoint {key: key}) MERGE (r)-[:CALLED]->(e))
+			FOREACH (path IN $files | MERGE (f:File {path: path}) MERGE (r)-[:USED]->(f))`,
+			map[string]any{"id": id, "endpoints": endpoints, "files": codeFiles}); err != nil {
+			return fmt.Errorf("simpan peta kode: %w", err)
+		}
+	}
 	if shapeID != "" {
 		if _, err := tx.Run(ctx, `
 			MERGE (s:Shape {id: $shapeId}) ON CREATE SET s.shape = $calls
