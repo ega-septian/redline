@@ -118,7 +118,7 @@ func TestKnowledge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if k.RunID != fail.RunID || k.PassRunID != base.RunID {
+		if k.RunID != fail.RunID || k.PassRunID != base.RunID || !k.Compared {
 			t.Errorf("run gagal dan run lulus terakhir: %+v", k)
 		}
 		want := []store.FileFact{

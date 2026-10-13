@@ -90,7 +90,32 @@ confidence, and K02 flips between correct and unclear.
    in the graph (schema changed two imports deep, the direct test passes), because the direct test
    does not check the field the API lost. Graph facts must therefore never override a changed
    response; the existing response rules decide K06.
-3. Analysis: a "graph knowledge" section for Claude, and rules where the pattern is unambiguous.
+3. Analysis (done): `Knowledge` is part of the facts, Claude gets a "graph knowledge" section
+   (prompt v9), and three graph rules run after the response and contract rules, so they never
+   override a changed response:
+   - an endpoint fails for tests in other specs that do not use any changed file, and passes for
+     none of them → backend_bug;
+   - the test calls an endpoint that never passed before, and only code that changed calls it →
+     test_bug (path typo);
+   - code the test uses changed, the response shape did not, and the same endpoint passes for tests
+     without that code → test_bug (high when other users of the changed file also fail).
+
+## Results after stage 3
+
+| Scenario | Before KAG | With KAG | Wrong guesses |
+|---|---|---|---|
+| `kag`, three runs | 17/18, 15 of 18 decisions by AI | **18/18, all by rules (high), $0** | 0 |
+| Test that passed before (24) | 24/24 | 23/24 | 0 |
+| New test, no history (24) | 22/24 | 23/24 | 0 |
+| App upgrade (6) | 6/6 | 6/6 | 0 |
+
+- T06 (path typo, an existing case not written for KAG) is now decided by a graph rule instead of
+  the AI, which suggests the rules are not only fitted to the `kag` cases.
+- B09 (another brand returned, same shape) was "unclear" once. It does not involve the graph; the
+  AI hesitates between a backend bug and seed data. Rerun three times: correct twice, unclear once.
+  The 92% → 96% on new tests is within the same AI variance and is not claimed as a KAG gain.
+- The rules were written with the `kag` cases in view, so 18/18 there shows the facts are right,
+  not that the rules generalise. The other scenarios are the check for that: no new wrong guesses.
 4. Impact analysis API.
 5. Benchmark: `--kag=off` to compare; all targets above.
 6. README, merge, tag `v0.3.0`.

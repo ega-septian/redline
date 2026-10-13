@@ -36,13 +36,16 @@ func (s *Store) Knowledge(ctx context.Context, fingerprint string) (*Knowledge, 
 		MATCH (:Run {id: $run})-[:HAS]->(r:Result {testKey: $key})-[:DEPENDS_ON]->(f:File)
 		OPTIONAL MATCH (:Run {id: $run})-[:HAD]->(now:FileVersion {path: f.path})
 		OPTIONAL MATCH (:Run {id: $pass})-[:HAD]->(before:FileVersion {path: f.path})
-		RETURN f.path AS path, EXISTS { (r)-[:USED]->(f) } AS direct,
+		RETURN f.path AS path, EXISTS { (r)-[:USED]->(f) } AS direct, passHasGraph AS compared,
 		       passHasGraph AND now IS NOT NULL AND coalesce(before.hash, '') <> now.hash AS changed
 		ORDER BY path`, params)
 	if err != nil {
 		return nil, fmt.Errorf("file yang dipakai: %w", err)
 	}
 	changed := []string{}
+	if len(res.Records) > 0 {
+		k.Compared = res.Records[0].AsMap()["compared"] == true
+	}
 	for _, rec := range res.Records {
 		p := rec.AsMap()
 		f := FileFact{Path: str(p, "path"), Direct: p["direct"] == true, Changed: p["changed"] == true, Others: newSplit()}

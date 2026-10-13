@@ -71,6 +71,8 @@ type Facts struct {
 	CodeFiles []string      `json:"code_files"` // file lokal yang dipakai test ini
 	CodeMap   []CodeLink    `json:"code_map"`   // test lain di run yang sama dengan endpoint/file yang sama
 	Similar   []SimilarCase `json:"similar"`    // kasus terbukti yang error-nya mirip maknanya (referensi, bukan bukti)
+	// Knowledge: pengetahuan graph (KAG). nil kalau tidak tersedia.
+	Knowledge *Knowledge `json:"knowledge,omitempty"`
 }
 
 // DecodeCalls membaca kembali bentuk response yang disimpan (hasil CallsJSON).
@@ -460,8 +462,10 @@ var ErrNotFound = errors.New("not found")
 // perubahannya sejak test terakhir lulus, dan test lain di run yang sama yang memakai file atau endpoint
 // yang sama. Kosong kalau reporter tidak mengirim graph import.
 type Knowledge struct {
-	RunID     int64          `json:"run_id"`      // run kegagalan terakhir
-	PassRunID int64          `json:"pass_run_id"` // run lulus terakhir; 0 = test belum pernah lulus
+	RunID     int64 `json:"run_id"`      // run kegagalan terakhir
+	PassRunID int64 `json:"pass_run_id"` // run lulus terakhir; 0 = test belum pernah lulus
+	// Compared: run lulus terakhir punya graph import, jadi FileFact.Changed bisa dipercaya.
+	Compared  bool           `json:"compared"`
 	Files     []FileFact     `json:"files"`
 	Endpoints []EndpointFact `json:"endpoints"`
 }

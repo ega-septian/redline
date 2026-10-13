@@ -19,6 +19,7 @@ var ErrAIDisabled = errors.New("analisis AI belum aktif: isi ANTHROPIC_API_KEY d
 
 type Store interface {
 	Facts(ctx context.Context, fingerprint string) (*store.Facts, error)
+	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SaveAnalysis(ctx context.Context, a store.Analysis) error
 	LatestProof(ctx context.Context, groupID string) (store.Experiment, error)

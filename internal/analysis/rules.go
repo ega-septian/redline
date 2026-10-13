@@ -25,8 +25,8 @@ var (
 // ApplyRules mengembalikan hasil kalau penyebabnya jelas tanpa AI, atau nil. Hasil berkeyakinan di bawah
 // high (matriks "kode test berubah") hanya dipakai kalau AI mati atau gagal; lihat Analyzer.decide.
 // Aturan sengaja sedikit dan ketat: lebih baik diserahkan ke AI daripada salah yakin.
-// Urutan: aturan bawaan yang spesifik, matriks "test tetap + API berubah" (bukti kuat bug backend),
-// aturan yang dipelajari, lalu sisa matriks perubahan. Aturan yang dipelajari hanya melihat teks error,
+// Urutan: aturan bawaan yang spesifik, matriks "test tetap + API berubah" (bukti kuat bug backend), kontrak,
+// pengetahuan graph (KAG), aturan yang dipelajari, lalu sisa matriks perubahan. Aturan yang dipelajari hanya melihat teks error,
 // jadi tidak boleh mengalahkan bukti bahwa API-lah yang berubah.
 func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
 	if res := builtinRules(f.ErrorMessage); res != nil {
@@ -37,6 +37,9 @@ func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
 		return matrix
 	}
 	if res := contractRule(f); res != nil {
+		return res
+	}
+	if res := graphRules(f); res != nil {
 		return res
 	}
 	if res := learnedRules(f.ErrorMessage, learned); res != nil {
@@ -179,6 +182,144 @@ func matrixRules(f *store.Facts) *store.Analysis {
 		}
 	}
 	return nil
+}
+
+// graphRules: aturan dari pengetahuan graph (KAG). Dijalankan setelah matriks yang yakin dan kontrak, jadi
+// tidak pernah mengalahkan bukti bahwa response atau kontrak API berubah. Hanya dipakai kalau ada pembanding
+// (run lulus terakhir yang juga punya graph import), supaya "file berubah" bisa dipercaya.
+func graphRules(f *store.Facts) *store.Analysis {
+	k := f.Knowledge
+	if k == nil || f.LastPass == nil || !k.Compared {
+		return nil
+	}
+	ownSpec := specOf(f.Group.TestKey)
+
+	// 1. Endpoint yang sama gagal untuk test di spec lain yang TIDAK memakai kode yang berubah, dan tidak ada
+	// yang lulus: masalahnya di endpoint, bukan di kode test.
+	for _, e := range k.Endpoints {
+		others := otherSpecs(e.Without.Failed, ownSpec)
+		if len(others) == 0 || len(e.Without.Passed) > 0 {
+			continue
+		}
+		return &store.Analysis{
+			Source:     "rule",
+			Category:   "backend_bug",
+			Confidence: "high",
+			Summary: fmt.Sprintf("%s juga gagal untuk %d test lain di spec berbeda yang tidak memakai kode yang berubah, "+
+				"dan tidak ada test yang lulus di endpoint itu. Masalahnya di endpoint, bukan di kode test ini.",
+				e.Key, len(e.Without.Failed)),
+			Evidence: append([]string{e.Key + ": test lain tanpa kode yang berubah gagal"}, first(titles(others), 3)...),
+			NextStep: "Periksa " + e.Key + " (response dan data) bersama tim backend; semua test yang memanggilnya ikut gagal.",
+		}
+	}
+
+	changed := []store.FileFact{}
+	for _, file := range k.Files {
+		if file.Changed {
+			changed = append(changed, file)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	paths := []string{}
+	for _, c := range changed {
+		paths = append(paths, describeFile(c))
+	}
+
+	// 2. Endpoint yang belum pernah lulus, dan hanya dipanggil lewat kode yang berubah: kode test yang baru
+	// memanggil endpoint itu (misalnya salah ketik path).
+	for _, e := range k.Endpoints {
+		if e.SeenPassing || len(e.Without.Passed)+len(e.Without.Failed) > 0 {
+			continue
+		}
+		return &store.Analysis{
+			Source:     "rule",
+			Category:   "test_bug",
+			Confidence: "high",
+			Summary: fmt.Sprintf("Test memanggil %s, yang belum pernah dipanggil test yang lulus, dan hanya dipanggil lewat "+
+				"kode yang berubah sejak run lulus terakhir (#%d): %s. Kemungkinan path atau method di kode test salah.",
+				e.Key, f.LastPass.RunID, strings.Join(paths, ", ")),
+			Evidence: append([]string{e.Key + ": belum pernah dipanggil test yang lulus"}, paths...),
+			NextStep: "Bandingkan path di " + changed[0].Path + " dengan kontrak API atau path sebelum diubah.",
+		}
+	}
+
+	// 3. Kode bersama berubah, bentuk response tetap, dan test lain yang memanggil endpoint yang sama tanpa
+	// kode itu lulus: endpoint-nya sehat, yang berubah kode test.
+	if f.Response.Verdict != triage.ResponseSame && f.Response.Verdict != triage.ResponseAddedOnly {
+		return nil
+	}
+	var healthy *store.EndpointFact
+	for i, e := range k.Endpoints {
+		if len(e.Without.Failed) > 0 {
+			return nil
+		}
+		if len(e.Without.Passed) > 0 && healthy == nil {
+			healthy = &k.Endpoints[i]
+		}
+	}
+	if healthy == nil {
+		return nil
+	}
+	// Lebih yakin kalau test lain yang memakai file yang berubah ikut gagal.
+	confidence := "medium"
+	for _, c := range changed {
+		if len(c.Others.Failed) > 0 {
+			confidence = "high"
+		}
+	}
+	return &store.Analysis{
+		Source:     "rule",
+		Category:   "test_bug",
+		Confidence: confidence,
+		Summary: fmt.Sprintf("Kode yang dipakai test ini berubah sejak run lulus terakhir (#%d): %s. Bentuk response API "+
+			"tetap, dan %s lulus untuk test lain yang tidak memakai kode itu. Penyebabnya di kode yang berubah.",
+			f.LastPass.RunID, strings.Join(paths, ", "), healthy.Key),
+		Evidence: append(append([]string{}, paths...),
+			fmt.Sprintf("%s: lulus untuk %s", healthy.Key, strings.Join(first(titles(healthy.Without.Passed), 2), ", ")),
+			"Response API: "+f.Response.Verdict),
+		NextStep: "Periksa perubahan di " + changed[0].Path + " (git diff); file itu dipakai juga oleh test lain.",
+	}
+}
+
+// describeFile: "schemas/brand.ts (lewat import lain)".
+func describeFile(f store.FileFact) string {
+	if f.Direct {
+		return f.Path + " berubah"
+	}
+	return f.Path + " berubah (lewat import lain)"
+}
+
+// specOf mengambil file spec dari kunci test "project › file › judul".
+func specOf(testKey string) string {
+	parts := strings.SplitN(testKey, " › ", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
+}
+
+func otherSpecs(tests []string, spec string) []string {
+	out := []string{}
+	for _, t := range tests {
+		if specOf(t) != spec {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// titles: kunci test -> "file › judul" (tanpa project), supaya singkat.
+func titles(tests []string) []string {
+	out := make([]string, len(tests))
+	for i, t := range tests {
+		if _, rest, ok := strings.Cut(t, " › "); ok {
+			t = rest
+		}
+		out[i] = t
+	}
+	return out
 }
 
 var compiled sync.Map // pola -> *regexp.Regexp (nil kalau tidak valid)
