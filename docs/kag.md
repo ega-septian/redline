@@ -75,8 +75,11 @@ confidence, and K02 flips between correct and unclear.
 ## Stages
 
 0. Questions, benchmark scenario and baseline (this document).
-1. Graph: files as nodes with a content hash per run and `IMPORTS` edges (reporter sends the import
-   graph), test case nodes from `@TC-` tags.
+1. Graph (done): the reporter sends the import graph (`files`: path → content hash and direct
+   imports, for every file reachable from the specs). Stored as `(:File)-[:IMPORTS]->(:File)`
+   (latest), `(:Run)-[:HAD]->(:FileVersion)` (content per run) and
+   `(:Result)-[:DEPENDS_ON]->(:File)` (every file a test uses, however deep). Test case IDs are
+   already on `(:Test {caseId})`, so no separate node is needed.
 2. Store queries for questions 1–6, with tests.
 3. Analysis: a "graph knowledge" section for Claude, and rules where the pattern is unambiguous.
 4. Impact analysis API.

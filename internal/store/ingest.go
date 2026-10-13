@@ -18,6 +18,8 @@ import (
 //
 //	(:Run)-[:HAS]->(:Result)-[:OF]->(:Test)   (:Result)-[:RETURNED]->(:Shape)
 //	(:Failure)-[:OF]->(:Test)                 (:SourceFile) disimpan sekali per isi
+//	(:Result)-[:CALLED]->(:Endpoint)          (:Result)-[:USED]->(:File)   (:Result)-[:DEPENDS_ON]->(:File)
+//	(:File)-[:IMPORTS]->(:File)               (:Run)-[:HAD]->(:FileVersion)<-[:VERSION]-(:File)
 func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMeta) (*IngestResult, error) {
 	if meta.Source == "" {
 		meta.Source = "local"
@@ -60,6 +62,9 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 
 		sourceIDs, err := saveSources(ctx, tx, rep.Sources)
 		if err != nil {
+			return nil, err
+		}
+		if err := saveFiles(ctx, tx, runID, rep.Files); err != nil {
 			return nil, err
 		}
 
@@ -106,7 +111,8 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 					res.Recurring = append(res.Recurring, change)
 				}
 			}
-			if err := saveResult(ctx, tx, runID, o, fingerprint, cleanMsg, incidentKey, sourceIDs); err != nil {
+			if err := saveResult(ctx, tx, runID, o, fingerprint, cleanMsg, incidentKey, sourceIDs,
+				rep.Dependencies(o.CodeFiles)); err != nil {
 				return nil, err
 			}
 		}
@@ -153,9 +159,43 @@ func saveSources(ctx context.Context, tx neo4j.ManagedTransaction, sources map[s
 	return ids, nil
 }
 
+// saveFiles menyimpan graph import run ini: isi setiap file (versi) dan import langsungnya. Import setiap
+// file diganti dengan yang terbaru, jadi (:File)-[:IMPORTS]->(:File) adalah graph import yang sekarang.
+func saveFiles(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, files map[string]report.FileNode) error {
+	if len(files) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(files))
+	for path, f := range files {
+		imports := f.Imports
+		if imports == nil {
+			imports = []string{}
+		}
+		rows = append(rows, map[string]any{"path": path, "hash": f.Hash, "imports": imports})
+	}
+	_, err := tx.Run(ctx, `
+		MATCH (run:Run {id: $runId})
+		UNWIND $rows AS row
+		MERGE (f:File {path: row.path})
+		SET f.hash = row.hash, f.lastRunId = $runId
+		MERGE (v:FileVersion {id: row.path + '@' + row.hash}) ON CREATE SET v.path = row.path, v.hash = row.hash
+		MERGE (f)-[:VERSION]->(v)
+		MERGE (run)-[:HAD]->(v)
+		WITH f, row
+		OPTIONAL MATCH (f)-[old:IMPORTS]->()
+		DELETE old
+		WITH DISTINCT f, row
+		FOREACH (p IN row.imports | MERGE (g:File {path: p}) MERGE (f)-[:IMPORTS]->(g))`,
+		map[string]any{"runId": runID, "rows": rows})
+	if err != nil {
+		return fmt.Errorf("simpan graph import: %w", err)
+	}
+	return nil
+}
+
 // saveResult menyimpan hasil satu test di run ini, beserta test-nya dan bentuk response-nya.
 func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o report.Outcome,
-	fingerprint, cleanMsg, incidentKey string, sourceIDs map[string]string) error {
+	fingerprint, cleanMsg, incidentKey string, sourceIDs map[string]string, deps []string) error {
 	id, err := nextID(ctx, tx, "result")
 	if err != nil {
 		return err
@@ -208,12 +248,17 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 	for _, c := range DecodeCalls([]byte(calls)) {
 		endpoints = append(endpoints, c.Method+" "+c.Path)
 	}
-	if len(endpoints)+len(codeFiles) > 0 {
+	// DEPENDS_ON: semua file yang dipakai, termasuk import bertingkat (kosong kalau reporter lama).
+	if deps == nil {
+		deps = []string{}
+	}
+	if len(endpoints)+len(codeFiles)+len(deps) > 0 {
 		if _, err := tx.Run(ctx, `
 			MATCH (r:Result {id: $id})
 			FOREACH (key IN $endpoints | MERGE (e:Endpoint {key: key}) MERGE (r)-[:CALLED]->(e))
-			FOREACH (path IN $files | MERGE (f:File {path: path}) MERGE (r)-[:USED]->(f))`,
-			map[string]any{"id": id, "endpoints": endpoints, "files": codeFiles}); err != nil {
+			FOREACH (path IN $files | MERGE (f:File {path: path}) MERGE (r)-[:USED]->(f))
+			FOREACH (path IN $deps | MERGE (f:File {path: path}) MERGE (r)-[:DEPENDS_ON]->(f))`,
+			map[string]any{"id": id, "endpoints": endpoints, "files": codeFiles, "deps": deps}); err != nil {
 			return fmt.Errorf("simpan peta kode: %w", err)
 		}
 	}
