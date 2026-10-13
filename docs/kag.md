@@ -116,6 +116,9 @@ confidence, and K02 flips between correct and unclear.
   The 92% → 96% on new tests is within the same AI variance and is not claimed as a KAG gain.
 - The rules were written with the `kag` cases in view, so 18/18 there shows the facts are right,
   not that the rules generalise. The other scenarios are the check for that: no new wrong guesses.
-4. Impact analysis API.
+4. Impact analysis API (done): `GET /api/impact?file=...|endpoint=...` and
+   `GET /api/groups/{id}/knowledge`; in the test project `npm run redline -- impact <file|endpoint>`
+   prints the tests and a `--grep` to run only them. On the `kag` data it returns exactly the
+   targets above.
 5. Benchmark: `--kag=off` to compare; all targets above.
 6. README, merge, tag `v0.3.0`.

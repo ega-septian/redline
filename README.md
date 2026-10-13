@@ -229,6 +229,8 @@ are still stored and analysed, as a preview. Working alone? Use `STATUS_FROM=all
 | `POST /api/groups/{id}/experiments` | Store an experiment result (used by `verify`) |
 | `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules |
 | `GET /api/scoreboard` | How often guesses matched the proof |
+| `GET /api/groups/{id}/knowledge` | Graph knowledge for one failure: files used (any import depth) and what changed, other tests on the same files and endpoints |
+| `GET /api/impact?file=...` or `?endpoint=...` | Tests affected if a file (through any chain of imports) or an endpoint changes |
 | `GET /healthz` | Health check |
 
 Labels are `backend_bug`, `test_bug`, `environment`, `flaky` or `unknown`.
