@@ -96,7 +96,7 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 	if f.Sources, err = s.sourceFiles(ctx, sourceIDs); err != nil {
 		return nil, fmt.Errorf("kode test: %w", err)
 	}
-	f.CurrentCalls = decodeCalls(curCalls)
+	f.CurrentCalls = DecodeCalls(curCalls)
 	f.FailRunID = curRun
 	if f.CodeFiles == nil {
 		f.CodeFiles = []string{}
@@ -128,7 +128,7 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 		return nil, fmt.Errorf("lulus terakhir: %w", err)
 	}
 	f.TestChanged = triage.CompareHash(passHash, curHash)
-	f.Response = triage.DiffCalls(decodeCalls(passCalls), f.CurrentCalls)
+	f.Response = triage.DiffCalls(DecodeCalls(passCalls), f.CurrentCalls)
 
 	after := int64(0)
 	if f.LastPass != nil {
@@ -171,7 +171,8 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 	return f, nil
 }
 
-func decodeCalls(raw []byte) []report.HTTPCall {
+// DecodeCalls membaca kembali bentuk response yang disimpan (hasil CallsJSON).
+func DecodeCalls(raw []byte) []report.HTTPCall {
 	var calls []report.HTTPCall
 	if len(raw) == 0 || json.Unmarshal(raw, &calls) != nil {
 		return []report.HTTPCall{}

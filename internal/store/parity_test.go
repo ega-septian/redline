@@ -29,3 +29,23 @@ func TestParity_Ingest(t *testing.T) {
 		return s
 	})
 }
+
+// TestParity_Analysis menjalankan test fakta, analisis, dan label yang sama dengan implementasi Neo4j.
+func TestParity_Analysis(t *testing.T) {
+	url := os.Getenv("REDLINE_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("REDLINE_TEST_DATABASE_URL tidak diset; test database dilewati")
+	}
+	storetest.RunAnalysis(t, func(t *testing.T) storetest.AnalysisBackend {
+		ctx := context.Background()
+		s, err := store.Open(ctx, store.TestSchema(ctx, t, url, "store_parity_test"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.Close)
+		if err := s.Migrate(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	})
+}
