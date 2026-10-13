@@ -455,3 +455,44 @@ type GroupError struct {
 
 // ErrNotFound dikembalikan kalau data yang diminta tidak ada.
 var ErrNotFound = errors.New("not found")
+
+// Knowledge adalah pengetahuan dari graph untuk satu kegagalan (KAG): file yang dipakai test beserta
+// perubahannya sejak test terakhir lulus, dan test lain di run yang sama yang memakai file atau endpoint
+// yang sama. Kosong kalau reporter tidak mengirim graph import.
+type Knowledge struct {
+	RunID     int64          `json:"run_id"`      // run kegagalan terakhir
+	PassRunID int64          `json:"pass_run_id"` // run lulus terakhir; 0 = test belum pernah lulus
+	Files     []FileFact     `json:"files"`
+	Endpoints []EndpointFact `json:"endpoints"`
+}
+
+// FileFact adalah satu file yang dipakai test yang gagal.
+type FileFact struct {
+	Path    string `json:"path"`
+	Direct  bool   `json:"direct"`  // file spec atau di-import langsung olehnya; false = lewat import lain
+	Changed bool   `json:"changed"` // isinya berbeda dari run lulus terakhir
+	// Others: test lain di run ini yang juga bergantung pada file ini. Hanya diisi untuk file yang berubah.
+	Others TestSplit `json:"others"`
+}
+
+// EndpointFact adalah satu endpoint yang dipanggil test yang gagal.
+type EndpointFact struct {
+	Key         string `json:"key"`          // misalnya "GET /brands/1"
+	SeenPassing bool   `json:"seen_passing"` // pernah dipanggil test yang lulus di run sebelumnya
+	// Test lain di run ini yang memanggil endpoint yang sama, dipisah: yang memakai file yang berubah, dan yang tidak.
+	WithChanged TestSplit `json:"with_changed"`
+	Without     TestSplit `json:"without"`
+}
+
+// TestSplit adalah daftar test (kunci test) yang lulus dan yang gagal. Flaky dihitung lulus.
+type TestSplit struct {
+	Passed []string `json:"passed"`
+	Failed []string `json:"failed"`
+}
+
+// ImpactedTest adalah test yang terdampak kalau sebuah file atau endpoint berubah.
+type ImpactedTest struct {
+	TestKey string `json:"test"`
+	CaseID  string `json:"test_case_id,omitempty"`
+	RunID   int64  `json:"run_id"` // run yang dipakai: lulus terakhir, atau run terakhir kalau belum pernah lulus
+}

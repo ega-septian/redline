@@ -69,7 +69,8 @@ confidence, and K02 flips between correct and unclear.
 - K01, K02, K03, K05 decided with high confidence, ideally by rules from graph facts (no AI cost).
 - K06 stays backend_bug.
 - Existing scenarios do not drop: new test 92%, test that passed before 100%, upgrade 6/6.
-- Impact analysis: for the `kag` specs, `schemas/brand.ts` → TC-KAG-01, 02, 03;
+- Impact analysis: for the `kag` specs, `schemas/brand.ts` → TC-KAG-01, 02, 03, 04 (04 is included
+  because its spec imports the helper; dependencies are tracked per file, not per function);
   `GET /brands/1` → TC-KAG-02, 03, 05.
 
 ## Stages
@@ -80,7 +81,15 @@ confidence, and K02 flips between correct and unclear.
    (latest), `(:Run)-[:HAD]->(:FileVersion)` (content per run) and
    `(:Result)-[:DEPENDS_ON]->(:File)` (every file a test uses, however deep). Test case IDs are
    already on `(:Test {caseId})`, so no separate node is needed.
-2. Store queries for questions 1–6, with tests.
+2. Store queries (done): `Knowledge` answers questions 1–4 for a failure, `ImpactOfFile` and
+   `ImpactOfEndpoint` answer 5 and 6. Impact uses each test's last *passing* run, because a broken
+   run can call other endpoints (K02 calls `/brand/:id`). Endpoints are stored as patterns
+   (`GET /brands/:id`), so queries like `GET /brands/1` are normalised the same way.
+
+   Checked on the real `kag` benchmark data. One finding for stage 3: K06 looks exactly like K01
+   in the graph (schema changed two imports deep, the direct test passes), because the direct test
+   does not check the field the API lost. Graph facts must therefore never override a changed
+   response; the existing response rules decide K06.
 3. Analysis: a "graph knowledge" section for Claude, and rules where the pattern is unambiguous.
 4. Impact analysis API.
 5. Benchmark: `--kag=off` to compare; all targets above.

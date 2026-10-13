@@ -255,3 +255,18 @@ func TestIngest_FileGraph(t *testing.T) {
 		t.Errorf("graph import harus tetap ada setelah retensi, dapat %d hubungan", n)
 	}
 }
+
+func TestEndpointPattern(t *testing.T) {
+	for in, want := range map[string]string{
+		"GET /brands/1":                        "GET /brands/:id",
+		"get /brands/1":                        "GET /brands/:id",
+		"/products/01JC2XKB5M3H9VQ8T7RZ4N6PDW": "/products/:id",
+		"DELETE /users/a1b2c3d4-e5f6-7890-abcd-ef1234567890/roles": "DELETE /users/:id/roles",
+		"POST /users/login": "POST /users/login",
+		" /brands ":         "/brands",
+	} {
+		if got := endpointPattern(in); got != want {
+			t.Errorf("%q: mau %q, dapat %q", in, want, got)
+		}
+	}
+}
