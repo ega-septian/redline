@@ -131,6 +131,8 @@ node scripts/redline.mts verify      # prove the cause of the last run's failure
 node scripts/redline.mts learn       # turn proven cases into rules
 node scripts/redline.mts rules       # list rules; approve <id> / reject <id>
 node scripts/redline.mts score       # how often the guesses turned out right
+node scripts/redline.mts impact schemas/brand.ts   # tests affected by a file (any import depth)
+node scripts/redline.mts impact GET /brands/1      # tests that call an endpoint
 ```
 
 No reporter? You can also post the JSON report yourself:
@@ -250,7 +252,7 @@ Claude, and redacted error messages to Voyage AI.
 | Server setting | Default | |
 |---|---|---|
 | `STATUS_FROM` | `ci` | Which runs may change a failure's status: `ci`, `local` or `all` |
-| `TIMEZONE` | `Asia/Jakarta` | Time zone for the API, logs and database |
+| `TIMEZONE` | `Asia/Jakarta` | Time zone for the API and logs |
 | `RETENTION_DAYS` | `30` | Old test details are cleaned up after this many days (`0` = never) |
 
 Only CI changes status by default. Otherwise a half-written test on someone's laptop would show up
