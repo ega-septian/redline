@@ -67,6 +67,10 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 		if err := saveFiles(ctx, tx, runID, rep.Files); err != nil {
 			return nil, err
 		}
+		aliases, err := followRenames(ctx, tx, outcomes)
+		if err != nil {
+			return nil, err
+		}
 
 		passedKeys := []string{}
 		for _, o := range outcomes {
@@ -88,6 +92,11 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				cleanMsg = triage.Clean(o.ErrorMessage)
 				normalized := triage.Normalize(cleanMsg)
 				fingerprint = triage.Fingerprint(o.Key(), normalized)
+				if previous := aliases[o.Key()]; len(previous) > 0 && o.Status == report.StatusFailed {
+					if fingerprint, err = aliasFingerprint(ctx, tx, o.Key(), previous, normalized); err != nil {
+						return nil, err
+					}
+				}
 				var kind, label string
 				incidentKey, kind, label = triage.IncidentKey(normalized, o.Calls)
 				if o.Status == report.StatusFailed {

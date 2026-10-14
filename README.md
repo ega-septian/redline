@@ -115,6 +115,9 @@ The full report, with a curl command to reproduce each failed request, goes to
 is down, tests still run normally.
 
 Give tests an ID with a tag, and Redline will use it in reports: `test("...", { tag: "@TC-USR-001" }, ...)`.
+The ID also keeps a test's history when you rename it (title, `describe` or file): the last pass,
+recent statuses and open failure groups carry over to the new name. A rename is only followed when
+the ID is used by exactly one test in the run and the old name is gone.
 
 | Environment variable | Effect |
 |---|---|

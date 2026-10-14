@@ -149,8 +149,8 @@ type Outcome struct {
 	File    string
 	Title   string // judul lengkap: "describe › nama test"
 	Line    int
-	// TestCaseID: ID test case dari tag @TC-... (kosong kalau tidak ada). Hanya label yang mudah dibaca;
-	// identitas test tetap Key(), karena tag bisa tidak ada, dobel, atau diganti.
+	// TestCaseID: ID test case dari tag @TC-... (kosong kalau tidak ada). Identitas test tetap Key(), karena
+	// tag bisa tidak ada, dobel, atau diganti; ID dipakai untuk menyambung riwayat test yang di-rename.
 	TestCaseID string
 
 	Status     string
