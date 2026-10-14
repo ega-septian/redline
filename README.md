@@ -1,103 +1,7 @@
 # Redline
 
 When a Playwright test fails, the first question is always the same: **is it a bug in the app, a bug
-in the test, or is the server just down?** Redline answers that for you.
-
-Every test run is sent to Redline, which:
-
-- **Groups repeated failures.** The same test failing with the same error across ten runs is one
-  problem, not ten. Each group is tracked as open, resolved, or regressed.
-- **Merges failures with a shared cause.** If the server is down and 300 tests fail, you see one
-  cause, not 300 rows.
-- **Explains why it failed**: backend bug, test bug, environment, or flaky. Cheap rules go first;
-  Claude is only asked when the rules can't decide.
-- **Proves it when you ask.** It reruns the test, lets the AI patch it in a copy of your project,
-  and runs it again. If it passes, the cause is proven, not guessed.
-- **Knows how your tests connect.** Tests, the files they import (however deep) and the endpoints
-  they call are a graph in Neo4j. Redline follows it to see what changed and who else is affected,
-  and can tell you which tests to run before you change a file.
-
-Tokens, passwords, JWTs and 16-digit numbers are redacted before anything is stored or sent to AI.
-
-```mermaid
-flowchart TD
-    A[npx playwright test] -->|reporter sends results| B[Redline]
-    B --> C[Group failures<br/>and merge shared causes]
-    C --> D{Labelled by a human<br/>or already proven?}
-    D -->|yes| R[Verdict]
-    D -->|no| E{A rule is sure?}
-    E -->|yes| R
-    E -->|no| F[Claude reads the facts:<br/>error, test code, API contract,<br/>what changed, graph knowledge,<br/>similar cases]
-    F --> R
-    R --> G[Report in the terminal<br/>and redline-report.md]
-    G -.->|optional: verify| H[Rerun the test,<br/>then patch it in a copy]
-    H -->|passes| I[Proven cause<br/>+ patch to review]
-    I -.->|learn| J[Rules and similar cases<br/>for next time]
-    J -.-> E
-```
-
-### How accurate is it?
-
-Measured with 24 bugs planted on purpose (12 in test code, 9 in the backend, 3 environment),
-6 app-upgrade cases and 6 cases in shared code, using Claude Haiku 5.5:
-
-| Scenario | Correct | Wrong guesses |
-|---|---|---|
-| Brand-new test, no history | 92–96% | 0 |
-| Test that passed before | 96–100% | 0 |
-| App upgrade: outdated test vs regression | 6/6 | 0 |
-| Shared helper/schema and shared endpoints (3 runs) | 18/18, all decided by rules | 0 |
-
-When Redline isn't sure, it says "unclear" instead of guessing. The ranges are the spread between
-runs: one case (another brand returned with the same shape) is sometimes left "unclear" by the
-AI. The benchmark lives in the Playwright project
-([`npm run redline:bench`](https://github.com/ega-septian/playwright-web-api-automation)).
-
-## Quick start
-
-You need Go 1.24+ and Docker.
-
-```bash
-cp .env.example .env
-docker compose up -d     # Neo4j (DozerDB) on bolt://localhost:7688, browser on http://localhost:7475
-go run ./cmd/server      # API on http://localhost:8787, the database and constraints are created on start
-```
-
-Everything below is optional; Redline works without it, just with less insight:
-
-| Setting in `.env` | What it adds |
-|---|---|
-| `ANTHROPIC_API_KEY` | AI analysis and AI patches. Without it, only rules are used |
-| `VOYAGE_API_KEY` | Finds past proven cases with a similar error ([Voyage AI](https://dashboard.voyageai.com), first 200M tokens free) |
-| `OPENAPI_SPECS` | Your API contract, e.g. `toolshop=http://localhost:8091/docs`, so Redline knows who is right: the test or the API |
-
-## Connect your Playwright project
-
-Copy these files from
-[playwright-web-api-automation](https://github.com/ega-septian/playwright-web-api-automation):
-
-| File | Purpose |
-|---|---|
-| `reporters/redline.ts`, `reporters/source-hash.ts` | Send results to Redline and print the summary |
-| `fixtures/redline.ts` | Records the shape of API responses and a curl per request. Optional, but makes the analysis much better |
-| `scripts/redline.mts`, `scripts/sandbox.mts` | CLI to prove causes, learn rules and see the scoreboard. Optional |
-
-Add the reporter after the JSON reporter in `playwright.config.ts`, and import `test` from the
-fixture in your specs:
-
-```ts
-reporter: [
-  ["html"],
-  ["json", { outputFile: "test-results/results.json" }],
-  ["./reporters/redline.ts"],
-],
-```
-
-```ts
-import { test, expect } from "../../../fixtures/redline";
-```
-
-That's it. After every `npx playwright test` you get a summary (the output is in Indonesian):
+in the test, or is the server just down?** Redline answers it for every failure, automatically.
 
 ```
 [redline] run #12 · 8 Okt 2026, 19.36 WIB: 40 lulus, 9 gagal, 0 flaky, 1 skip
@@ -106,214 +10,215 @@ That's it. After every `npx playwright test` you get a summary (the output is in
   #  INSIDEN                    TEST  STATUS     KATEGORI     PENYEBAB
   1  POST /users/login → 500       8  BARU       BUG BACKEND  API membalas 500 padahal test…
   2  TC-USR-001 Register user      1  REGRESSED  BUG DI TEST  Test memeriksa objek response…
-
-  Laporan lengkap: test-results/redline-report.md
 ```
 
-The full report, with a curl command to reproduce each failed request, goes to
-`test-results/redline-report.md` (and to the job summary on GitHub Actions). If the Redline server
-is down, tests still run normally.
+_Output after `npx playwright test` (the report is in Indonesian). 9 failures, 2 causes, each explained._
 
-Give tests an ID with a tag, and Redline will use it in reports: `test("...", { tag: "@TC-USR-001" }, ...)`.
-The ID also keeps a test's history when you rename it (title, `describe` or file): the last pass,
-recent statuses and open failure groups carry over to the new name. A rename is only followed when
-the ID is used by exactly one test in the run and the old name is gone.
+## What it does
 
-| Environment variable | Effect |
-|---|---|
-| `REDLINE_AI=1` | Ask for the cause of each failure |
-| `REDLINE_VERIFY=1` | Right after the run, prove each new failure (local only, ignored in CI) |
-| `REDLINE_URL` | Server address, default `http://localhost:8787` |
-| `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint2` |
-| `REDLINE=0` | Turn Redline off |
+- **Groups failures.** The same failure over ten runs is one problem; 300 tests failing because the server is down is one cause.
+- **Explains each cause**: backend bug, test bug, environment or flaky. Free rules first, Claude only when needed.
+- **Proves it on request** by rerunning the test and patching it in a copy of your project.
+- **Knows how tests connect**: which files and endpoints each test uses, so it can tell you which tests a change affects.
+- **Redacts secrets** (tokens, passwords, JWTs, card numbers) before anything is stored or sent to AI.
 
-The CLI (Node 22.6+), run from your Playwright project:
+## How it works
+
+```mermaid
+flowchart LR
+    A[Test fails] --> B[Collect facts<br/>what changed since it passed,<br/>API contract, files and endpoints]
+    B --> C{Can a rule<br/>decide?}
+    C -->|yes, free| D[Verdict<br/>backend bug · test bug<br/>environment · flaky]
+    C -->|no| E[Claude reads<br/>the facts] --> D
+    D -.->|optional| F[Verify<br/>rerun and patch<br/>= proven cause]
+```
+
+## Accuracy
+
+Measured with bugs planted on purpose, using Claude Haiku 5.5:
+
+| Scenario                                 | Correct         | Wrong guesses |
+| ---------------------------------------- | --------------- | ------------- |
+| New test, no history (24 bugs)           | 92–96%          | 0             |
+| Test that passed before (24 bugs)        | 96–100%         | 0             |
+| App upgrade: outdated test vs regression | 6/6             | 0             |
+| Shared helper, schema or endpoint        | 18/18, by rules | 0             |
+
+When unsure, Redline says "unclear" instead of guessing. The benchmark lives in the
+[Playwright project](https://github.com/ega-septian/playwright-web-api-automation) (`npm run redline:bench`).
+
+## Quick start
+
+Requires Go 1.24+ and Docker.
 
 ```bash
-node scripts/redline.mts verify      # prove the cause of the last run's failures
-node scripts/redline.mts learn       # turn proven cases into rules
-node scripts/redline.mts rules       # list rules; approve <id> / reject <id>
-node scripts/redline.mts score       # how often the guesses turned out right
-node scripts/redline.mts impact schemas/brand.ts   # tests affected by a file (any import depth)
-node scripts/redline.mts impact GET /brands/1      # tests that call an endpoint
+cp .env.example .env
+docker compose up -d   # Neo4j (DozerDB): bolt://localhost:7688, browser http://localhost:7475
+go run ./cmd/server    # API on http://localhost:8787
 ```
 
-No reporter? You can also post the JSON report yourself:
+Optional settings in `.env` (Redline works without them, with less insight):
 
-```bash
-curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json
-```
+| Setting             | Adds                                                                                         |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | AI analysis and patches. Without it, only rules are used                                     |
+| `VOYAGE_API_KEY`    | Matches past proven cases with a similar error ([Voyage AI](https://dashboard.voyageai.com)) |
+| `OPENAPI_SPECS`     | Your API contract, e.g. `toolshop=http://localhost:8091/docs`                                |
 
-## How Redline decides
+## Connect your Playwright project
 
-It tries the cheapest, most trustworthy source first:
+1. Copy from [playwright-web-api-automation](https://github.com/ega-septian/playwright-web-api-automation):
+   `reporters/redline.ts`, `reporters/source-hash.ts`, `fixtures/redline.ts`, and for the CLI
+   `scripts/redline.mts` and `scripts/sandbox.mts`.
+2. Add the reporter after the JSON reporter in `playwright.config.ts`:
+   ```ts
+   reporter: [["html"], ["json", { outputFile: "test-results/results.json" }], ["./reporters/redline.ts"]],
+   ```
+3. Import `test` from the fixture in your specs (it records response shapes and a curl per request):
+   ```ts
+   import { test, expect } from "../../../fixtures/redline";
+   ```
+4. Give each test an ID: `test("...", { tag: "@TC-USR-001" }, ...)`. It appears in reports, and keeps
+   a test's history when you rename its title, `describe` or file.
+
+Run your tests as usual. The full report, with a curl to reproduce each failed request, is written to
+`test-results/redline-report.md`. If Redline is down, tests still run normally.
+
+## Commands
+
+From your Playwright project:
+
+| Command                                            | What it does                                         |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| `REDLINE_AI=1 npx playwright test`                 | Run tests and explain each failure                   |
+| `node scripts/redline.mts verify`                  | Prove the cause of the last run's failures           |
+| `node scripts/redline.mts impact schemas/brand.ts` | Tests affected by a file (or `impact GET /brands/1`) |
+| `node scripts/redline.mts score`                   | How often Redline's guesses turned out right         |
+| `node scripts/redline.mts learn`                   | Turn proven cases into rules; then `approve <id>`    |
+
+| Environment variable  | Effect                                                  |
+| --------------------- | ------------------------------------------------------- |
+| `REDLINE_URL`         | Server address, default `http://localhost:8787`         |
+| `REDLINE_VERIFY=1`    | Prove each new failure right after the run (local only) |
+| `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint2`           |
+| `REDLINE=0`           | Turn Redline off                                        |
+
+## How it decides
+
+Redline tries the cheapest, most reliable source first:
 
 1. **A human label**, if someone already labelled the failure.
-2. **Proof from an experiment** (see below).
-3. **Rules**, free and instant. For example: server unreachable → environment; expected 2xx but got
-   5xx → backend bug; checking a `Promise` or an `APIResponse` instead of its body → test bug
-   (missing `await` or `.json()`); response breaks the API contract → backend bug; rules from the
-   knowledge graph (below); plus rules you approved yourself.
-4. **Claude**, with the redacted facts: error, the failed test's source code, response shapes, the
-   API contract, what changed since the last pass, and similar proven cases.
+2. **Proof** from an earlier `verify`.
+3. **Rules**, free and instant: server unreachable → environment; 5xx → backend bug; missing `await`
+   → test bug; response breaks the API contract → backend bug; plus rules you approved.
+4. **Claude**, with the redacted error, test code, response shapes, API contract and what changed.
+   Every piece of evidence must be quoted from those facts, or the confidence is lowered.
 
-The most useful signal is what changed since the test last passed:
+The strongest signal is **what changed since the test last passed**:
 
-| Test code | API response | API contract | Verdict |
-|---|---|---|---|
-| same | changed | same | **backend bug** (regression) |
-| same | changed | changed the same way | **test bug**: the change was intended, the test is outdated |
-| changed | same | — | **test bug** (Claude explains, since it can read the code) |
+| Test code | API response | API contract         | Verdict                         |
+| --------- | ------------ | -------------------- | ------------------------------- |
+| same      | changed      | same                 | **backend bug** (regression)    |
+| same      | changed      | changed the same way | **test bug** (test is outdated) |
+| changed   | same         | —                    | **test bug**                    |
 
-### Knowledge graph (KAG)
-
-Similar cases (RAG) find failures whose *error means the same*. The knowledge graph answers questions
-that only show up by following relationships:
-
-- Which files does this test really use, including imports of imports, and which changed since it
-  last passed? (The test-code hash only covers the spec and its direct imports.)
-- Of the other tests that use a changed file, which failed?
-- Of the other tests that call the same endpoint *without* that file, which failed?
-
-```
-brands.spec.ts   ─┐
-products.spec.ts ─┴→ helpers/brands.ts → schemas/brand.ts   ← changed
-direct.spec.ts   → GET /brands/:id (no helper)               ← passes
-```
-
-From that, three rules decide without AI, and only after the response and contract rules, so a
-changed response always wins:
-
-| Graph fact | Verdict |
-|---|---|
-| The endpoint also fails for tests in other specs that use none of the changed code | **backend bug** |
-| The test calls an endpoint no passing test ever called, and only changed code calls it | **test bug** (path typo) |
-| Code the test uses changed, the response did not, and the endpoint passes for tests without that code | **test bug** |
-
-Otherwise these facts go to Claude as a "graph knowledge" section. On the shared-code benchmark this
-moved 15 of 18 decisions from the AI (often low confidence, one "unclear") to rules with high
-confidence and no AI cost. Details and the honest caveats: [`docs/kag.md`](docs/kag.md).
-
-The same graph gives **impact analysis**: which tests depend on a file or call an endpoint.
-
-```bash
-npm run redline -- impact schemas/brand.ts   # in the Playwright project
-# → TC-KAG-01, 02, 03, 04, and a --grep to run only those tests
-```
-
-The contract is snapshotted on every run, so after an upgrade (say sprint 1 → sprint 2) a failure
-is judged against the contract that was live when it failed.
-
-To keep the AI honest, every piece of evidence it gives must be a quote from the facts it was sent.
-Made-up evidence is dropped and the confidence is lowered. One analysis costs about $0.0002–0.0007.
+**Knowledge graph.** Tests, the files they import (however deep) and the endpoints they call are
+stored as a graph in Neo4j. That catches what a single test can't show: a shared schema two imports
+deep that changed, or an endpoint failing for unrelated tests too. More in [`docs/kag.md`](docs/kag.md).
 
 ## Proving a cause
 
-A guess is still a guess. `verify` tests it:
+`verify` turns a guess into proof, in a temporary copy of your project (your code is never touched):
 
-1. **Rerun** the test twice as is. If it passes, the failure isn't consistent: flaky.
-2. **Patch.** Claude proposes the smallest change to the test that would fix it, and the test is run
-   again with that change. If it passes, the cause is proven.
+1. **Rerun** the test as is. If it passes now, it's flaky.
+2. **Patch**: Claude proposes the smallest fix and the test runs again. If it passes, the cause is proven.
 
-Everything runs in a temporary copy of your project, so your code is never touched. A proven patch
-is saved to `test-results/redline/<id>.patch` for you to review and `git apply`. Patches that remove
-assertions, add `skip`/`only`, wrap code in `try/catch` or add retries are rejected automatically.
-A verify costs about $0.001.
-
-The patch is a minimal fix that proves the cause, not a code review: always read it before applying.
-
-## Learning
-
-- **Similar cases.** Error messages are turned into embeddings (Voyage AI, stored in Neo4j), so
-  a new failure can be matched with past *proven* cases that mean the same thing, even with
-  different wording. These are given to Claude as references, never as proof.
-- **Code map.** Redline knows which files and endpoints each test uses, stored as graph edges:
-  `(:Result)-[:CALLED]->(:Endpoint)` and `(:Result)-[:USED]->(:File)`. "Three other tests on
-  `GET /brands` passed" points at this test; "every test using this schema failed" points at the
-  shared schema or the backend.
-- **Learned rules.** `learn` turns proven cases into regex rules. Each rule is checked against past
-  failures (it must not match a case with a different cause) and only becomes active after you
-  approve it.
-- **Scoreboard.** Every guess is recorded and graded once there is proof, so you can see whether a
-  change actually made Redline more accurate.
+The patch is saved to `test-results/redline/<id>.patch` to review. Patches that remove assertions or
+add `skip`, `try/catch` or retries are rejected. About $0.001 per verify.
 
 ## What is sent
 
-| Data | When |
-|---|---|
-| Test results, error messages, a code snippet around the error | every run |
-| A hash of each test's code and the list of local files it imports | every run |
-| The local import graph: file paths, a hash of each file's content, and what it imports | every run |
-| Response shapes: field names and types only, **no values** | every run, with the fixture |
-| **The source code of failed tests** (spec plus local imports) | failed tests only |
+| Data                                                           | When              |
+| -------------------------------------------------------------- | ----------------- |
+| Test results, error messages, code around the error            | every run         |
+| File paths and content hashes of the test code and its imports | every run         |
+| Response shapes: field names and types, **no values**          | with the fixture  |
+| **Source code of failed tests**                                | failed tests only |
 
-Everything is redacted before it is stored. With AI enabled, those redacted facts are sent to
-Claude, and redacted error messages to Voyage AI.
+Everything is redacted before it is stored. With AI on, the redacted facts go to Claude and redacted
+error messages to Voyage AI.
 
-## Working as a team
+## Team settings
 
-| Server setting | Default | |
-|---|---|---|
-| `STATUS_FROM` | `ci` | Which runs may change a failure's status: `ci`, `local` or `all` |
-| `TIMEZONE` | `Asia/Jakarta` | Time zone for the API and logs |
-| `RETENTION_DAYS` | `30` | Old test details are cleaned up after this many days (`0` = never) |
+| Setting          | Default        | Meaning                                                      |
+| ---------------- | -------------- | ------------------------------------------------------------ |
+| `STATUS_FROM`    | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all` |
+| `RETENTION_DAYS` | `30`           | Old test details are cleaned up (`0` = never)                |
+| `TIMEZONE`       | `Asia/Jakarta` | Time zone for the API and logs                               |
 
-Only CI changes status by default. Otherwise a half-written test on someone's laptop would show up
-as a team failure, and a lucky local pass would close a failure that still breaks in CI. Local runs
-are still stored and analysed, as a preview. Working alone? Use `STATUS_FROM=all`.
+Only CI changes a failure's status by default, so a half-written test on a laptop doesn't become a
+team failure. Working alone? Use `STATUS_FROM=all`.
 
-## API
+<details>
+<summary><b>API</b></summary>
 
-| Endpoint | |
-|---|---|
-| `POST /api/runs` | Send a Playwright JSON report |
-| `GET /api/runs` | Recent runs |
-| `GET /api/groups` | Failures to work on (`?status=all` for every failure) |
-| `GET /api/groups/{id}` | One failure: occurrences, experiments and analysis |
-| `POST /api/groups/{id}/analyze` | Find the cause (`?force=1` to redo) |
-| `PUT /api/groups/{id}/label` | Label it yourself: `{"label": "test_bug", "note": "...", "by": "name"}` |
-| `POST /api/groups/{id}/fix` | Ask Claude for a hypothesis and patch (used by `verify`) |
-| `POST /api/groups/{id}/experiments` | Store an experiment result (used by `verify`) |
-| `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules |
-| `GET /api/scoreboard` | How often guesses matched the proof |
-| `GET /api/groups/{id}/knowledge` | Graph knowledge for one failure: files used (any import depth) and what changed, other tests on the same files and endpoints |
-| `GET /api/impact?file=...` or `?endpoint=...` | Tests affected if a file (through any chain of imports) or an endpoint changes |
-| `GET /healthz` | Health check |
+| Endpoint                                                           | Purpose                                                        |
+| ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `POST /api/runs`                                                   | Send a Playwright JSON report                                  |
+| `GET /api/runs`                                                    | Recent runs                                                    |
+| `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
+| `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
+| `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
+| `PUT /api/groups/{id}/label`                                       | Label it: `{"label": "test_bug", "note": "...", "by": "name"}` |
+| `GET /api/groups/{id}/knowledge`                                   | Graph facts behind a decision                                  |
+| `POST /api/groups/{id}/fix`, `.../experiments`                     | Used by `verify`                                               |
+| `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules                                                  |
+| `GET /api/scoreboard`                                              | How often guesses matched the proof                            |
+| `GET /api/impact?file=...` or `?endpoint=...`                      | Tests affected by a file or endpoint                           |
+| `GET /healthz`                                                     | Health check                                                   |
 
-Labels are `backend_bug`, `test_bug`, `environment`, `flaky` or `unknown`.
+Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 
-## Development
+No reporter? Post the JSON report yourself:
+`curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`
+
+</details>
+
+<details>
+<summary><b>Development</b></summary>
 
 ```
 cmd/server/          HTTP server
 internal/report/     reads Playwright JSON reports
 internal/triage/     redaction, grouping, shared causes
 internal/analysis/   rules, AI, experiments, learning
-internal/contract/   OpenAPI summaries and response checks
+internal/contract/   OpenAPI checks
 internal/embed/      Voyage AI client
 internal/llm/        Claude client
-internal/store/      Neo4j (DozerDB): graph model, queries, retention
+internal/store/      Neo4j graph model, queries, retention
 internal/api/        HTTP handlers
 ```
 
 ```bash
-go test ./...    # tests that need Neo4j are skipped
-
-REDLINE_TEST_NEO4J_URI=bolt://localhost:7688 go test ./...
+REDLINE_TEST_NEO4J_URI=bolt://localhost:7688 go test ./...   # without it, database tests are skipped
 ```
 
-Tests create and empty their own databases (`redlinetest-*`) on the DozerDB server from
-`docker compose`, so never point them at a server with real data. No real AI calls are made in
-tests. The graph model and its constraints are in [`internal/store/migrations/`](internal/store/migrations/).
+Tests create and empty their own databases (`redlinetest-*`); never point them at a server with real
+data. No real AI calls are made in tests.
 
-Versions: `v0.1.0` stores data in Postgres + pgvector; `v0.2.0` moves to Neo4j only, with the same
-behaviour and benchmark results; `v0.3.0` adds the knowledge graph (KAG) and impact analysis. KAG
-needs a reporter that sends the import graph (the one in the Playwright project does); without it,
-Redline works as in `v0.2.0`.
+</details>
+
+## Versions
+
+| Version  | Highlights                                             |
+| -------- | ------------------------------------------------------ |
+| `v0.3.1` | A renamed test keeps its history through its `@TC-` ID |
+| `v0.3.0` | Knowledge graph and impact analysis                    |
+| `v0.2.0` | Neo4j (DozerDB) as the only database                   |
+| `v0.1.0` | First release, Postgres + pgvector                     |
 
 ## What's next
 
-- **ReportPortal integration**: read "To Investigate" items, write back the defect type, comment
-  and proven patch, and learn from the team's corrections.
-- Analyse errors that stop a spec from loading at all (syntax errors, broken imports).
-- An inferred contract for APIs without documentation, built from responses of passing tests.
+- **ReportPortal integration**: read "To Investigate" items, write back the defect type and proven patch.
+- Analyse errors that stop a spec from loading (syntax errors, broken imports).
+- An inferred contract for APIs without documentation.
