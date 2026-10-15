@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"redline/internal/analysis"
 	"redline/internal/report"
+	"redline/internal/reportportal"
 	"redline/internal/store"
 )
 
@@ -45,11 +47,17 @@ type Analyzer interface {
 	SnapshotContracts(ctx context.Context, runID int64, projects []string)
 }
 
+// ReportPortal mengisi hasil analisis ke launch ReportPortal milik sebuah run (lihat reportportal.Syncer).
+type ReportPortal interface {
+	Sync(ctx context.Context, runID int64, token string) (reportportal.Result, error)
+}
+
 type Server struct {
-	Store       Store
-	Analyzer    Analyzer
-	Log         *slog.Logger
-	MaxBodySize int64
+	Store        Store
+	Analyzer     Analyzer
+	ReportPortal ReportPortal // nil = integrasi ReportPortal mati
+	Log          *slog.Logger
+	MaxBodySize  int64
 }
 
 func (s *Server) Routes() http.Handler {
@@ -71,6 +79,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
+	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
 	return mux
 }
 
@@ -492,4 +501,38 @@ func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"file": file, "endpoint": endpoint, "tests": tests})
+}
+
+var runToken = regexp.MustCompile(`^[A-Za-z0-9-]{1,100}$`)
+
+// handleReportPortal: POST /api/runs/{id}/reportportal?token=<redline_run>. Mengisi jenis defect dan komentar
+// di launch ReportPortal yang membawa atribut redline_run=<token>. Dikerjakan di background, karena agen
+// Playwright baru menutup launch setelah semua reporter selesai (termasuk reporter Redline yang memanggil ini).
+func (s *Server) handleReportPortal(w http.ResponseWriter, r *http.Request) {
+	if s.ReportPortal == nil {
+		writeError(w, http.StatusNotFound, "integrasi ReportPortal mati (REPORTPORTAL_URL kosong)")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		return
+	}
+	token := r.URL.Query().Get("token")
+	if !runToken.MatchString(token) {
+		writeError(w, http.StatusBadRequest, "token harus huruf, angka, atau tanda hubung (maksimal 100)")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		res, err := s.ReportPortal.Sync(ctx, id, token)
+		if err != nil {
+			s.Log.Warn("ReportPortal tidak bisa diisi", "run", id, "err", err)
+			return
+		}
+		s.Log.Info("ReportPortal diisi", "run", id, "launch", res.Launch, "updated", res.Updated,
+			"unclear", res.Unclear, "labelled", res.Labelled, "unmatched", res.Unmatched)
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted", "run": id})
 }

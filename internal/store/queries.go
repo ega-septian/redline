@@ -147,3 +147,26 @@ func strs(p map[string]any, k string) []string {
 	}
 	return out
 }
+
+// RunFailure adalah satu test yang gagal di sebuah run, beserta kelompok kegagalannya.
+type RunFailure struct {
+	TestKey     string `json:"test"`
+	CaseID      string `json:"test_case_id,omitempty"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+// RunFailures mengembalikan test yang gagal di run ini (bukan flaky), urut kunci test.
+func (s *Store) RunFailures(ctx context.Context, runID int64) ([]RunFailure, error) {
+	res, err := s.query(ctx, `
+		MATCH (:Run {id: $run})-[:HAS]->(r:Result {status: 'failed'}) WHERE r.groupId <> ''
+		RETURN r.testKey AS test, r.caseId AS caseId, r.groupId AS fp ORDER BY test`, map[string]any{"run": runID})
+	if err != nil {
+		return nil, err
+	}
+	out := []RunFailure{}
+	for _, rec := range res.Records {
+		p := rec.AsMap()
+		out = append(out, RunFailure{TestKey: str(p, "test"), CaseID: str(p, "caseId"), Fingerprint: str(p, "fp")})
+	}
+	return out, nil
+}
