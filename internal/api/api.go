@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -58,6 +59,7 @@ type Server struct {
 	ReportPortal ReportPortal // nil = integrasi ReportPortal mati
 	Log          *slog.Logger
 	MaxBodySize  int64
+	APIKey       string // kosong = tanpa autentikasi
 }
 
 func (s *Server) Routes() http.Handler {
@@ -80,7 +82,29 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
-	return mux
+	if s.APIKey == "" {
+		return mux
+	}
+	return s.requireAPIKey(mux)
+}
+
+// requireAPIKey menolak request /api/... tanpa "Authorization: Bearer <APIKey>". /healthz tetap terbuka supaya
+// pengecekan server hidup tidak butuh key. Key dibandingkan dalam waktu konstan.
+func (s *Server) requireAPIKey(next http.Handler) http.Handler {
+	want := []byte("Bearer " + s.APIKey)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(got, want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="redline"`)
+			writeError(w, http.StatusUnauthorized, "API key salah atau tidak ada: kirim header Authorization: Bearer <REDLINE_API_KEY>")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handleIngest menerima isi results.json di body (mentah, atau dibungkus reporter Redline

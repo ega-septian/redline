@@ -19,6 +19,9 @@ type Config struct {
 	StatusSources []string
 	// Timezone untuk semua waktu yang dikeluarkan server (JSON dan log).
 	Timezone string
+	// APIKey: kalau diisi, setiap request /api/... wajib membawa "Authorization: Bearer <key>". Kosong = terbuka
+	// (cocok untuk server di laptop sendiri). Wajib diisi kalau server bisa dijangkau orang lain.
+	APIKey string
 
 	// Analisis AI. Kosongkan ANTHROPIC_API_KEY untuk mematikan AI (aturan tetap jalan).
 	AnthropicAPIKey  string
@@ -79,6 +82,7 @@ func Load() (Config, error) {
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		MaxReportMB:   maxMB,
+		APIKey:        os.Getenv("REDLINE_API_KEY"),
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),

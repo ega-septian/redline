@@ -175,14 +175,20 @@ error messages to Voyage AI.
 
 ## Team settings
 
-| Setting          | Default        | Meaning                                                      |
-| ---------------- | -------------- | ------------------------------------------------------------ |
-| `STATUS_FROM`    | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all` |
-| `RETENTION_DAYS` | `30`           | Old test details are cleaned up (`0` = never)                |
-| `TIMEZONE`       | `Asia/Jakarta` | Time zone for the API and logs                               |
+| Setting           | Default        | Meaning                                                      |
+| ----------------- | -------------- | ------------------------------------------------------------ |
+| `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all` |
+| `RETENTION_DAYS`  | `30`           | Old test details are cleaned up (`0` = never)                |
+| `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                               |
+| `REDLINE_API_KEY` | empty          | Required key for `/api/...` (empty = open, for a laptop)     |
 
 Only CI changes a failure's status by default, so a half-written test on a laptop doesn't become a
 team failure. Working alone? Use `STATUS_FROM=all`.
+
+**Running Redline where others can reach it?** Set `REDLINE_API_KEY` (for example `openssl rand -hex 32`)
+on the server and the same value in the Playwright project's `.env`. Every `/api/...` request must then
+send `Authorization: Bearer <key>`; without it, anyone who can reach the server could send runs, change
+labels or spend your AI key. `/healthz` stays open.
 
 <details>
 <summary><b>API</b></summary>
@@ -206,6 +212,7 @@ Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`
+(add `-H "Authorization: Bearer $REDLINE_API_KEY"` when the server has a key)
 
 </details>
 

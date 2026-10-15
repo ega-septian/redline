@@ -329,3 +329,41 @@ func TestReportPortal(t *testing.T) {
 		t.Errorf("run dan token: %d %q", rp.run, rp.token)
 	}
 }
+
+func TestAPIKey(t *testing.T) {
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "rahasia-123"}).Routes()
+	call := func(path, auth string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	cases := []struct {
+		name, path, auth string
+		want             int
+	}{
+		{"tanpa key", "/api/runs", "", http.StatusUnauthorized},
+		{"key salah", "/api/runs", "Bearer salah", http.StatusUnauthorized},
+		{"key tanpa Bearer", "/api/runs", "rahasia-123", http.StatusUnauthorized},
+		{"key dengan awalan benar tapi lebih panjang", "/api/runs", "Bearer rahasia-1234", http.StatusUnauthorized},
+		{"key benar", "/api/runs", "Bearer rahasia-123", http.StatusOK},
+		{"healthz tanpa key", "/healthz", "", http.StatusOK},
+	}
+	for _, c := range cases {
+		if rec := call(c.path, c.auth); rec.Code != c.want {
+			t.Errorf("%s: status %d, harusnya %d (%s)", c.name, rec.Code, c.want, rec.Body)
+		}
+	}
+	if rec := call("/api/runs", ""); rec.Header().Get("WWW-Authenticate") == "" || strings.Contains(rec.Body.String(), "rahasia") {
+		t.Errorf("401 harus memberi WWW-Authenticate dan tidak membocorkan key: %v %s", rec.Header(), rec.Body)
+	}
+}
+
+func TestAPIKey_EmptyMeansOpen(t *testing.T) {
+	if rec := do(newServer(&fakeStore{}, 0), "GET", "/api/runs", nil); rec.Code != http.StatusOK {
+		t.Fatalf("tanpa APIKey server harus terbuka, dapat %d", rec.Code)
+	}
+}

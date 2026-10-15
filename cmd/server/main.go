@@ -101,7 +101,12 @@ func run(log *slog.Logger) error {
 		log.Info("pencarian kasus mirip mati (VOYAGE_API_KEY kosong)")
 	}
 
-	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20}
+	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey}
+	if cfg.APIKey != "" {
+		log.Info("API key aktif: request /api/... wajib membawa REDLINE_API_KEY")
+	} else {
+		log.Info("API key mati (REDLINE_API_KEY kosong): aman untuk server di laptop sendiri, wajib diisi kalau server bisa dijangkau orang lain")
+	}
 	if cfg.ReportPortalURL != "" {
 		srv.ReportPortal = &reportportal.Syncer{
 			Client:   &reportportal.Client{BaseURL: cfg.ReportPortalURL, Project: cfg.ReportPortalProject, APIKey: cfg.ReportPortalAPIKey},
