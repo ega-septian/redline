@@ -36,6 +36,12 @@ type Config struct {
 	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
 	OpenAPISpecs string
 
+	// ReportPortal: Redline mengisi jenis defect dan komentar untuk test yang masih "To Investigate".
+	// Kosongkan REPORTPORTAL_URL untuk mematikannya.
+	ReportPortalURL     string
+	ReportPortalProject string
+	ReportPortalAPIKey  string
+
 	// Embedding untuk mencari kasus mirip. Kosongkan VOYAGE_API_KEY untuk mematikannya.
 	VoyageAPIKey  string
 	VoyageModel   string
@@ -55,6 +61,9 @@ func Load() (Config, error) {
 	retention, err := strconv.Atoi(getenv("RETENTION_DAYS", "30"))
 	if err != nil || retention < 0 {
 		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
+	}
+	if os.Getenv("REPORTPORTAL_URL") != "" && os.Getenv("REPORTPORTAL_API_KEY") == "" {
+		return Config{}, fmt.Errorf("REPORTPORTAL_URL diisi tapi REPORTPORTAL_API_KEY kosong")
 	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
@@ -83,6 +92,10 @@ func Load() (Config, error) {
 		Neo4jDatabase: getenv("NEO4J_DATABASE", "redline"),
 
 		Neo4jDatabaseReset: os.Getenv("NEO4J_DATABASE_RESET") == "1",
+
+		ReportPortalURL:     os.Getenv("REPORTPORTAL_URL"),
+		ReportPortalProject: getenv("REPORTPORTAL_PROJECT", "superadmin_personal"),
+		ReportPortalAPIKey:  os.Getenv("REPORTPORTAL_API_KEY"),
 
 		VoyageAPIKey:  os.Getenv("VOYAGE_API_KEY"),
 		VoyageModel:   getenv("VOYAGE_MODEL", "voyage-4-lite"),

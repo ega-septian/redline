@@ -10,9 +10,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"redline/internal/analysis"
 	"redline/internal/report"
+	"redline/internal/reportportal"
 	"redline/internal/store"
 )
 
@@ -286,5 +288,44 @@ func TestKnowledge(t *testing.T) {
 	}
 	if rec := do(h, "GET", "/api/groups/tidakada/knowledge", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("kelompok tidak ada harus 404, dapat %d", rec.Code)
+	}
+}
+
+type fakeRP struct {
+	run   int64
+	token string
+	done  chan struct{}
+}
+
+func (f *fakeRP) Sync(_ context.Context, runID int64, token string) (reportportal.Result, error) {
+	f.run, f.token = runID, token
+	close(f.done)
+	return reportportal.Result{Launch: 1}, nil
+}
+
+func TestReportPortal(t *testing.T) {
+	if rec := do(newServer(&fakeStore{}, 0), "POST", "/api/runs/3/reportportal?token=abc", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("tanpa REPORTPORTAL_URL harus 404, dapat %d", rec.Code)
+	}
+	rp := &fakeRP{done: make(chan struct{})}
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, ReportPortal: rp,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
+	for _, url := range []string{"/api/runs/x/reportportal?token=abc", "/api/runs/3/reportportal",
+		"/api/runs/3/reportportal?token=a%20b", "/api/runs/0/reportportal?token=abc"} {
+		if rec := do(h, "POST", url, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s harus 400, dapat %d", url, rec.Code)
+		}
+	}
+	rec := do(h, "POST", "/api/runs/3/reportportal?token=5f0c-a1", nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("harus 202, dapat %d %s", rec.Code, rec.Body)
+	}
+	select {
+	case <-rp.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sinkronisasi tidak dijalankan di background")
+	}
+	if rp.run != 3 || rp.token != "5f0c-a1" {
+		t.Errorf("run dan token: %d %q", rp.run, rp.token)
 	}
 }

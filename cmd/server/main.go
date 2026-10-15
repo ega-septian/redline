@@ -23,6 +23,7 @@ import (
 	"redline/internal/contract"
 	"redline/internal/embed"
 	"redline/internal/llm"
+	"redline/internal/reportportal"
 	"redline/internal/store"
 )
 
@@ -101,6 +102,15 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20}
+	if cfg.ReportPortalURL != "" {
+		srv.ReportPortal = &reportportal.Syncer{
+			Client:   &reportportal.Client{BaseURL: cfg.ReportPortalURL, Project: cfg.ReportPortalProject, APIKey: cfg.ReportPortalAPIKey},
+			Store:    db,
+			Analyzer: analyzer,
+			Log:      log,
+		}
+		log.Info("integrasi ReportPortal aktif", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
+	}
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Routes(),

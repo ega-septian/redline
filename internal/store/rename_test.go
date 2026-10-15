@@ -124,3 +124,22 @@ func TestRenameFollowsTestCaseID(t *testing.T) {
 		}
 	})
 }
+
+func TestRunFailures(t *testing.T) {
+	s := newStore(t)
+	run := ingest(t, s, describeReport("Brands",
+		tagged{"get", "TC-BRD-001", ""},
+		tagged{"create", "TC-BRD-002", "Expected: 201\nReceived: 500"},
+		tagged{"untagged", "", "Expected: 200\nReceived: 404"}), store.RunMeta{})
+	got, err := s.RunFailures(context.Background(), run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].CaseID != "TC-BRD-002" || got[0].Fingerprint != groupOf(t, run, "create").Fingerprint ||
+		got[1].CaseID != "" || !strings.HasSuffix(got[1].TestKey, "untagged") {
+		t.Errorf("hanya test yang gagal, dengan ID dan kelompoknya: %+v", got)
+	}
+	if none, _ := s.RunFailures(context.Background(), 9999); len(none) != 0 {
+		t.Errorf("run yang tidak ada: %+v", none)
+	}
+}
