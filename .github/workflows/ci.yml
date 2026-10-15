@@ -62,3 +62,21 @@ jobs:
           # Pengaman: test database tidak boleh diam-diam dilewati.
           if grep -q "test Neo4j dilewati" test.log; then echo "Test database dilewati: DozerDB tidak terhubung"; exit 1; fi
           echo "Lulus: $(grep -c -- '--- PASS' test.log) test"
+
+  playwright-package:
+    # Paket redline-playwright (reporter, fixture, CLI) harus tetap bisa dibangun: npm membangunnya saat dipasang.
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install and build
+        run: npm ci
+
+      - name: Built files
+        run: test -f playwright/dist/reporter.js && test -f playwright/dist/fixture.js && test -f playwright/dist/cli.js
