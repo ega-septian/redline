@@ -69,16 +69,17 @@ Optional settings in `.env` (Redline works without them, with less insight):
 
 ## Connect your Playwright project
 
-1. Copy from [playwright-web-api-automation](https://github.com/ega-septian/playwright-web-api-automation):
-   `reporters/redline.ts`, `reporters/source-hash.ts`, `fixtures/redline.ts`, and for the CLI
-   `scripts/redline.mts` and `scripts/sandbox.mts`.
+1. Install the `redline-playwright` package from this repo, pinned to a release (Node.js 20+):
+   ```bash
+   npm i -D github:ega-septian/redline#v0.5.0
+   ```
 2. Add the reporter after the JSON reporter in `playwright.config.ts`:
    ```ts
-   reporter: [["html"], ["json", { outputFile: "test-results/results.json" }], ["./reporters/redline.ts"]],
+   reporter: [["html"], ["json", { outputFile: "test-results/results.json" }], ["redline-playwright/reporter"]],
    ```
 3. Import `test` from the fixture in your specs (it records response shapes and a curl per request):
    ```ts
-   import { test, expect } from "../../../fixtures/redline";
+   import { test, expect } from "redline-playwright/fixture";
    ```
 4. Give each test an ID: `test("...", { tag: "@TC-USR-001" }, ...)`. It appears in reports, and keeps
    a test's history when you rename its title, `describe` or file.
@@ -90,13 +91,13 @@ Run your tests as usual. The full report, with a curl to reproduce each failed r
 
 From your Playwright project:
 
-| Command                                            | What it does                                         |
-| -------------------------------------------------- | ---------------------------------------------------- |
-| `REDLINE_AI=1 npx playwright test`                 | Run tests and explain each failure                   |
-| `node scripts/redline.mts verify`                  | Prove the cause of the last run's failures           |
-| `node scripts/redline.mts impact schemas/brand.ts` | Tests affected by a file (or `impact GET /brands/1`) |
-| `node scripts/redline.mts score`                   | How often Redline's guesses turned out right         |
-| `node scripts/redline.mts learn`                   | Turn proven cases into rules; then `approve <id>`    |
+| Command                               | What it does                                         |
+| ------------------------------------- | ---------------------------------------------------- |
+| `REDLINE_AI=1 npx playwright test`    | Run tests and explain each failure                   |
+| `npx redline verify`                  | Prove the cause of the last run's failures           |
+| `npx redline impact schemas/brand.ts` | Tests affected by a file (or `impact GET /brands/1`) |
+| `npx redline score`                   | How often Redline's guesses turned out right         |
+| `npx redline learn`                   | Turn proven cases into rules; then `approve <id>`    |
 
 | Environment variable  | Effect                                                  |
 | --------------------- | ------------------------------------------------------- |
@@ -104,6 +105,7 @@ From your Playwright project:
 | `REDLINE_VERIFY=1`    | Prove each new failure right after the run (local only) |
 | `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint2`           |
 | `REDLINE=0`           | Turn Redline off                                        |
+| `REDLINE_API_KEY`     | The server's API key, if it has one                     |
 
 ## How it decides
 
@@ -159,7 +161,31 @@ which copies labels from past failures, Redline also explains failures it has ne
 2. Run the tests with both reporters on: `REDLINE=1 REPORTPORTAL=1 npx playwright test`.
 
 The Playwright project tags the launch with a `redline_run` token and sends the same token to Redline,
-which waits for the launch to finish and matches tests by their `@TC-` ID.
+which waits for the launch to finish and matches tests by their `@TC-` ID. The fixture sends the ID to
+ReportPortal when `REPORTPORTAL=1` (it needs `@reportportal/agent-js-playwright`); see `playwright.config.ts`
+in [playwright-web-api-automation](https://github.com/ega-septian/playwright-web-api-automation) for the
+token and the ReportPortal reporter.
+
+## Allure
+
+With [`allure-playwright`](https://allurereport.org) in the reporter list, Redline adds its cause to each
+failed test it analysed (`REDLINE_AI=1`): a `redline` label, an explanation with the evidence and next
+step, and a proven patch as an attachment. Group them on the Categories page in `allurerc.mjs`
+(Allure Report 3):
+
+```js
+categories: [
+  { name: "Backend bug (Redline)", matchers: { labels: { redline: "backend_bug" } } },
+  { name: "Test bug (Redline)", matchers: { labels: { redline: "test_bug" } } },
+  { name: "Environment (Redline)", matchers: { labels: { redline: "environment" } } },
+  { name: "Flaky (Redline)", matchers: { labels: { redline: "flaky" } } },
+  { name: "Unclear (Redline)", matchers: { labels: { redline: "unknown" } } },
+],
+```
+
+Allure's own categories only look at the error type, so a wrong expected value in a test lands under
+"Product errors"; Redline's label says whose bug it is. Example: the
+[published report](https://ega-septian.github.io/playwright-web-api-automation/) of the Playwright project.
 
 ## What is sent
 
@@ -229,6 +255,7 @@ internal/embed/      Voyage AI client
 internal/llm/        Claude client
 internal/store/      Neo4j graph model, queries, retention
 internal/api/        HTTP handlers
+playwright/src/      redline-playwright: reporter, fixture, CLI (TypeScript)
 ```
 
 ```bash
@@ -243,13 +270,14 @@ against DozerDB on every pull request, and fails if the database tests are skipp
 
 ## Versions
 
-| Version  | Highlights                                             |
-| -------- | ------------------------------------------------------ |
-| `v0.4.0` | Fills ReportPortal with the cause of each failed test  |
-| `v0.3.1` | A renamed test keeps its history through its `@TC-` ID |
-| `v0.3.0` | Knowledge graph and impact analysis                    |
-| `v0.2.0` | Neo4j (DozerDB) as the only database                   |
-| `v0.1.0` | First release, Postgres + pgvector                     |
+| Version  | Highlights                                                              |
+| -------- | ----------------------------------------------------------------------- |
+| `v0.5.0` | Playwright package installed from GitHub, optional API key, MIT license |
+| `v0.4.0` | Fills ReportPortal with the cause of each failed test                   |
+| `v0.3.1` | A renamed test keeps its history through its `@TC-` ID                  |
+| `v0.3.0` | Knowledge graph and impact analysis                                     |
+| `v0.2.0` | Neo4j (DozerDB) as the only database                                    |
+| `v0.1.0` | First release, Postgres + pgvector                                      |
 
 ## What's next
 

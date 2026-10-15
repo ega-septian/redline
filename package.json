@@ -1,0 +1,53 @@
+{
+  "name": "redline-playwright",
+  "version": "0.5.0",
+  "description": "Playwright reporter, fixture and CLI for Redline, the failure-triage server",
+  "license": "MIT",
+  "author": "Ega Septian",
+  "repository": "github:ega-septian/redline",
+  "files": [
+    "playwright/dist"
+  ],
+  "exports": {
+    "./reporter": {
+      "types": "./playwright/dist/reporter.d.ts",
+      "default": "./playwright/dist/reporter.js"
+    },
+    "./fixture": {
+      "types": "./playwright/dist/fixture.d.ts",
+      "default": "./playwright/dist/fixture.js"
+    },
+    "./sandbox": {
+      "types": "./playwright/dist/sandbox.d.ts",
+      "default": "./playwright/dist/sandbox.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "redline": "playwright/dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p playwright",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0 || ^18.0.0"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.50.0",
+    "@reportportal/agent-js-playwright": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@reportportal/agent-js-playwright": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.3",
+    "typescript": "6.0.3"
+  }
+}
