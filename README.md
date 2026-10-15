@@ -249,3 +249,7 @@ against DozerDB on every pull request, and fails if the database tests are skipp
 - **ReportPortal, the other way**: labels corrected by the team in ReportPortal flow back into Redline as proven cases.
 - Analyse errors that stop a spec from loading (syntax errors, broken imports).
 - An inferred contract for APIs without documentation.
+
+## License
+
+[MIT](LICENSE) © 2026 Ega Septian
