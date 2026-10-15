@@ -1,0 +1,64 @@
+name: CI
+# Format, vet dan semua test Go, termasuk test database terhadap DozerDB yang dinyalakan di runner.
+# Tidak butuh API key: AI dan ReportPortal di test memakai tiruan.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        # Sama dengan docker-compose.yml. Database test (redlinetest-*) dibuat dan dikosongkan oleh test sendiri.
+        image: graphstack/dozerdb:5.26.27.0
+        env:
+          NEO4J_AUTH: neo4j/redline-local
+          NEO4J_server_memory_heap_max__size: 1G
+          NEO4J_server_memory_pagecache_size: 512M
+        ports:
+          - 7688:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p redline-local 'RETURN 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Belum diformat dengan gofmt:"; echo "$unformatted"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        shell: bash
+        env:
+          REDLINE_TEST_NEO4J_URI: bolt://localhost:7688
+          REDLINE_TEST_NEO4J_PASSWORD: redline-local
+        run: |
+          status=0
+          go test -count=1 -v ./... > test.log 2>&1 || status=$?
+          grep -E "^(ok|FAIL)" test.log || true
+          if [ "$status" -ne 0 ]; then
+            echo "go test gagal:"; grep -E -A15 -- "--- FAIL" test.log || tail -50 test.log
+            exit "$status"
+          fi
+          # Pengaman: test database tidak boleh diam-diam dilewati.
+          if grep -q "test Neo4j dilewati" test.log; then echo "Test database dilewati: DozerDB tidak terhubung"; exit 1; fi
+          echo "Lulus: $(grep -c -- '--- PASS' test.log) test"
