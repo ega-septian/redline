@@ -136,6 +136,29 @@ deep that changed, or an endpoint failing for unrelated tests too. More in [`doc
 The patch is saved to `test-results/redline/<id>.patch` to review. Patches that remove assertions or
 add `skip`, `try/catch` or retries are rejected. About $0.001 per verify.
 
+## ReportPortal
+
+Redline can fill in [ReportPortal](https://reportportal.io) for you: each failed test that is still
+"To Investigate" gets a defect type and a comment with the cause, evidence and next step.
+
+| Redline       | ReportPortal                         |
+| ------------- | ------------------------------------ |
+| `backend_bug` | Product Bug                          |
+| `test_bug`    | Automation Bug                       |
+| `environment` | System Issue                         |
+| `flaky`       | Automation Bug, comment says flaky   |
+| `unknown`     | stays To Investigate, with a comment |
+
+Labels set by people or by ReportPortal's Auto-Analysis are never overwritten. Unlike Auto-Analysis,
+which copies labels from past failures, Redline also explains failures it has never seen before.
+
+1. Set `REPORTPORTAL_URL` and `REPORTPORTAL_API_KEY` (and `REPORTPORTAL_PROJECT` if it isn't
+   `superadmin_personal`) in Redline's `.env`.
+2. Run the tests with both reporters on: `REDLINE=1 REPORTPORTAL=1 npx playwright test`.
+
+The Playwright project tags the launch with a `redline_run` token and sends the same token to Redline,
+which waits for the launch to finish and matches tests by their `@TC-` ID.
+
 ## What is sent
 
 | Data                                                           | When              |
@@ -219,6 +242,6 @@ data. No real AI calls are made in tests.
 
 ## What's next
 
-- **ReportPortal integration**: read "To Investigate" items, write back the defect type and proven patch.
+- **ReportPortal, the other way**: labels corrected by the team in ReportPortal flow back into Redline as proven cases.
 - Analyse errors that stop a spec from loading (syntax errors, broken imports).
 - An inferred contract for APIs without documentation.
