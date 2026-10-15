@@ -235,6 +235,7 @@ data. No real AI calls are made in tests.
 
 | Version  | Highlights                                             |
 | -------- | ------------------------------------------------------ |
+| `v0.4.0` | Fills ReportPortal with the cause of each failed test  |
 | `v0.3.1` | A renamed test keeps its history through its `@TC-` ID |
 | `v0.3.0` | Knowledge graph and impact analysis                    |
 | `v0.2.0` | Neo4j (DozerDB) as the only database                   |
