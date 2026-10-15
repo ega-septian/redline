@@ -5,3 +5,7 @@
 # Semua varian .env berisi rahasia (misalnya .env.supabase), kecuali contohnya
 .env.*
 !.env.example
+
+# Paket Playwright (redline-playwright)
+node_modules/
+playwright/dist/
