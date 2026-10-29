@@ -277,6 +277,11 @@ against DozerDB on every pull request, and fails if the database tests are skipp
 
 ## Versions
 
+The server reports its build and API version at `/healthz` (`version`, `api`) and on every response as
+`X-Redline-Version` / `X-Redline-Api-Version`. The Playwright package expects API version `1` and logs a
+warning when the server serves another one, so a mismatched server and package are visible instead of
+failing in a confusing way.
+
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
 | `v0.5.0` | Playwright package installed from GitHub, optional API key, MIT license |

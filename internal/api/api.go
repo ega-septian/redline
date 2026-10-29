@@ -60,14 +60,27 @@ type Server struct {
 	Log          *slog.Logger
 	MaxBodySize  int64
 	APIKey       string // kosong = tanpa autentikasi
+	// Version: versi build server, ditampilkan di /healthz dan header respons.
+	Version string
 	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
 	Ready func(context.Context) error
+}
+
+// APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
+// memeriksa header X-Redline-Api-Version dan memperingatkan kalau server dan paket berbeda.
+const APIVersion = 1
+
+func (s *Server) version() string {
+	if s.Version == "" {
+		return "dev"
+	}
+	return s.Version
 }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.version(), "api": APIVersion})
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
@@ -85,10 +98,21 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
-	if s.APIKey == "" {
-		return mux
+	var h http.Handler = mux
+	if s.APIKey != "" {
+		h = s.requireAPIKey(mux)
 	}
-	return s.requireAPIKey(mux)
+	return s.versionHeaders(h)
+}
+
+// versionHeaders menandai setiap respons dengan versi server dan versi API, supaya klien bisa
+// mendeteksi server dan paket yang tidak seversi tanpa memanggil endpoint tambahan.
+func (s *Server) versionHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Redline-Version", s.version())
+		w.Header().Set("X-Redline-Api-Version", strconv.Itoa(APIVersion))
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handleReady memeriksa dependensi (database). Berbeda dari /healthz yang hanya menandakan proses hidup.

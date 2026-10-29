@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"syscall"
@@ -37,6 +38,36 @@ func pricing(model string) llm.Pricing {
 	default:
 		return llm.Pricing{}
 	}
+}
+
+// buildVersion: versi modul dari build info, atau commit pendek saat build lokal (`go run`).
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	rev, dirty := "", false
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	return rev
 }
 
 func main() {
@@ -112,7 +143,8 @@ func run(log *slog.Logger) error {
 		log.Info("pencarian kasus mirip mati (VOYAGE_API_KEY kosong)")
 	}
 
-	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey}
+	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
+		Version: buildVersion()}
 	// /readyz memeriksa database; /healthz tetap liveness saja.
 	srv.Ready = db.Ping
 	if cfg.APIKey != "" {

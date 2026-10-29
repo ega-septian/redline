@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -397,5 +399,37 @@ func TestReadyz_NotConfigured(t *testing.T) {
 	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
 	if rec := do(h, "GET", "/readyz", nil); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("tanpa Ready, /readyz harus 503, dapat %d", rec.Code)
+	}
+}
+
+func TestVersionHeaders(t *testing.T) {
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "9.9.9"}).Routes()
+	rec := do(h, "GET", "/healthz", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("healthz status %d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Redline-Version"); got != "9.9.9" {
+		t.Errorf("X-Redline-Version = %q", got)
+	}
+	if got := rec.Header().Get("X-Redline-Api-Version"); got != strconv.Itoa(APIVersion) {
+		t.Errorf("X-Redline-Api-Version = %q", got)
+	}
+	var body struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+		API     int    `json:"api"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body healthz bukan JSON: %v", err)
+	}
+	if body.Status != "ok" || body.Version != "9.9.9" || body.API != APIVersion {
+		t.Errorf("body healthz = %+v", body)
+	}
+}
+
+func TestVersionDefault(t *testing.T) {
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
+	if got := do(h, "GET", "/healthz", nil).Header().Get("X-Redline-Version"); got != "dev" {
+		t.Errorf("versi default = %q, harusnya dev", got)
 	}
 }
