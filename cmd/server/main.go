@@ -117,6 +117,10 @@ func run(log *slog.Logger) error {
 		knownPrice = true
 	}
 	analyzer.Pricing = price
+	if cfg.AIDailyBudgetUSD > 0 {
+		analyzer.DailyBudgetUSD = cfg.AIDailyBudgetUSD
+		log.Info("batas biaya AI harian aktif", "usd", cfg.AIDailyBudgetUSD)
+	}
 	if cfg.AnthropicAPIKey != "" && !knownPrice {
 		log.Warn("harga model tidak dikenal, biaya AI dicatat 0; set ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE",
 			"model", cfg.AnthropicModel)
