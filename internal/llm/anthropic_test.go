@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -17,6 +18,7 @@ func TestCreateMessage_ToolChoice(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
+			w.Header().Set("Retry-After", "0")        // backoff dihormati, test tidak menunggu
 			w.WriteHeader(http.StatusTooManyRequests) // harus di-retry
 			return
 		}
@@ -76,5 +78,35 @@ func TestPricingFor(t *testing.T) {
 	}
 	if _, ok := PricingFor("claude-opus-5-5"); ok {
 		t.Error("model yang tidak dikenal tidak boleh punya harga karangan")
+	}
+}
+
+// flakyTransport gagal sekali di level jaringan, lalu berhasil. Memastikan error transport ikut di-retry.
+type flakyTransport struct{ calls int }
+
+func (f *flakyTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	f.calls++
+	if f.calls == 1 {
+		return nil, errors.New("koneksi terputus")
+	}
+	body := `{"model":"m","stop_reason":"end_turn","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}, nil
+}
+
+func TestCreateMessage_RetriesTransportError(t *testing.T) {
+	tr := &flakyTransport{}
+	c := NewClient("k", "http://contoh.invalid")
+	c.HTTP = &http.Client{Transport: tr}
+	c.MaxRetries = 1
+
+	if _, err := c.CreateMessage(context.Background(), Request{}); err != nil {
+		t.Fatalf("error jaringan sesaat harus di-retry: %v", err)
+	}
+	if tr.calls != 2 {
+		t.Errorf("permintaan = %d, harusnya 2", tr.calls)
 	}
 }

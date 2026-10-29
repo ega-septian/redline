@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -108,6 +109,13 @@ func (c *Client) CreateMessage(ctx context.Context, req Request) (*Response, err
 
 		resp, err := c.HTTP.Do(httpReq)
 		if err != nil {
+			// Error jaringan (bukan ctx yang dibatalkan) biasanya sesaat: ulangi dengan backoff.
+			if attempt < c.MaxRetries && ctx.Err() == nil {
+				if err := waitRetry(ctx, retryDelay(attempt, nil)); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			return nil, err
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
@@ -117,10 +125,8 @@ func (c *Client) CreateMessage(ctx context.Context, req Request) (*Response, err
 		}
 		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
 		if retryable && attempt < c.MaxRetries {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
+			if err := waitRetry(ctx, retryDelay(attempt, resp)); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -136,6 +142,32 @@ func (c *Client) CreateMessage(ctx context.Context, req Request) (*Response, err
 			return nil, fmt.Errorf("decode response: %w", err)
 		}
 		return &out, nil
+	}
+}
+
+// retryDelay: Retry-After dari server (detik, maksimal 30) kalau ada, kalau tidak backoff linear.
+func retryDelay(attempt int, resp *http.Response) time.Duration {
+	if resp != nil {
+		if raw := resp.Header.Get("Retry-After"); raw != "" {
+			if secs, err := strconv.Atoi(raw); err == nil && secs >= 0 {
+				d := time.Duration(secs) * time.Second
+				if d > 30*time.Second {
+					d = 30 * time.Second
+				}
+				return d
+			}
+		}
+	}
+	return time.Duration(attempt+1) * time.Second
+}
+
+// waitRetry menunggu, tetapi berhenti kalau context dibatalkan.
+func waitRetry(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }
 
