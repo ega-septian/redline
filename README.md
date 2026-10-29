@@ -289,6 +289,7 @@ failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
+| `v0.6.0` | Safe binding and `/readyz`, PII redaction, AI pricing and daily budget, version handshake |
 | `v0.5.0` | Playwright package installed from GitHub, optional API key, MIT license |
 | `v0.4.0` | Fills ReportPortal with the cause of each failed test                   |
 | `v0.3.1` | A renamed test keeps its history through its `@TC-` ID                  |
