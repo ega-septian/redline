@@ -11,7 +11,7 @@ func TestRedact(t *testing.T) {
 		`{"Authorization":"Bearer xyz"}`:                     `{"Authorization":"[REDACTED]"}`,
 		`headers: { authorization: 'Bearer 1a2b3c' }`:        `headers: { authorization: "[REDACTED]" }`,
 		`{"password": "rahasia123", "email": "a@b.co"}`:      `{"password": "[REDACTED]", "email": "<email>"}`,
-		"hubungi +6281234567890 atau 081298765432":           "hubungi <n> atau <n>",
+		"hubungi +6281234567890 atau 081298765432":           "hubungi +<n> atau <n>",
 		"email budi.santoso+qa@example.co.id terdaftar":      "email <email> terdaftar",
 		"token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_abc": `token="[REDACTED]"`,
 		"jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_abc":   "jwt [JWT]",
@@ -51,5 +51,22 @@ func TestFingerprint(t *testing.T) {
 	}
 	if f1 == Fingerprint("toolshop › a.spec.ts › y", "Expected: 201\nReceived: 500") {
 		t.Error("test berbeda harus beda fingerprint")
+	}
+}
+
+// Redaksi PII harus menghasilkan teks yang sama dengan pipeline lama (Clean tanpa redaksi PII lalu
+// Normalize), supaya test yang sudah punya riwayat tidak memulai grup baru setelah upgrade.
+func TestFingerprint_PIIRedactionKeepsHistory(t *testing.T) {
+	cases := []string{
+		"login gagal untuk budi@example.com",
+		"hubungi +6281234567890",
+		"hubungi 081298765432",
+	}
+	for _, msg := range cases {
+		old := Fingerprint("t", Normalize(msg))
+		now := Fingerprint("t", Normalize(Clean(msg)))
+		if old != now {
+			t.Errorf("%q: fingerprint berubah %s -> %s", msg, old, now)
+		}
 	}
 }

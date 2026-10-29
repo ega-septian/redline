@@ -23,8 +23,9 @@ var (
 		// Email dan nomor telepon adalah PII: jangan disimpan atau dikirim ke AI. Penggantinya sengaja
 		// sama dengan aturan Normalize ("<email>" / "<n>"), supaya fingerprint lama tidak berubah.
 		{regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`), `<email>`},
-		{regexp.MustCompile(`(?:\+62|62|0)8[1-9][0-9]{6,11}`), `<n>`},
-		{regexp.MustCompile(`\+\d{8,15}`), `<n>`},
+		// Nomor internasional: Normalize lama menyisakan "+" di depan, jadi pertahankan.
+		{regexp.MustCompile(`\+\d{8,15}`), `+<n>`},
+		{regexp.MustCompile(`(?:62|0)8[1-9][0-9]{6,11}`), `<n>`},
 		{regexp.MustCompile(`\b\d{16}\b`), "[NIK/16-DIGIT]"},
 	}
 
