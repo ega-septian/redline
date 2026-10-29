@@ -17,6 +17,9 @@ import (
 // ErrAIDisabled: aturan tidak cocok dan ANTHROPIC_API_KEY belum diisi.
 var ErrAIDisabled = errors.New("analisis AI belum aktif: isi ANTHROPIC_API_KEY di .env lalu restart server")
 
+// ErrBudgetExceeded: biaya AI hari ini sudah mencapai AI_DAILY_BUDGET_USD.
+var ErrBudgetExceeded = errors.New("batas biaya AI harian tercapai")
+
 type Store interface {
 	Facts(ctx context.Context, fingerprint string) (*store.Facts, error)
 	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
@@ -34,6 +37,8 @@ type Store interface {
 	SimilarCases(ctx context.Context, groupID, model string, minSimilarity float64, limit int) ([]store.SimilarCase, error)
 	SaveRunContract(ctx context.Context, runID int64, project, sourceURL, document string) (string, error)
 	RunContract(ctx context.Context, runID int64, project string) (id, document string, err error)
+	RecordSpend(ctx context.Context, costUSD float64) error
+	SpendSince(ctx context.Context, since time.Time) (float64, error)
 }
 
 type LLM interface {
@@ -51,6 +56,10 @@ type Analyzer struct {
 	Embed      Embedder  // nil = tanpa kasus mirip
 	EmbedModel string
 	embedMu    sync.Mutex // satu pemanggilan Voyage pada satu waktu (rate limit akun gratis rendah)
+
+	// DailyBudgetUSD: batas biaya AI per hari, USD (0 = tanpa batas). Biaya dicatat di Store
+	// setiap kali AI menjawab, jadi analisis ulang tetap terhitung.
+	DailyBudgetUSD float64
 }
 
 // Analyze menentukan penyebab satu kelompok kegagalan. Urutannya, dari bukti terkuat:
@@ -117,7 +126,13 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 		if a.LLM == nil {
 			return nil, false, ErrAIDisabled
 		}
-		if res, err = a.ask(ctx, facts); err != nil {
+		if err := a.checkBudget(ctx); err != nil {
+			if fallback == nil {
+				return nil, false, err
+			}
+			a.logger().Warn("batas biaya AI tercapai, memakai hasil aturan", "fingerprint", fingerprint, "err", err)
+			res = fallback
+		} else if res, err = a.ask(ctx, facts); err != nil {
 			if fallback == nil {
 				return nil, false, err
 			}
@@ -128,6 +143,13 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	res.Fingerprint = fingerprint
 	res.PromptVersion = PromptVersion
 	res.CreatedAt = time.Now()
+	// Biaya dicatat terpisah dari Analysis, karena SaveAnalysis menimpa analisis lama dan analisis
+	// ulang (?force=1) tetap harus terhitung di batas harian.
+	if res.Source == "ai" && res.CostUSD > 0 {
+		if err := a.Store.RecordSpend(ctx, res.CostUSD); err != nil {
+			a.logger().Warn("gagal mencatat biaya AI", "err", err)
+		}
+	}
 	if err := a.Store.SaveAnalysis(ctx, *res); err != nil {
 		return nil, false, fmt.Errorf("simpan analisis: %w", err)
 	}
@@ -136,6 +158,25 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 		a.logger().Warn("gagal mencatat tebakan", "fingerprint", fingerprint, "err", err)
 	}
 	return res, false, nil
+}
+
+// checkBudget menolak panggilan AI kalau biaya hari ini sudah mencapai batas. Kalau query gagal,
+// analisis tetap jalan (lebih baik daripada memblokir karena masalah hitung).
+func (a *Analyzer) checkBudget(ctx context.Context) error {
+	if a.DailyBudgetUSD <= 0 {
+		return nil
+	}
+	now := time.Now()
+	since := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	spent, err := a.Store.SpendSince(ctx, since)
+	if err != nil {
+		a.logger().Warn("gagal menghitung biaya AI hari ini; batas dilewati", "err", err)
+		return nil
+	}
+	if spent >= a.DailyBudgetUSD {
+		return fmt.Errorf("%w: $%.4f dari $%.2f", ErrBudgetExceeded, spent, a.DailyBudgetUSD)
+	}
+	return nil
 }
 
 func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, error) {

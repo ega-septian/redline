@@ -20,6 +20,11 @@ var (
 		{regexp.MustCompile(`eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*`), "[JWT]"},
 		{regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9\-._~+/]+=*`), "$1 [REDACTED]"},
 		{regexp.MustCompile(`(?i)("?(?:authorization|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|passwd)"?\s*[:=]\s*)((?i:bearer|basic)\s+\S+|"[^"]*"|'[^']*'|[^\s,}]+)`), `$1"[REDACTED]"`},
+		// Email dan nomor telepon adalah PII: jangan disimpan atau dikirim ke AI. Penggantinya sengaja
+		// sama dengan aturan Normalize ("<email>" / "<n>"), supaya fingerprint lama tidak berubah.
+		{regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`), `<email>`},
+		{regexp.MustCompile(`(?:\+62|62|0)8[1-9][0-9]{6,11}`), `<n>`},
+		{regexp.MustCompile(`\+\d{8,15}`), `<n>`},
 		{regexp.MustCompile(`\b\d{16}\b`), "[NIK/16-DIGIT]"},
 	}
 

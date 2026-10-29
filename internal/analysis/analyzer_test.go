@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"redline/internal/llm"
 	"redline/internal/report"
@@ -262,5 +263,42 @@ func TestGrounded(t *testing.T) {
 	got := grounded([]string{"Received: 500", "Expected: 201", "kolom hilang", "", "Received: 500", "Expected: 201"}, facts)
 	if len(got) != 4 || got[0] != "Received: 500" {
 		t.Errorf("spasi harus diabaikan, karangan dibuang, maksimal 4: %v", got)
+	}
+}
+
+func TestAnalyze_DailyBudget(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	if err := s.RecordSpend(ctx, 0.01); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLLM{verdict: verdict{Category: "backend_bug", Confidence: "high", Summary: "x"}}
+	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5",
+		Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}, DailyBudgetUSD: 0.005}
+
+	if _, _, err := a.Analyze(ctx, fps["order dibayar"], false); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("mau ErrBudgetExceeded, dapat %v", err)
+	}
+	if fake.calls != 0 {
+		t.Errorf("AI tidak boleh dipanggil saat budget habis, calls=%d", fake.calls)
+	}
+}
+
+func TestAnalyze_RecordsSpend(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fake := &fakeLLM{verdict: verdict{Category: "backend_bug", Confidence: "high", Summary: "x"}}
+	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5",
+		Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}}
+
+	if _, _, err := a.Analyze(ctx, fps["order dibayar"], false); err != nil {
+		t.Fatal(err)
+	}
+	spent, err := s.SpendSince(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spent <= 0 {
+		t.Errorf("biaya AI harus tercatat untuk batas harian, dapat %v", spent)
 	}
 }

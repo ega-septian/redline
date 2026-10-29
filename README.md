@@ -22,7 +22,8 @@ _Output after `npx playwright test` (the report is in Indonesian). 9 failures, 2
 - **Explains each cause**: backend bug, test bug, environment or flaky. Free rules first, Claude only when needed.
 - **Proves it on request** by rerunning the test and patching it in a copy of your project.
 - **Knows how tests connect**: which files and endpoints each test uses, so it can tell you which tests a change affects.
-- **Redacts secrets** (tokens, passwords, JWTs, card numbers) before anything is stored or sent to AI.
+- **Redacts secrets and PII** (tokens, passwords, JWTs, card numbers, emails, phone numbers) before
+  anything is stored or sent to AI.
 
 ## How it works
 
@@ -64,6 +65,8 @@ Optional settings in `.env` (Redline works without them, with less insight):
 | Setting             | Adds                                                                                         |
 | ------------------- | -------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | AI analysis and patches. Without it, only rules are used                                     |
+| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | USD per 1M tokens for a model that is not built in; without it the AI cost is recorded as 0 |
+| `AI_DAILY_BUDGET_USD` | Daily AI budget. When reached, rules keep running but Claude is not called                  |
 | `VOYAGE_API_KEY`    | Matches past proven cases with a similar error ([Voyage AI](https://dashboard.voyageai.com)) |
 | `OPENAPI_SPECS`     | Your API contract, e.g. `toolshop=http://localhost:8091/docs`                                |
 
@@ -196,25 +199,28 @@ Allure's own categories only look at the error type, so a wrong expected value i
 | Response shapes: field names and types, **no values**          | with the fixture  |
 | **Source code of failed tests**                                | failed tests only |
 
-Everything is redacted before it is stored. With AI on, the redacted facts go to Claude and redacted
-error messages to Voyage AI.
+Everything is redacted before it is stored, including tokens, passwords, JWTs, card/NIK numbers, email
+addresses and phone numbers. With AI on, the redacted facts go to Claude and redacted error messages to
+Voyage AI.
 
 ## Team settings
 
 | Setting           | Default        | Meaning                                                      |
 | ----------------- | -------------- | ------------------------------------------------------------ |
+| `HOST`            | `127.0.0.1`    | Interface to bind. A non-loopback host requires `REDLINE_API_KEY` |
 | `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all` |
 | `RETENTION_DAYS`  | `30`           | Old test details are cleaned up (`0` = never)                |
 | `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                               |
-| `REDLINE_API_KEY` | empty          | Required key for `/api/...` (empty = open, for a laptop)     |
+| `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host |
 
 Only CI changes a failure's status by default, so a half-written test on a laptop doesn't become a
 team failure. Working alone? Use `STATUS_FROM=all`.
 
-**Running Redline where others can reach it?** Set `REDLINE_API_KEY` (for example `openssl rand -hex 32`)
-on the server and the same value in the Playwright project's `.env`. Every `/api/...` request must then
-send `Authorization: Bearer <key>`; without it, anyone who can reach the server could send runs, change
-labels or spend your AI key. `/healthz` stays open.
+**Running Redline where others can reach it?** Bind it to a reachable host (`HOST=0.0.0.0`) and set
+`REDLINE_API_KEY` (for example `openssl rand -hex 32`) on the server and the same value in the Playwright
+project's `.env`. The server refuses to start on a non-loopback host without a key. Every `/api/...`
+request must then send `Authorization: Bearer <key>`; without it, anyone who can reach the server could
+send runs, change labels or spend your AI key. `/healthz` and `/readyz` stay open.
 
 <details>
 <summary><b>API</b></summary>
@@ -233,6 +239,7 @@ labels or spend your AI key. `/healthz` stays open.
 | `GET /api/scoreboard`                                              | How often guesses matched the proof                            |
 | `GET /api/impact?file=...` or `?endpoint=...`                      | Tests affected by a file or endpoint                           |
 | `GET /healthz`                                                     | Health check                                                   |
+| `GET /readyz`                                                      | Readiness: the server is up and the database answers           |
 
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 
@@ -266,9 +273,19 @@ Tests create and empty their own databases (`redlinetest-*`); never point them a
 data. No real AI calls are made in tests. CI (`.github/workflows/ci.yml`) runs gofmt, vet and all tests
 against DozerDB on every pull request, and fails if the database tests are skipped.
 
+Migrations in `internal/store/migrations/` run one statement at a time, because Neo4j does not allow
+schema commands and data writes in the same transaction. Every statement is idempotent (`IF NOT EXISTS`,
+`MERGE`), so a failed migration can be rerun safely; the version is recorded only after the whole file
+succeeds. Keep new statements idempotent.
+
 </details>
 
 ## Versions
+
+The server reports its build and API version at `/healthz` (`version`, `api`) and on every response as
+`X-Redline-Version` / `X-Redline-Api-Version`. The Playwright package expects API version `1` and logs a
+warning when the server serves another one, so a mismatched server and package are visible instead of
+failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |

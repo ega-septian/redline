@@ -60,13 +60,29 @@ type Server struct {
 	Log          *slog.Logger
 	MaxBodySize  int64
 	APIKey       string // kosong = tanpa autentikasi
+	// Version: versi build server, ditampilkan di /healthz dan header respons.
+	Version string
+	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
+	Ready func(context.Context) error
+}
+
+// APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
+// memeriksa header X-Redline-Api-Version dan memperingatkan kalau server dan paket berbeda.
+const APIVersion = 1
+
+func (s *Server) version() string {
+	if s.Version == "" {
+		return "dev"
+	}
+	return s.Version
 }
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.version(), "api": APIVersion})
 	})
+	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
@@ -82,18 +98,47 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
-	if s.APIKey == "" {
-		return mux
+	var h http.Handler = mux
+	if s.APIKey != "" {
+		h = s.requireAPIKey(mux)
 	}
-	return s.requireAPIKey(mux)
+	return s.versionHeaders(h)
 }
 
-// requireAPIKey menolak request /api/... tanpa "Authorization: Bearer <APIKey>". /healthz tetap terbuka supaya
-// pengecekan server hidup tidak butuh key. Key dibandingkan dalam waktu konstan.
+// versionHeaders menandai setiap respons dengan versi server dan versi API, supaya klien bisa
+// mendeteksi server dan paket yang tidak seversi tanpa memanggil endpoint tambahan.
+func (s *Server) versionHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Redline-Version", s.version())
+		w.Header().Set("X-Redline-Api-Version", strconv.Itoa(APIVersion))
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleReady memeriksa dependensi (database). Berbeda dari /healthz yang hanya menandakan proses hidup.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.Ready == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "readiness check belum dikonfigurasi"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.Ready(ctx); err != nil {
+		if s.Log != nil {
+			s.Log.Warn("readiness gagal", "err", err)
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "database tidak bisa dihubungi"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+// requireAPIKey menolak request /api/... tanpa "Authorization: Bearer <APIKey>". /healthz dan /readyz tetap
+// terbuka supaya pengecekan server hidup tidak butuh key. Key dibandingkan dalam waktu konstan.
 func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 	want := []byte("Bearer " + s.APIKey)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}

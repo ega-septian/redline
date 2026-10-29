@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"syscall"
@@ -36,6 +38,36 @@ func pricing(model string) llm.Pricing {
 	default:
 		return llm.Pricing{}
 	}
+}
+
+// buildVersion: versi modul dari build info, atau commit pendek saat build lokal (`go run`).
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	rev, dirty := "", false
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	return rev
 }
 
 func main() {
@@ -78,7 +110,21 @@ func run(log *slog.Logger) error {
 		log.Info("retensi mati (RETENTION_DAYS=0); semua detail test disimpan")
 	}
 
-	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Pricing: pricing(cfg.AnthropicModel), Log: log}
+	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log}
+	price, knownPrice := llm.PricingFor(cfg.AnthropicModel)
+	if cfg.AnthropicInputPrice > 0 || cfg.AnthropicOutputPrice > 0 {
+		price = llm.Pricing{InputPerMTok: cfg.AnthropicInputPrice, OutputPerMTok: cfg.AnthropicOutputPrice}
+		knownPrice = true
+	}
+	analyzer.Pricing = price
+	if cfg.AIDailyBudgetUSD > 0 {
+		analyzer.DailyBudgetUSD = cfg.AIDailyBudgetUSD
+		log.Info("batas biaya AI harian aktif", "usd", cfg.AIDailyBudgetUSD)
+	}
+	if cfg.AnthropicAPIKey != "" && !knownPrice {
+		log.Warn("harga model tidak dikenal, biaya AI dicatat 0; set ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE",
+			"model", cfg.AnthropicModel)
+	}
 	if cfg.AnthropicAPIKey != "" {
 		analyzer.LLM = llm.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
 		log.Info("analisis AI aktif", "model", cfg.AnthropicModel)
@@ -101,7 +147,10 @@ func run(log *slog.Logger) error {
 		log.Info("pencarian kasus mirip mati (VOYAGE_API_KEY kosong)")
 	}
 
-	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey}
+	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
+		Version: buildVersion()}
+	// /readyz memeriksa database; /healthz tetap liveness saja.
+	srv.Ready = db.Ping
 	if cfg.APIKey != "" {
 		log.Info("API key aktif: request /api/... wajib membawa REDLINE_API_KEY")
 	} else {
@@ -117,13 +166,13 @@ func run(log *slog.Logger) error {
 		log.Info("integrasi ReportPortal aktif", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
 	}
 	httpSrv := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
 		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("Redline jalan", "url", "http://localhost:"+cfg.Port)
+		log.Info("Redline jalan", "url", "http://"+httpSrv.Addr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

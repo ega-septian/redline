@@ -38,6 +38,9 @@ type Options = {
   url?: string;
 };
 
+/** Naik kalau protokol /api berubah. Server mengirim versinya di header X-Redline-Api-Version. */
+const API_VERSION = 1;
+
 type GroupChange = {
   fingerprint: string;
   test: string;
@@ -259,6 +262,11 @@ export default class RedlineReporter implements Reporter {
       log(`server menolak laporan (${res.status}): ${(await res.text()).slice(0, 300)}`);
       return;
     }
+    const servedApi = res.headers.get("x-redline-api-version");
+    if (servedApi && servedApi !== String(API_VERSION))
+      log(
+        `server Redline memakai API v${servedApi}, paket redline-playwright ini mengharapkan v${API_VERSION}. Samakan versi server dan paket.`,
+      );
     const summary = (await res.json()) as IngestResult;
     const idOf = (g: GroupChange) => this.ids[g.test] ?? "-";
     const rows: Row[] = [

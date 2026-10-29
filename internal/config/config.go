@@ -4,12 +4,17 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
+	// Host: interface tempat server mendengarkan. Default 127.0.0.1 (hanya laptop sendiri).
+	// Host non-loopback mensyaratkan REDLINE_API_KEY, supaya server tidak terbuka tanpa autentikasi.
+	Host string
 	Port string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
@@ -27,6 +32,13 @@ type Config struct {
 	AnthropicAPIKey  string
 	AnthropicModel   string
 	AnthropicBaseURL string
+	// AnthropicInputPrice/OutputPrice: harga USD per 1 juta token, untuk model yang tidak ada di
+	// daftar bawaan. Keduanya harus diisi bersama; 0 = pakai harga bawaan.
+	AnthropicInputPrice  float64
+	AnthropicOutputPrice float64
+	// AIDailyBudgetUSD: batas biaya analisis AI per hari (0 = tanpa batas). Kalau tercapai, aturan
+	// tetap dipakai tetapi AI tidak dipanggil.
+	AIDailyBudgetUSD float64
 
 	// Database: Neo4j (DozerDB). Default cocok dengan docker-compose.yml.
 	Neo4jURI      string
@@ -68,6 +80,26 @@ func Load() (Config, error) {
 	if os.Getenv("REPORTPORTAL_URL") != "" && os.Getenv("REPORTPORTAL_API_KEY") == "" {
 		return Config{}, fmt.Errorf("REPORTPORTAL_URL diisi tapi REPORTPORTAL_API_KEY kosong")
 	}
+	host := getenv("HOST", "127.0.0.1")
+	apiKey := os.Getenv("REDLINE_API_KEY")
+	if !loopbackHost(host) && apiKey == "" {
+		return Config{}, fmt.Errorf("HOST %q bisa dijangkau dari jaringan, tetapi REDLINE_API_KEY kosong: isi REDLINE_API_KEY atau pakai HOST=127.0.0.1", host)
+	}
+	inputPrice, err := priceEnv("ANTHROPIC_INPUT_PRICE")
+	if err != nil {
+		return Config{}, err
+	}
+	outputPrice, err := priceEnv("ANTHROPIC_OUTPUT_PRICE")
+	if err != nil {
+		return Config{}, err
+	}
+	if (inputPrice == 0) != (outputPrice == 0) {
+		return Config{}, fmt.Errorf("ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE harus diisi berdua (USD per 1 juta token)")
+	}
+	budget, err := priceEnv("AI_DAILY_BUDGET_USD")
+	if err != nil {
+		return Config{}, err
+	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
 		for _, s := range strings.Split(from, ",") {
@@ -77,16 +109,21 @@ func Load() (Config, error) {
 		}
 	}
 	return Config{
+		Host:          host,
 		Port:          getenv("PORT", "8787"),
 		RetentionDays: retention,
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		MaxReportMB:   maxMB,
-		APIKey:        os.Getenv("REDLINE_API_KEY"),
+		APIKey:        apiKey,
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+
+		AnthropicInputPrice:  inputPrice,
+		AnthropicOutputPrice: outputPrice,
+		AIDailyBudgetUSD:     budget,
 
 		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
 
@@ -112,6 +149,33 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loopbackHost: true untuk localhost dan alamat loopback. Nama host atau alamat lain dianggap bisa
+// dijangkau dari jaringan, jadi server mensyaratkan API key.
+func loopbackHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	h := strings.ToLower(strings.Trim(host, "[]"))
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// priceEnv membaca angka non-negatif (harga USD atau batas biaya). Kosong = 0.
+func priceEnv(key string) (float64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, fmt.Errorf("%s harus angka >= 0, dapat %q", key, raw)
+	}
+	return v, nil
 }
 
 // LoadDotEnv membaca file KEY=VALUE sederhana. File yang tidak ada diabaikan.
