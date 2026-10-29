@@ -145,6 +145,26 @@ type Pricing struct {
 	OutputPerMTok float64
 }
 
+// knownPricing adalah harga bawaan model yang dipakai Redline, USD per 1 juta token.
+// ANTHROPIC_INPUT_PRICE/ANTHROPIC_OUTPUT_PRICE menimpa ini untuk model lain.
+var knownPricing = []struct {
+	prefix string
+	price  Pricing
+}{
+	{"claude-haiku-5-5", Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}},
+}
+
+// PricingFor mengembalikan harga model kalau dikenal. Model dengan sufiks tanggal
+// (misalnya claude-haiku-5-5-20260101) memakai harga awalan yang cocok.
+func PricingFor(model string) (Pricing, bool) {
+	for _, k := range knownPricing {
+		if strings.HasPrefix(model, k.prefix) {
+			return k.price, true
+		}
+	}
+	return Pricing{}, false
+}
+
 func (p Pricing) Cost(u Usage) float64 {
 	return float64(u.InputTokens)*p.InputPerMTok/1e6 + float64(u.OutputTokens)*p.OutputPerMTok/1e6
 }

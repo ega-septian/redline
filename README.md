@@ -65,6 +65,8 @@ Optional settings in `.env` (Redline works without them, with less insight):
 | Setting             | Adds                                                                                         |
 | ------------------- | -------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | AI analysis and patches. Without it, only rules are used                                     |
+| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | USD per 1M tokens for a model that is not built in; without it the AI cost is recorded as 0 |
+| `AI_DAILY_BUDGET_USD` | Daily AI budget. When reached, rules keep running but Claude is not called                  |
 | `VOYAGE_API_KEY`    | Matches past proven cases with a similar error ([Voyage AI](https://dashboard.voyageai.com)) |
 | `OPENAPI_SPECS`     | Your API contract, e.g. `toolshop=http://localhost:8091/docs`                                |
 

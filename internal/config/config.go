@@ -4,6 +4,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -31,6 +32,13 @@ type Config struct {
 	AnthropicAPIKey  string
 	AnthropicModel   string
 	AnthropicBaseURL string
+	// AnthropicInputPrice/OutputPrice: harga USD per 1 juta token, untuk model yang tidak ada di
+	// daftar bawaan. Keduanya harus diisi bersama; 0 = pakai harga bawaan.
+	AnthropicInputPrice  float64
+	AnthropicOutputPrice float64
+	// AIDailyBudgetUSD: batas biaya analisis AI per hari (0 = tanpa batas). Kalau tercapai, aturan
+	// tetap dipakai tetapi AI tidak dipanggil.
+	AIDailyBudgetUSD float64
 
 	// Database: Neo4j (DozerDB). Default cocok dengan docker-compose.yml.
 	Neo4jURI      string
@@ -77,6 +85,21 @@ func Load() (Config, error) {
 	if !loopbackHost(host) && apiKey == "" {
 		return Config{}, fmt.Errorf("HOST %q bisa dijangkau dari jaringan, tetapi REDLINE_API_KEY kosong: isi REDLINE_API_KEY atau pakai HOST=127.0.0.1", host)
 	}
+	inputPrice, err := priceEnv("ANTHROPIC_INPUT_PRICE")
+	if err != nil {
+		return Config{}, err
+	}
+	outputPrice, err := priceEnv("ANTHROPIC_OUTPUT_PRICE")
+	if err != nil {
+		return Config{}, err
+	}
+	if (inputPrice == 0) != (outputPrice == 0) {
+		return Config{}, fmt.Errorf("ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE harus diisi berdua (USD per 1 juta token)")
+	}
+	budget, err := priceEnv("AI_DAILY_BUDGET_USD")
+	if err != nil {
+		return Config{}, err
+	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
 		for _, s := range strings.Split(from, ",") {
@@ -97,6 +120,10 @@ func Load() (Config, error) {
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
 		AnthropicBaseURL: getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+
+		AnthropicInputPrice:  inputPrice,
+		AnthropicOutputPrice: outputPrice,
+		AIDailyBudgetUSD:     budget,
 
 		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
 
@@ -136,6 +163,19 @@ func loopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
+}
+
+// priceEnv membaca angka non-negatif (harga USD atau batas biaya). Kosong = 0.
+func priceEnv(key string) (float64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, fmt.Errorf("%s harus angka >= 0, dapat %q", key, raw)
+	}
+	return v, nil
 }
 
 // LoadDotEnv membaca file KEY=VALUE sederhana. File yang tidak ada diabaikan.

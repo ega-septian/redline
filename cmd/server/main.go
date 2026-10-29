@@ -79,7 +79,17 @@ func run(log *slog.Logger) error {
 		log.Info("retensi mati (RETENTION_DAYS=0); semua detail test disimpan")
 	}
 
-	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Pricing: pricing(cfg.AnthropicModel), Log: log}
+	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log}
+	price, knownPrice := llm.PricingFor(cfg.AnthropicModel)
+	if cfg.AnthropicInputPrice > 0 || cfg.AnthropicOutputPrice > 0 {
+		price = llm.Pricing{InputPerMTok: cfg.AnthropicInputPrice, OutputPerMTok: cfg.AnthropicOutputPrice}
+		knownPrice = true
+	}
+	analyzer.Pricing = price
+	if cfg.AnthropicAPIKey != "" && !knownPrice {
+		log.Warn("harga model tidak dikenal, biaya AI dicatat 0; set ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE",
+			"model", cfg.AnthropicModel)
+	}
 	if cfg.AnthropicAPIKey != "" {
 		analyzer.LLM = llm.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
 		log.Info("analisis AI aktif", "model", cfg.AnthropicModel)

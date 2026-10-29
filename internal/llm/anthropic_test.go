@@ -66,3 +66,15 @@ func TestCreateMessage_APIError(t *testing.T) {
 		t.Errorf("mau APIError 401, dapat %v", err)
 	}
 }
+
+func TestPricingFor(t *testing.T) {
+	for _, model := range []string{"claude-haiku-5-5", "claude-haiku-5-5-20260101"} {
+		p, ok := PricingFor(model)
+		if !ok || p.InputPerMTok != 0.10 || p.OutputPerMTok != 0.50 {
+			t.Errorf("PricingFor(%q) = %+v, %v", model, p, ok)
+		}
+	}
+	if _, ok := PricingFor("claude-opus-5-5"); ok {
+		t.Error("model yang tidak dikenal tidak boleh punya harga karangan")
+	}
+}

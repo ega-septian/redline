@@ -53,3 +53,39 @@ func TestLoad_LoopbackAliases(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_AnthropicPriceOverrides(t *testing.T) {
+	t.Setenv("ANTHROPIC_INPUT_PRICE", "1.5")
+	t.Setenv("ANTHROPIC_OUTPUT_PRICE", "2.5")
+	t.Setenv("AI_DAILY_BUDGET_USD", "3")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AnthropicInputPrice != 1.5 || cfg.AnthropicOutputPrice != 2.5 || cfg.AIDailyBudgetUSD != 3 {
+		t.Errorf("harga/budget = %v/%v/%v", cfg.AnthropicInputPrice, cfg.AnthropicOutputPrice, cfg.AIDailyBudgetUSD)
+	}
+}
+
+func TestLoad_AnthropicPriceNeedsBoth(t *testing.T) {
+	t.Setenv("ANTHROPIC_INPUT_PRICE", "1.5")
+	t.Setenv("ANTHROPIC_OUTPUT_PRICE", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("hanya satu harga diisi harus ditolak")
+	}
+}
+
+func TestLoad_RejectsInvalidPrice(t *testing.T) {
+	for _, raw := range []string{"-1", "abc", "NaN", "+Inf"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("ANTHROPIC_INPUT_PRICE", raw)
+			t.Setenv("ANTHROPIC_OUTPUT_PRICE", "1")
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("harga %q harus ditolak", raw)
+			}
+		})
+	}
+}
