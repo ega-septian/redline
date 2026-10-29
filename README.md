@@ -2,8 +2,9 @@
 
 [![CI](https://github.com/ega-septian/redline/actions/workflows/ci.yml/badge.svg)](https://github.com/ega-septian/redline/actions/workflows/ci.yml)
 
-When a Playwright test fails, the first question is always the same: **is it a bug in the app, a bug
-in the test, or is the server just down?** Redline answers it for every failure, automatically.
+Failure triage for Playwright. When a test fails, Redline tells you whether it is a **backend bug**, a
+**test bug**, an **environment problem** or **flaky** — with the evidence, a curl to reproduce it, and
+an optional proof.
 
 ```
 [redline] run #12 · 8 Okt 2026, 19.36 WIB: 40 lulus, 9 gagal, 0 flaky, 1 skip
@@ -14,81 +15,157 @@ in the test, or is the server just down?** Redline answers it for every failure,
   2  TC-USR-001 Register user      1  REGRESSED  BUG DI TEST  Test memeriksa objek response…
 ```
 
-_Output after `npx playwright test` (the report is in Indonesian). 9 failures, 2 causes, each explained._
+_The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-## What it does
-
-- **Groups failures.** The same failure over ten runs is one problem; 300 tests failing because the server is down is one cause.
-- **Explains each cause**: backend bug, test bug, environment or flaky. Free rules first, Claude only when needed.
-- **Proves it on request** by rerunning the test and patching it in a copy of your project.
-- **Knows how tests connect**: which files and endpoints each test uses, so it can tell you which tests a change affects.
-- **Redacts secrets and PII** (tokens, passwords, JWTs, card numbers, emails, phone numbers) before
-  anything is stored or sent to AI.
-
-## How it works
-
-```mermaid
-flowchart LR
-    A[Test fails] --> B[Collect facts<br/>what changed since it passed,<br/>API contract, files and endpoints]
-    B --> C{Can a rule<br/>decide?}
-    C -->|yes, free| D[Verdict<br/>backend bug · test bug<br/>environment · flaky]
-    C -->|no| E[Claude reads<br/>the facts] --> D
-    D -.->|optional| F[Verify<br/>rerun and patch<br/>= proven cause]
-```
-
-## Accuracy
-
-Measured with bugs planted on purpose, using Claude Haiku 5.5:
-
-| Scenario                                 | Correct         | Wrong guesses |
-| ---------------------------------------- | --------------- | ------------- |
-| New test, no history (24 bugs)           | 92–96%          | 0             |
-| Test that passed before (24 bugs)        | 96–100%         | 0             |
-| App upgrade: outdated test vs regression | 6/6             | 0             |
-| Shared helper, schema or endpoint        | 18/18, by rules | 0             |
-
-When unsure, Redline says "unclear" instead of guessing. The benchmark lives in the
-[Playwright project](https://github.com/ega-septian/playwright-web-api-automation) (`npm run redline:bench`).
+Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
 ## Quick start
 
-Requires Go 1.24+ and Docker.
+### 1. Run the server
+
+Requires Go 1.24+ and Docker. Node.js 20+ is only needed for the Playwright package.
 
 ```bash
+git clone https://github.com/ega-septian/redline.git
+cd redline
 cp .env.example .env
-docker compose up -d   # Neo4j (DozerDB): bolt://localhost:7688, browser http://localhost:7475
-go run ./cmd/server    # API on http://localhost:8787
+docker compose up -d        # Neo4j/DozerDB: bolt://localhost:7688, browser http://localhost:7475
+go run ./cmd/server         # API on http://localhost:8787
 ```
 
-Optional settings in `.env` (Redline works without them, with less insight):
+Check that both the process and the database are ready:
 
-| Setting             | Adds                                                                                         |
-| ------------------- | -------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | AI analysis and patches. Without it, only rules are used                                     |
-| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE` | USD per 1M tokens for a model that is not built in; without it the AI cost is recorded as 0 |
-| `AI_DAILY_BUDGET_USD` | Daily AI budget. When reached, rules keep running but Claude is not called                  |
-| `VOYAGE_API_KEY`    | Matches past proven cases with a similar error ([Voyage AI](https://dashboard.voyageai.com)) |
-| `OPENAPI_SPECS`     | Your API contract, e.g. `toolshop=http://localhost:8091/docs`                                |
+```bash
+curl -s localhost:8787/healthz   # {"status":"ok","version":"…","api":1}
+curl -s localhost:8787/readyz    # {"status":"ready"}
+```
 
-## Connect your Playwright project
+Redline works without any API key. AI analysis is optional; without it, the deterministic rules still
+run. To turn it on, put these in `.env` and restart the server:
 
-1. Install the `redline-playwright` package from this repo, pinned to a release (Node.js 20+):
-   ```bash
-   npm i -D github:ega-septian/redline#v0.5.0
-   ```
-2. Add the reporter after the JSON reporter in `playwright.config.ts`:
-   ```ts
-   reporter: [["html"], ["json", { outputFile: "test-results/results.json" }], ["redline-playwright/reporter"]],
-   ```
-3. Import `test` from the fixture in your specs (it records response shapes and a curl per request):
-   ```ts
-   import { test, expect } from "redline-playwright/fixture";
-   ```
-4. Give each test an ID: `test("...", { tag: "@TC-USR-001" }, ...)`. It appears in reports, and keeps
-   a test's history when you rename its title, `describe` or file.
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+AI_DAILY_BUDGET_USD=5      # optional: stop AI calls after $5/day
+```
 
-Run your tests as usual. The full report, with a curl to reproduce each failed request, is written to
-`test-results/redline-report.md`. If Redline is down, tests still run normally.
+### 2. Connect a Playwright project
+
+Install the package, pinned to a release (use the same tag as your server):
+
+```bash
+npm i -D github:ega-septian/redline#v0.6.0
+```
+
+Add the reporter **after** the JSON reporter in `playwright.config.ts`:
+
+```ts
+reporter: [
+  ["html"],
+  ["json", { outputFile: "test-results/results.json" }],
+  ["redline-playwright/reporter"],
+],
+```
+
+Import `test` and `expect` from the fixture in your specs. It records response shapes and a curl per
+request:
+
+```ts
+import { test, expect } from "redline-playwright/fixture";
+
+test("Register user", { tag: "@TC-USR-001" }, async ({ request }) => {
+  const response = await request.post("/users/register", { data: payload }); // your payload
+  expect(response.status()).toBe(201);
+});
+```
+
+Give every test one unique `@TC-` tag. It appears in reports and keeps a test's history when you rename
+its title, `describe` or file.
+
+Run your tests as usual:
+
+```bash
+npx playwright test
+cat test-results/redline-report.md     # causes, evidence, curl per failed request
+```
+
+Explain the failures with AI as well:
+
+```bash
+REDLINE_AI=1 npx playwright test
+```
+
+If the Redline server is down, your tests still run normally.
+
+## What it does
+
+- **Groups failures.** The same failure over ten runs is one problem; 300 tests failing because the
+  server is down is one cause.
+- **Explains each cause**: backend bug, test bug, environment or flaky. Free rules first, Claude only
+  when rules cannot decide.
+- **Proves a cause on request** by rerunning the test and patching it in a temporary copy of your
+  project.
+- **Knows how tests connect**: which files and endpoints each test uses, so it can tell you which tests
+  a change affects.
+- **Redacts secrets and PII** (tokens, passwords, JWTs, card numbers, emails, phone numbers) before
+  anything is stored or sent to AI.
+
+## Requirements
+
+| Tool       | Version | Why                                  |
+| ---------- | ------- | ------------------------------------ |
+| Go         | 1.24+   | Build and run the server             |
+| Docker     | any     | Neo4j (DozerDB) for the graph        |
+| Node.js    | 20+     | `redline-playwright` package         |
+| Playwright | 1.50+   | Peer dependency of the package       |
+
+## Configuration
+
+Everything has a default that works on a laptop. The settings you are most likely to change:
+
+| Server setting    | Default        | Meaning                                                          |
+| ----------------- | -------------- | ---------------------------------------------------------------- |
+| `HOST`            | `127.0.0.1`    | Interface to bind. A non-loopback host requires `REDLINE_API_KEY` |
+| `PORT`            | `8787`         | HTTP port                                                        |
+| `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host     |
+| `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all`     |
+| `RETENTION_DAYS`  | `30`           | Old test details are cleaned up (`0` = never)                    |
+| `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                                   |
+| `MAX_REPORT_MB`   | `50`           | Largest accepted Playwright JSON report                           |
+
+| AI setting                                                 | Default           | Meaning                                                       |
+| ---------------------------------------------------------- | ----------------- | ------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                                        | empty             | AI analysis and patches; empty = rules only                   |
+| `ANTHROPIC_MODEL`                                          | `claude-haiku-5-5` | Model used for analysis                                       |
+| `ANTHROPIC_INPUT_PRICE`, `ANTHROPIC_OUTPUT_PRICE`          | empty             | USD per 1M tokens for a model that is not built in            |
+| `AI_DAILY_BUDGET_USD`                                      | `0`               | Daily AI budget; when reached, rules keep running, Claude stops |
+| `VOYAGE_API_KEY`                                           | empty             | Finds similar past proven cases (Voyage AI)                   |
+
+| Integration                | Default | Meaning                                                     |
+| -------------------------- | ------- | ----------------------------------------------------------- |
+| `OPENAPI_SPECS`            | empty   | API contract per project, e.g. `toolshop=http://localhost:8091/docs` |
+| `REPORTPORTAL_URL`, `REPORTPORTAL_API_KEY` | empty | Fill ReportPortal with causes (optional) |
+| `NEO4J_URI`                | `bolt://localhost:7688` | Neo4j/DozerDB address                        |
+
+Only CI changes a failure's status by default, so a half-written test on a laptop does not become a team
+failure. Working alone? Use `STATUS_FROM=all`.
+
+### Running a shared server
+
+To let others reach Redline, bind it to a reachable host **and** set a key. The server refuses to start
+on a non-loopback host without one.
+
+```bash
+# server .env
+HOST=0.0.0.0
+REDLINE_API_KEY=$(openssl rand -hex 32)
+
+# every Playwright project .env
+REDLINE_URL=http://your-server:8787
+REDLINE_API_KEY=<the same key>
+```
+
+`/healthz` and `/readyz` stay open; every other `/api/...` request must send
+`Authorization: Bearer <key>`.
 
 ## Commands
 
@@ -102,13 +179,15 @@ From your Playwright project:
 | `npx redline score`                   | How often Redline's guesses turned out right         |
 | `npx redline learn`                   | Turn proven cases into rules; then `approve <id>`    |
 
-| Environment variable  | Effect                                                  |
+| Client env variable   | Effect                                                  |
 | --------------------- | ------------------------------------------------------- |
 | `REDLINE_URL`         | Server address, default `http://localhost:8787`         |
-| `REDLINE_VERIFY=1`    | Prove each new failure right after the run (local only) |
-| `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint2`           |
-| `REDLINE=0`           | Turn Redline off                                        |
 | `REDLINE_API_KEY`     | The server's API key, if it has one                     |
+| `REDLINE_AI=1`        | Explain failures with Claude                            |
+| `REDLINE_AI_MAX`      | Maximum AI analyses per run, default `10`               |
+| `REDLINE_VERIFY=1`    | Prove each new failure after the run (local only)       |
+| `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint5`           |
+| `REDLINE=0`           | Turn Redline off                                        |
 
 ## How it decides
 
@@ -129,68 +208,49 @@ The strongest signal is **what changed since the test last passed**:
 | same      | changed      | changed the same way | **test bug** (test is outdated) |
 | changed   | same         | —                    | **test bug**                    |
 
-**Knowledge graph.** Tests, the files they import (however deep) and the endpoints they call are
-stored as a graph in Neo4j. That catches what a single test can't show: a shared schema two imports
-deep that changed, or an endpoint failing for unrelated tests too. More in [`docs/kag.md`](docs/kag.md).
+Tests, the files they import (however deep) and the endpoints they call are stored as a graph in Neo4j.
+That catches what a single test cannot show: a shared schema two imports deep that changed, or an
+endpoint failing for unrelated tests too. More in [`docs/kag.md`](docs/kag.md).
+
+Measured with bugs planted on purpose, using Claude Haiku 5.5: 92–96% correct on a new test, 96–100% on
+a test that passed before, 6/6 on app upgrades, and 18/18 on shared code by rules alone. When unsure,
+Redline says "unclear" instead of guessing.
 
 ## Proving a cause
 
-`verify` turns a guess into proof, in a temporary copy of your project (your code is never touched):
+`npx redline verify` turns a guess into proof, in a temporary copy of your project (your code is never
+touched). It uses Claude, so the server needs `ANTHROPIC_API_KEY`:
 
-1. **Rerun** the test as is. If it passes now, it's flaky.
-2. **Patch**: Claude proposes the smallest fix and the test runs again. If it passes, the cause is proven.
+1. **Rerun** the test as is. If it passes now, it is flaky.
+2. **Patch**: Claude proposes the smallest fix and the test runs again. If it passes, the cause is
+   proven.
 
-The patch is saved to `test-results/redline/<id>.patch` to review. Patches that remove assertions or
-add `skip`, `try/catch` or retries are rejected. About $0.001 per verify.
+The patch is saved to `test-results/redline/<id>.patch` to review. Patches that remove assertions or add
+`skip`, `try/catch` or retries are rejected. About $0.001 per verify.
 
-## ReportPortal
+## Reports
 
-Redline can fill in [ReportPortal](https://reportportal.io) for you: each failed test that is still
-"To Investigate" gets a defect type and a comment with the cause, evidence and next step.
+- **Markdown**: `test-results/redline-report.md`, with the cause, evidence and a curl per failed request.
+- **Allure** (`allure-playwright` in the reporter list, `REDLINE_AI=1`): Redline adds a `redline` label,
+  the explanation and a proven patch. Group them by cause in `allurerc.mjs`:
 
-| Redline       | ReportPortal                         |
-| ------------- | ------------------------------------ |
-| `backend_bug` | Product Bug                          |
-| `test_bug`    | Automation Bug                       |
-| `environment` | System Issue                         |
-| `flaky`       | Automation Bug, comment says flaky   |
-| `unknown`     | stays To Investigate, with a comment |
+  ```js
+  categories: [
+    { name: "Backend bug (Redline)", matchers: { labels: { redline: "backend_bug" } } },
+    { name: "Test bug (Redline)", matchers: { labels: { redline: "test_bug" } } },
+    { name: "Environment (Redline)", matchers: { labels: { redline: "environment" } } },
+    { name: "Flaky (Redline)", matchers: { labels: { redline: "flaky" } } },
+    { name: "Unclear (Redline)", matchers: { labels: { redline: "unknown" } } },
+  ],
+  ```
 
-Labels set by people or by ReportPortal's Auto-Analysis are never overwritten. Unlike Auto-Analysis,
-which copies labels from past failures, Redline also explains failures it has never seen before.
+- **ReportPortal**: set `REPORTPORTAL_URL` and `REPORTPORTAL_API_KEY` on Redline, install
+  `@reportportal/agent-js-playwright` in the Playwright project, then run
+  `REDLINE=1 REPORTPORTAL=1 npx playwright test`. Each failed test still "To Investigate" gets a defect
+  type and a comment with the cause, evidence and next step. Labels set by people or Auto-Analysis are
+  never overwritten.
 
-1. Set `REPORTPORTAL_URL` and `REPORTPORTAL_API_KEY` (and `REPORTPORTAL_PROJECT` if it isn't
-   `superadmin_personal`) in Redline's `.env`.
-2. Run the tests with both reporters on: `REDLINE=1 REPORTPORTAL=1 npx playwright test`.
-
-The Playwright project tags the launch with a `redline_run` token and sends the same token to Redline,
-which waits for the launch to finish and matches tests by their `@TC-` ID. The fixture sends the ID to
-ReportPortal when `REPORTPORTAL=1` (it needs `@reportportal/agent-js-playwright`); see `playwright.config.ts`
-in [playwright-web-api-automation](https://github.com/ega-septian/playwright-web-api-automation) for the
-token and the ReportPortal reporter.
-
-## Allure
-
-With [`allure-playwright`](https://allurereport.org) in the reporter list, Redline adds its cause to each
-failed test it analysed (`REDLINE_AI=1`): a `redline` label, an explanation with the evidence and next
-step, and a proven patch as an attachment. Group them on the Categories page in `allurerc.mjs`
-(Allure Report 3):
-
-```js
-categories: [
-  { name: "Backend bug (Redline)", matchers: { labels: { redline: "backend_bug" } } },
-  { name: "Test bug (Redline)", matchers: { labels: { redline: "test_bug" } } },
-  { name: "Environment (Redline)", matchers: { labels: { redline: "environment" } } },
-  { name: "Flaky (Redline)", matchers: { labels: { redline: "flaky" } } },
-  { name: "Unclear (Redline)", matchers: { labels: { redline: "unknown" } } },
-],
-```
-
-Allure's own categories only look at the error type, so a wrong expected value in a test lands under
-"Product errors"; Redline's label says whose bug it is. Example: the
-[published report](https://ega-septian.github.io/playwright-web-api-automation/) of the Playwright project.
-
-## What is sent
+## Privacy: what is sent
 
 | Data                                                           | When              |
 | -------------------------------------------------------------- | ----------------- |
@@ -203,27 +263,21 @@ Everything is redacted before it is stored, including tokens, passwords, JWTs, c
 addresses and phone numbers. With AI on, the redacted facts go to Claude and redacted error messages to
 Voyage AI.
 
-## Team settings
+## Troubleshooting
 
-| Setting           | Default        | Meaning                                                      |
-| ----------------- | -------------- | ------------------------------------------------------------ |
-| `HOST`            | `127.0.0.1`    | Interface to bind. A non-loopback host requires `REDLINE_API_KEY` |
-| `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all` |
-| `RETENTION_DAYS`  | `30`           | Old test details are cleaned up (`0` = never)                |
-| `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                               |
-| `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host |
+| Symptom                                                        | Fix                                                               |
+| -------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `go run` fails: cannot connect to Neo4j                        | `docker compose up -d`, then check `docker compose ps`            |
+| Server exits on a non-loopback host                            | Set `REDLINE_API_KEY`, or use `HOST=127.0.0.1`                    |
+| Test output: `server tidak bisa dihubungi`                     | Start Redline, or set `REDLINE_URL`; disable with `REDLINE=0`     |
+| `npm i` fails while building the package                       | Use Node.js 20+                                                   |
+| Database tests are skipped                                     | Set `REDLINE_TEST_NEO4J_URI=bolt://localhost:7688`                |
+| Reporter warns about an API version mismatch                   | Use the same tag for the server and `redline-playwright`          |
 
-Only CI changes a failure's status by default, so a half-written test on a laptop doesn't become a
-team failure. Working alone? Use `STATUS_FROM=all`.
-
-**Running Redline where others can reach it?** Bind it to a reachable host (`HOST=0.0.0.0`) and set
-`REDLINE_API_KEY` (for example `openssl rand -hex 32`) on the server and the same value in the Playwright
-project's `.env`. The server refuses to start on a non-loopback host without a key. Every `/api/...`
-request must then send `Authorization: Bearer <key>`; without it, anyone who can reach the server could
-send runs, change labels or spend your AI key. `/healthz` and `/readyz` stay open.
+## API
 
 <details>
-<summary><b>API</b></summary>
+<summary>Endpoints and manual upload</summary>
 
 | Endpoint                                                           | Purpose                                                        |
 | ------------------------------------------------------------------ | -------------------------------------------------------------- |
@@ -238,19 +292,21 @@ send runs, change labels or spend your AI key. `/healthz` and `/readyz` stay ope
 | `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules                                                  |
 | `GET /api/scoreboard`                                              | How often guesses matched the proof                            |
 | `GET /api/impact?file=...` or `?endpoint=...`                      | Tests affected by a file or endpoint                           |
-| `GET /healthz`                                                     | Health check                                                   |
-| `GET /readyz`                                                      | Readiness: the server is up and the database answers           |
+| `GET /healthz`                                                     | Liveness check                                                 |
+| `GET /readyz`                                                      | Readiness: the database answers                                |
 
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`
-(add `-H "Authorization: Bearer $REDLINE_API_KEY"` when the server has a key)
+(add `-H "Authorization: Bearer $REDLINE_API_KEY"` when the server has a key).
 
 </details>
 
+## Development
+
 <details>
-<summary><b>Development</b></summary>
+<summary>Layout, tests and migrations</summary>
 
 ```
 cmd/server/          HTTP server
@@ -267,11 +323,12 @@ playwright/src/      redline-playwright: reporter, fixture, CLI (TypeScript)
 
 ```bash
 REDLINE_TEST_NEO4J_URI=bolt://localhost:7688 go test ./...   # without it, database tests are skipped
+npm ci && npm run build                                      # the Playwright package
 ```
 
 Tests create and empty their own databases (`redlinetest-*`); never point them at a server with real
-data. No real AI calls are made in tests. CI (`.github/workflows/ci.yml`) runs gofmt, vet and all tests
-against DozerDB on every pull request, and fails if the database tests are skipped.
+data. No real AI calls are made in tests. CI runs gofmt, vet and all tests against DozerDB on every pull
+request, and fails if the database tests are skipped.
 
 Migrations in `internal/store/migrations/` run one statement at a time, because Neo4j does not allow
 schema commands and data writes in the same transaction. Every statement is idempotent (`IF NOT EXISTS`,
