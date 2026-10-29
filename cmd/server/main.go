@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -102,6 +103,8 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey}
+	// /readyz memeriksa database; /healthz tetap liveness saja.
+	srv.Ready = db.Ping
 	if cfg.APIKey != "" {
 		log.Info("API key aktif: request /api/... wajib membawa REDLINE_API_KEY")
 	} else {
@@ -117,13 +120,13 @@ func run(log *slog.Logger) error {
 		log.Info("integrasi ReportPortal aktif", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
 	}
 	httpSrv := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
 		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("Redline jalan", "url", "http://localhost:"+cfg.Port)
+		log.Info("Redline jalan", "url", "http://"+httpSrv.Addr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

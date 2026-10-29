@@ -4,12 +4,16 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
+	// Host: interface tempat server mendengarkan. Default 127.0.0.1 (hanya laptop sendiri).
+	// Host non-loopback mensyaratkan REDLINE_API_KEY, supaya server tidak terbuka tanpa autentikasi.
+	Host string
 	Port string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
@@ -68,6 +72,11 @@ func Load() (Config, error) {
 	if os.Getenv("REPORTPORTAL_URL") != "" && os.Getenv("REPORTPORTAL_API_KEY") == "" {
 		return Config{}, fmt.Errorf("REPORTPORTAL_URL diisi tapi REPORTPORTAL_API_KEY kosong")
 	}
+	host := getenv("HOST", "127.0.0.1")
+	apiKey := os.Getenv("REDLINE_API_KEY")
+	if !loopbackHost(host) && apiKey == "" {
+		return Config{}, fmt.Errorf("HOST %q bisa dijangkau dari jaringan, tetapi REDLINE_API_KEY kosong: isi REDLINE_API_KEY atau pakai HOST=127.0.0.1", host)
+	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
 		for _, s := range strings.Split(from, ",") {
@@ -77,12 +86,13 @@ func Load() (Config, error) {
 		}
 	}
 	return Config{
+		Host:          host,
 		Port:          getenv("PORT", "8787"),
 		RetentionDays: retention,
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		MaxReportMB:   maxMB,
-		APIKey:        os.Getenv("REDLINE_API_KEY"),
+		APIKey:        apiKey,
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),
@@ -112,6 +122,20 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loopbackHost: true untuk localhost dan alamat loopback. Nama host atau alamat lain dianggap bisa
+// dijangkau dari jaringan, jadi server mensyaratkan API key.
+func loopbackHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	h := strings.ToLower(strings.Trim(host, "[]"))
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // LoadDotEnv membaca file KEY=VALUE sederhana. File yang tidak ada diabaikan.

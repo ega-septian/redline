@@ -72,6 +72,14 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 
 func (s *Store) Close(ctx context.Context) error { return s.driver.Close(ctx) }
 
+// Ping memastikan database masih bisa dihubungi. Dipakai /readyz, dengan timeout pendek supaya
+// health check tidak menggantung saat Neo4j mati.
+func (s *Store) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return s.driver.VerifyConnectivity(ctx)
+}
+
 // createDatabase membuat database (replace = kosongkan dulu kalau sudah ada), lalu menunggu sampai online.
 // Database "neo4j" bawaan selalu ada, jadi tidak dibuat.
 func createDatabase(ctx context.Context, driver neo4j.DriverWithContext, name string, replace bool) error {

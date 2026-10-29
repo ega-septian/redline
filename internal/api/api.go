@@ -60,6 +60,8 @@ type Server struct {
 	Log          *slog.Logger
 	MaxBodySize  int64
 	APIKey       string // kosong = tanpa autentikasi
+	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
+	Ready func(context.Context) error
 }
 
 func (s *Server) Routes() http.Handler {
@@ -67,6 +69,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
@@ -88,12 +91,30 @@ func (s *Server) Routes() http.Handler {
 	return s.requireAPIKey(mux)
 }
 
-// requireAPIKey menolak request /api/... tanpa "Authorization: Bearer <APIKey>". /healthz tetap terbuka supaya
-// pengecekan server hidup tidak butuh key. Key dibandingkan dalam waktu konstan.
+// handleReady memeriksa dependensi (database). Berbeda dari /healthz yang hanya menandakan proses hidup.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if s.Ready == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "readiness check belum dikonfigurasi"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.Ready(ctx); err != nil {
+		if s.Log != nil {
+			s.Log.Warn("readiness gagal", "err", err)
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "database tidak bisa dihubungi"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+// requireAPIKey menolak request /api/... tanpa "Authorization: Bearer <APIKey>". /healthz dan /readyz tetap
+// terbuka supaya pengecekan server hidup tidak butuh key. Key dibandingkan dalam waktu konstan.
 func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 	want := []byte("Bearer " + s.APIKey)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}
