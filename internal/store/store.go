@@ -149,7 +149,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 		// Perintah schema (constraint, index) tidak boleh dicampur dengan penulisan data dalam satu
-		// transaksi, jadi setiap statement dijalankan sendiri. Semuanya memakai IF NOT EXISTS, aman diulang.
+		// transaksi, jadi setiap statement dijalankan sendiri. Semuanya memakai IF NOT EXISTS / MERGE,
+		// jadi aman diulang: kalau satu statement gagal, versi belum dicatat dan server berikutnya
+		// menjalankan ulang seluruh file. Jangan menambah statement yang tidak idempoten di sini.
 		for _, stmt := range statements(string(body)) {
 			if _, err := s.query(ctx, stmt, nil); err != nil {
 				return fmt.Errorf("migrasi %s: %w\n%s", version, err, stmt)

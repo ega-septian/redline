@@ -273,6 +273,11 @@ Tests create and empty their own databases (`redlinetest-*`); never point them a
 data. No real AI calls are made in tests. CI (`.github/workflows/ci.yml`) runs gofmt, vet and all tests
 against DozerDB on every pull request, and fails if the database tests are skipped.
 
+Migrations in `internal/store/migrations/` run one statement at a time, because Neo4j does not allow
+schema commands and data writes in the same transaction. Every statement is idempotent (`IF NOT EXISTS`,
+`MERGE`), so a failed migration can be rerun safely; the version is recorded only after the whole file
+succeeds. Keep new statements idempotent.
+
 </details>
 
 ## Versions
