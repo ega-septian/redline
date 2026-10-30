@@ -114,3 +114,44 @@ export type ImpactResult = {
   endpoint: string;
   tests: ApiImpactedTest[];
 };
+
+export type ApiRule = {
+  id: number;
+  pattern: string;
+  category: string;
+  summary: string;
+  next_step: string;
+  status: string;
+  learned_from: string[];
+  hits: number;
+  also_matches: number;
+  cost_usd: number;
+  created_at: string;
+  decided_by?: string;
+  decided_at?: string | null;
+};
+
+export type Score = {
+  source: string;
+  graded: number;
+  correct: number;
+  unknown: number;
+  accuracy: number;
+};
+
+export type ScoreEntry = {
+  group_id: string;
+  test: string;
+  source: string;
+  predicted: string;
+  confidence: string;
+  truth: string;
+  truth_by: string;
+  correct: boolean;
+  proven_at: string | null;
+};
+
+export type Scoreboard = {
+  sources: Score[];
+  entries: ScoreEntry[];
+};

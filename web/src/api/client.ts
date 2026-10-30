@@ -1,9 +1,11 @@
 import type {
   ApiGroup,
+  ApiRule,
   ApiRun,
   GroupDetail,
   ImpactResult,
   Knowledge,
+  Scoreboard,
 } from "./types";
 
 export class ApiError extends Error {
@@ -47,6 +49,8 @@ export const api = {
   runs: () => request<ApiRun[]>("/api/runs?limit=50"),
   impact: (kind: "file" | "endpoint", query: string) =>
     request<ImpactResult>(`/api/impact?${kind}=${encodeURIComponent(query)}`),
+  rules: () => request<ApiRule[]>("/api/rules"),
+  scoreboard: () => request<Scoreboard>("/api/scoreboard?limit=50"),
   label: (fingerprint: string, input: LabelInput) =>
     request<LabelResult>(`/api/groups/${encodeURIComponent(fingerprint)}/label`, {
       method: "PUT",
