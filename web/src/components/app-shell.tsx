@@ -113,9 +113,9 @@ export function AppShell() {
         </nav>
 
         <div className="mt-auto border-t border-line pt-3 text-[11px] leading-relaxed text-faint">
-          <span className="font-semibold text-muted">Labels only</span>
+          <span className="font-semibold text-muted">Operator</span>
           <br />
-          Labels and notes are saved here. Analysis and rules stay in the CLI or API.
+          Labels and rule decisions are saved here. Analysis stays in the CLI or API.
           {health.data?.auth && (
             <form method="post" action="/ui/logout" className="mt-2">
               <button type="submit" className="text-[11px] text-brand hover:underline">
@@ -132,7 +132,7 @@ export function AppShell() {
           <span className="hidden text-xs text-faint sm:inline">{subtitle}</span>
           <Badge tone="brand" className="gap-1.5 px-2">
             <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-            Labels only
+            Operator
           </Badge>
           <div className="flex-1" />
           <div className="hidden items-center gap-2 text-xs text-muted sm:flex">

@@ -51,12 +51,12 @@ src/
 │   ├── failures.tsx         Failures (TanStack Query + Router)
 │   ├── runs.tsx             recent runs, filters and results
 │   ├── impact.tsx           file/endpoint impact lookup
-│   ├── rules.tsx            learned rules, read-only
+│   ├── rules.tsx            learned rules, approve/reject
 │   └── scoreboard.tsx       prediction accuracy against proven cases
 ├── routeTree.tsx            TanStack Router tree
 └── main.tsx                 QueryClient + Router
 ```
 
 The Failures screen reads `/api/groups`; labels are written from the detail panel with the
-`X-CSRF-Token` double-submit cookie. Runs, Impact, Rules and Scoreboard are read-only. Analysis
-and rule decisions stay in the CLI/API.
+`X-CSRF-Token` double-submit cookie. Rules can be approved/rejected from the Rules page. Runs,
+Impact and Scoreboard are read-only; analysis stays in the CLI/API.
