@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LabelForm } from "@/components/failures/label-form";
-import { categoryLabel, type Failure } from "@/lib/failure";
+import { categoryLabel, type Failure, type FailureRun } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
 const categoryTone = {
@@ -36,7 +36,7 @@ export function FailureDetail({
 
   return (
     <aside className="overflow-hidden rounded-[10px] border border-line bg-surface lg:sticky lg:top-4">
-      <div className="border-b border-line bg-[#12171e] p-4 pb-3">
+      <div className="rounded-t-[10px] border-b border-line bg-[#12171e] p-4 pb-3">
         <div className="mb-2 flex items-center gap-2">
           <Badge tone={categoryTone[failure.category]}>{categoryLabel[failure.category]}</Badge>
           <Badge>
@@ -142,37 +142,7 @@ function Analysis({ failure }: { failure: Failure }) {
         <span>{failure.nextStep}</span>
       </div>
 
-      <section>
-        <BlockLabel>Last 14 runs</BlockLabel>
-        <div className="flex h-8 items-end gap-[3px]">
-          {failure.spark.map((state, index) => (
-            <i
-              key={index}
-              className={cn(
-                "flex-1 rounded-t-sm",
-                state === "fail" && "bg-danger",
-                state === "pass" && "bg-[#2ea043]",
-                state === "none" && "bg-line",
-              )}
-              style={{ height: `${38 + ((index * 9) % 40)}%` }}
-            />
-          ))}
-        </div>
-        <div className="mt-1.5 flex gap-2.5 text-[10.5px] text-faint">
-          <span>
-            <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[#2ea043]" />
-            passed
-          </span>
-          <span>
-            <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-danger" />
-            failed
-          </span>
-          <span>
-            <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-line" />
-            no data
-          </span>
-        </div>
-      </section>
+      <RunHistory runs={failure.runs} />
 
       <section>
         <BlockLabel>Last error</BlockLabel>
@@ -184,33 +154,122 @@ function Analysis({ failure }: { failure: Failure }) {
   );
 }
 
+function RunHistory({ runs }: { runs: FailureRun[] }) {
+  const [active, setActive] = useState<FailureRun | null>(null);
+
+  if (runs.length === 0) {
+    return (
+      <section>
+        <BlockLabel>Run history</BlockLabel>
+        <p className="text-[11.5px] text-faint">No run history yet.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <BlockLabel>
+        Run history · {runs.length} {runs.length === 1 ? "occurrence" : "occurrences"}
+      </BlockLabel>
+      <div className="flex flex-wrap gap-1.5">
+        {runs.map((run) => (
+          <button
+            key={run.runId}
+            type="button"
+            title={`Run ${run.runId} · ${whenRun(run.at)} · ${run.status}`}
+            aria-label={`Run ${run.runId}, ${run.status}, ${whenRun(run.at)}`}
+            onMouseEnter={() => setActive(run)}
+            onMouseLeave={() => setActive(null)}
+            onFocus={() => setActive(run)}
+            onBlur={() => setActive(null)}
+            className={cn(
+              "grid h-7 w-9 place-items-center rounded-md border font-mono text-[12px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand/60",
+              run.status === "passed" && "border-ok/40 bg-ok/10 text-ok",
+              run.status === "failed" && "border-danger/50 bg-danger/10 text-[#ff7b72]",
+              run.status === "flaky" && "border-warn/50 bg-warn/10 text-warn",
+            )}
+          >
+            {run.status === "passed" ? "✓" : run.status === "failed" ? "✗" : "~"}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 min-h-4 text-[11px] text-muted">
+        {active ? (
+          <>
+            <span className="font-mono">run #{active.runId}</span> · {whenRun(active.at)} ·{" "}
+            <span
+              className={cn(
+                "font-semibold",
+                active.status === "passed" && "text-ok",
+                active.status === "failed" && "text-[#ff7b72]",
+                active.status === "flaky" && "text-warn",
+              )}
+            >
+              {active.status}
+            </span>{" "}
+            · retries {active.retries} · {active.source || "local"}
+          </>
+        ) : (
+          "Hover or focus a run for its date."
+        )}
+      </div>
+      <div className="mt-1 flex gap-2.5 text-[10.5px] text-faint">
+        <span>
+          <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-ok" />
+          passed
+        </span>
+        <span>
+          <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-danger" />
+          failed
+        </span>
+        <span>
+          <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-warn" />
+          flaky
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function whenRun(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function Occurrences({ failure }: { failure: Failure }) {
-  const rows = failure.spark
-    .map((state, index) => ({
-      id: 48 - (failure.spark.length - index - 1),
-      state,
-      at: index === failure.spark.length - 1 ? failure.lastSeen : `run ${48 - (failure.spark.length - index - 1)}`,
-    }))
-    .reverse();
+  const rows = [...failure.runs].reverse();
 
   return (
     <section>
       <BlockLabel>Occurrences</BlockLabel>
-      <div className="flex flex-col divide-y divide-line-soft rounded-md border border-line-soft">
-        {rows.map((row) => (
-          <div key={row.id} className="flex items-center gap-2.5 px-2.5 py-2 text-[11.5px]">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                row.state === "fail" ? "bg-danger" : "bg-ok",
-              )}
-            />
-            <span className="font-mono text-muted">run #{row.id}</span>
-            <span className="text-faint">{row.state === "fail" ? "failed" : "passed"}</span>
-            <span className="ml-auto text-faint">{row.at}</span>
-          </div>
-        ))}
-      </div>
+      {rows.length === 0 ? (
+        <p className="text-[11.5px] text-faint">No occurrence stored for this group.</p>
+      ) : (
+        <div className="flex flex-col divide-y divide-line-soft rounded-md border border-line-soft">
+          {rows.map((row) => (
+            <div key={row.runId} className="flex items-center gap-2.5 px-2.5 py-2 text-[11.5px]">
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  row.status === "failed" && "bg-danger",
+                  row.status === "flaky" && "bg-warn",
+                  row.status === "passed" && "bg-ok",
+                )}
+              />
+              <span className="font-mono text-muted">run #{row.runId}</span>
+              <span className="text-faint">{row.status}</span>
+              <span className="ml-auto text-faint">{whenRun(row.at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
