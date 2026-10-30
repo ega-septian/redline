@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, Outlet } from "@tanstack/react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   AlertTriangle,
   BarChart3,
@@ -25,8 +25,8 @@ async function fetchHealth(): Promise<Health> {
 const nav = [
   { label: "Overview", icon: LayoutDashboard, soon: true },
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
-  { label: "Runs", icon: GitBranch, soon: true },
-  { label: "Impact", icon: Waypoints, soon: true },
+  { label: "Runs", icon: GitBranch, to: "/runs" as const },
+  { label: "Impact", icon: Waypoints, to: "/impact" as const },
   { label: "Rules", icon: Sparkles, soon: true },
   { label: "Scoreboard", icon: BarChart3, soon: true },
 ];
@@ -42,6 +42,17 @@ export function AppShell() {
   const items = nav.map((item) =>
     item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
   );
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const title = pathname.startsWith("/runs")
+    ? "Runs"
+    : pathname.startsWith("/impact")
+      ? "Impact"
+      : "Failures";
+  const subtitle = title === "Failures" ? "open failures" : title === "Runs" ? "recent runs" : "graph";
+
+  function isActive(to?: string) {
+    return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
+  }
 
   const online = health.isSuccess && !health.isError;
   const version = health.data?.version ?? "dev";
@@ -70,13 +81,21 @@ export function AppShell() {
             Workspace
           </div>
           {items.slice(0, 4).map((item) => (
-            <NavItem key={item.label} {...item} />
+            <NavItem
+              key={item.label}
+              {...item}
+              active={"to" in item && isActive(item.to)}
+            />
           ))}
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
           {items.slice(4).map((item) => (
-            <NavItem key={item.label} {...item} />
+            <NavItem
+              key={item.label}
+              {...item}
+              active={"to" in item && isActive(item.to)}
+            />
           ))}
         </nav>
 
@@ -96,8 +115,8 @@ export function AppShell() {
 
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-14 flex-wrap items-center gap-x-3.5 gap-y-1 border-b border-line px-4 py-2 md:px-5">
-          <h1 className="shrink-0 text-[15px] font-semibold">Failures</h1>
-          <span className="hidden text-xs text-faint sm:inline">open failures</span>
+          <h1 className="shrink-0 text-[15px] font-semibold">{title}</h1>
+          <span className="hidden text-xs text-faint sm:inline">{subtitle}</span>
           <Badge tone="brand" className="gap-1.5 px-2">
             <span className="h-1.5 w-1.5 rounded-full bg-brand" />
             Labels only
@@ -134,12 +153,14 @@ function NavItem({
   to,
   count,
   soon,
+  active,
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/";
+  to?: "/" | "/runs" | "/impact";
   count?: number;
   soon?: boolean;
+  active?: boolean;
 }) {
   const content = (
     <>
@@ -158,7 +179,12 @@ function NavItem({
     return (
       <Link
         to={to}
-        className="flex items-center gap-2.5 rounded-[7px] bg-surface-2 px-2.5 py-2 text-[13px] text-ink shadow-[inset_0_0_0_1px_#ffffff0d]"
+        className={cn(
+          "flex items-center gap-2.5 rounded-[7px] px-2.5 py-2 text-[13px] transition-colors",
+          active
+            ? "bg-surface-2 text-ink shadow-[inset_0_0_0_1px_#ffffff0d]"
+            : "text-muted hover:bg-surface-2 hover:text-ink",
+        )}
       >
         {content}
       </Link>
