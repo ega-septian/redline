@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { FailuresPage } from "@/pages/failures";
 import { ImpactPage } from "@/pages/impact";
 import { RulesPage } from "@/pages/rules";
+import { RunDetailPage } from "@/pages/run-detail";
 import { RunsPage } from "@/pages/runs";
 import { ScoreboardPage } from "@/pages/scoreboard";
 
@@ -19,6 +20,12 @@ const runsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/runs",
   component: RunsPage,
+});
+
+const runDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runs/$runId",
+  component: RunDetailPage,
 });
 
 const impactRoute = createRoute({
@@ -42,6 +49,7 @@ const scoreboardRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   runsRoute,
+  runDetailRoute,
   impactRoute,
   rulesRoute,
   scoreboardRoute,

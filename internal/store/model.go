@@ -372,6 +372,24 @@ type Run struct {
 	ReportErrors      []string   `json:"report_errors"`
 }
 
+// RunResult is one test outcome in a run, with the failure group's latest analysis.
+type RunResult struct {
+	TestKey       string   `json:"test"`
+	TestCaseID    string   `json:"test_case_id,omitempty"`
+	Status        string   `json:"status"`
+	DurationMs    int      `json:"duration_ms"`
+	Retries       int      `json:"retries"`
+	ErrorMessage  string   `json:"error,omitempty"`
+	ErrorSnippet  string   `json:"error_snippet,omitempty"`
+	ErrorLocation string   `json:"error_location,omitempty"`
+	TracePath     string   `json:"trace_path,omitempty"`
+	Screenshots   []string `json:"screenshots"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+	Category      string   `json:"category,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"`
+	HumanLabel    string   `json:"human_label,omitempty"`
+}
+
 type Group struct {
 	Fingerprint  string     `json:"fingerprint"`
 	TestKey      string     `json:"test"`

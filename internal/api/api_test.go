@@ -36,6 +36,21 @@ func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta sto
 	return &store.IngestResult{RunID: 7, Total: f.gotTests}, nil
 }
 func (f *fakeStore) ListRuns(context.Context, int) ([]store.Run, error) { return []store.Run{}, nil }
+func (f *fakeStore) GetRun(_ context.Context, id int64) (store.Run, error) {
+	if id != 1 {
+		return store.Run{}, store.ErrNotFound
+	}
+	return store.Run{ID: 1, Total: 2, Failed: 1}, nil
+}
+func (f *fakeStore) RunResults(_ context.Context, runID int64) ([]store.RunResult, error) {
+	if runID != 1 {
+		return []store.RunResult{}, nil
+	}
+	return []store.RunResult{
+		{TestKey: "toolshop › api.spec.ts › register", TestCaseID: "TC-USR-001", Status: "failed", DurationMs: 120},
+		{TestKey: "toolshop › api.spec.ts › health", Status: "passed", DurationMs: 10},
+	}, nil
+}
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
 	return []store.Group{}, nil
@@ -460,6 +475,25 @@ func TestRuleDecisionUsesSessionUser(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"decided_by": "ega"`) {
 		t.Errorf("rule decision did not use the session user: %s", rec.Body)
+	}
+}
+
+func TestGetRun(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+
+	rec := do(h, http.MethodGet, "/api/runs/1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "TC-USR-001") || !strings.Contains(rec.Body.String(), `"failed"`) {
+		t.Errorf("response should include tests: %s", rec.Body)
+	}
+
+	if rec := do(h, http.MethodGet, "/api/runs/2", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown run = %d, want 404", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/runs/abc", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid id = %d, want 400", rec.Code)
 	}
 }
 

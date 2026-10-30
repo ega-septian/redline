@@ -18,22 +18,69 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	runs := []Run{}
 	for _, rec := range res.Records {
 		node, _ := rec.Get("r")
-		p := node.(neo4j.Node).Props
-		r := Run{
-			ID: i64(p, "id"), CreatedAt: local(p["createdAt"]), DurationMs: int(i64(p, "durationMs")),
-			Source: str(p, "source"), TriggeredBy: str(p, "triggeredBy"), CIURL: str(p, "ciURL"),
-			Branch: str(p, "branch"), CommitSHA: str(p, "commit"), AppVersion: str(p, "appVersion"),
-			PlaywrightVersion: str(p, "playwrightVersion"), Total: int(i64(p, "total")), Passed: int(i64(p, "passed")),
-			Failed: int(i64(p, "failed")), Flaky: int(i64(p, "flaky")), Skipped: int(i64(p, "skipped")),
-			ReportErrors: strs(p, "reportErrors"),
-		}
-		if v, ok := p["startedAt"]; ok && v != nil {
-			t := local(v)
-			r.StartedAt = &t
-		}
-		runs = append(runs, r)
+		runs = append(runs, toRun(node.(neo4j.Node).Props))
 	}
 	return runs, nil
+}
+
+// GetRun mengembalikan satu run, atau ErrNotFound.
+func (s *Store) GetRun(ctx context.Context, id int64) (Run, error) {
+	res, err := s.query(ctx, `MATCH (r:Run {id: $id}) RETURN r`, map[string]any{"id": id})
+	if err != nil {
+		return Run{}, err
+	}
+	if len(res.Records) == 0 {
+		return Run{}, ErrNotFound
+	}
+	node, _ := res.Records[0].Get("r")
+	return toRun(node.(neo4j.Node).Props), nil
+}
+
+// RunResults mengembalikan semua outcome run, beserta group dan analisis terakhirnya.
+func (s *Store) RunResults(ctx context.Context, runID int64) ([]RunResult, error) {
+	res, err := s.query(ctx, `
+		MATCH (:Run {id: $run})-[:HAS]->(r:Result)
+		OPTIONAL MATCH (r)-[:IN_GROUP]->(f:Failure)
+		OPTIONAL MATCH (f)-[:ANALYZED]->(a:Analysis)
+		WITH r, f, a ORDER BY a.createdAt DESC
+		WITH r, f, head(collect(a)) AS a
+		RETURN r, a.category AS category, a.confidence AS confidence,
+		       coalesce(f.manualCategory, '') AS humanLabel
+		ORDER BY r.testKey`, map[string]any{"run": runID})
+	if err != nil {
+		return nil, err
+	}
+	out := []RunResult{}
+	for _, rec := range res.Records {
+		node, _ := rec.Get("r")
+		p := node.(neo4j.Node).Props
+		m := rec.AsMap()
+		out = append(out, RunResult{
+			TestKey: str(p, "testKey"), TestCaseID: str(p, "caseId"), Status: str(p, "status"),
+			DurationMs: int(i64(p, "durationMs")), Retries: int(i64(p, "retries")),
+			ErrorMessage: str(p, "errorMessage"), ErrorSnippet: str(p, "errorSnippet"),
+			ErrorLocation: str(p, "errorLocation"), TracePath: str(p, "tracePath"),
+			Screenshots: strs(p, "screenshots"), Fingerprint: str(p, "groupId"),
+			Category: str(m, "category"), Confidence: str(m, "confidence"), HumanLabel: str(m, "humanLabel"),
+		})
+	}
+	return out, nil
+}
+
+func toRun(p map[string]any) Run {
+	r := Run{
+		ID: i64(p, "id"), CreatedAt: local(p["createdAt"]), DurationMs: int(i64(p, "durationMs")),
+		Source: str(p, "source"), TriggeredBy: str(p, "triggeredBy"), CIURL: str(p, "ciURL"),
+		Branch: str(p, "branch"), CommitSHA: str(p, "commit"), AppVersion: str(p, "appVersion"),
+		PlaywrightVersion: str(p, "playwrightVersion"), Total: int(i64(p, "total")), Passed: int(i64(p, "passed")),
+		Failed: int(i64(p, "failed")), Flaky: int(i64(p, "flaky")), Skipped: int(i64(p, "skipped")),
+		ReportErrors: strs(p, "reportErrors"),
+	}
+	if v, ok := p["startedAt"]; ok && v != nil {
+		t := local(v)
+		r.StartedAt = &t
+	}
+	return r
 }
 
 // failureReturn: kolom kelompok kegagalan beserta waktu dari run terkait. Dipakai setelah MATCH (f:Failure).

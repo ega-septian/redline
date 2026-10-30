@@ -25,6 +25,8 @@ import (
 type Store interface {
 	IngestReport(ctx context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error)
 	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
+	GetRun(ctx context.Context, id int64) (store.Run, error)
+	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
 	ListGroups(ctx context.Context, statuses []string, limit int) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
@@ -98,6 +100,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
+	mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/analyze", s.handleAnalyze)
@@ -270,6 +273,30 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, runs)
+}
+
+// handleGetRun: GET /api/runs/{id} mengembalikan metadata run dan semua outcome-nya.
+func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		return
+	}
+	run, err := s.Store.GetRun(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	tests, err := s.Store.RunResults(r.Context(), id)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": run, "tests": tests})
 }
 
 // handleListGroups: GET /api/groups?status=open,regressed (default) atau status=all.

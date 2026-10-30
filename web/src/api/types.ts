@@ -103,6 +103,28 @@ export type ApiRun = {
   report_errors: string[];
 };
 
+export type ApiRunResult = {
+  test: string;
+  test_case_id?: string;
+  status: string;
+  duration_ms: number;
+  retries: number;
+  error?: string;
+  error_snippet?: string;
+  error_location?: string;
+  trace_path?: string;
+  screenshots: string[];
+  fingerprint?: string;
+  category?: string;
+  confidence?: string;
+  human_label?: string;
+};
+
+export type RunDetail = {
+  run: ApiRun;
+  tests: ApiRunResult[];
+};
+
 export type ApiImpactedTest = {
   test: string;
   test_case_id?: string;
