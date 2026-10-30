@@ -43,8 +43,14 @@ func pricing(model string) llm.Pricing {
 	}
 }
 
+// versionOverride lets release builds inject a tag with -ldflags.
+var versionOverride string
+
 // buildVersion: versi modul dari build info, atau commit pendek saat build lokal (`go run`).
 func buildVersion() string {
+	if versionOverride != "" {
+		return versionOverride
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "dev"
@@ -152,7 +158,10 @@ func run(log *slog.Logger) error {
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		Version: buildVersion()}
-	sessions := auth.New(cfg.APIKey)
+	sessions := auth.New(cfg.APIKey, cfg.Users)
+	srv.AuthEnabled = sessions.Enabled()
+	srv.ValidateKey = sessions.ValidKey
+	srv.User = sessions.User
 	srv.Session = sessions.Valid
 	srv.CSRF = sessions.CSRFValid
 	// /readyz memeriksa database; /healthz tetap liveness saja.

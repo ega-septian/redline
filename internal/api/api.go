@@ -59,7 +59,13 @@ type Server struct {
 	ReportPortal ReportPortal // nil = integrasi ReportPortal mati
 	Log          *slog.Logger
 	MaxBodySize  int64
-	APIKey       string // kosong = tanpa autentikasi
+	APIKey       string // legacy single key; empty = no Bearer auth unless AuthEnabled
+	// AuthEnabled wraps /api with the key check even when APIKey is empty (REDLINE_USERS only).
+	AuthEnabled bool
+	// ValidateKey checks a Bearer token. nil falls back to APIKey.
+	ValidateKey func(string) bool
+	// User returns the signed-in user for a session cookie (labels are attributed to it).
+	User func(*http.Request) string
 	// Version: versi build server, ditampilkan di /healthz dan header respons.
 	Version string
 	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
@@ -85,7 +91,8 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok", "version": s.version(), "api": APIVersion, "auth": s.APIKey != "",
+			"status": "ok", "version": s.version(), "api": APIVersion,
+			"auth": s.AuthEnabled || s.APIKey != "",
 		})
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
@@ -105,7 +112,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
 	var h http.Handler = mux
-	if s.APIKey != "" {
+	if s.AuthEnabled || s.APIKey != "" {
 		h = s.requireAPIKey(mux)
 	}
 	return s.versionHeaders(h)
@@ -158,12 +165,17 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			return
 		}
 		got := []byte(r.Header.Get("Authorization"))
-		if subtle.ConstantTimeCompare(got, want) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="redline"`)
-			writeError(w, http.StatusUnauthorized, "API key salah atau tidak ada: kirim header Authorization: Bearer <REDLINE_API_KEY>")
+		if s.ValidateKey != nil {
+			if token, ok := strings.CutPrefix(string(got), "Bearer "); ok && s.ValidateKey(token) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		} else if subtle.ConstantTimeCompare(got, want) == 1 {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="redline"`)
+		writeError(w, http.StatusUnauthorized, "API key salah atau tidak ada: kirim header Authorization: Bearer <REDLINE_API_KEY>")
 	})
 }
 
@@ -350,6 +362,12 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "body harus JSON: {\"label\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
 		return
+	}
+	// A UI session has an identity; do not trust the client's "by".
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
 	}
 	if body.Label != "" && !store.ValidCategory(body.Label) {
 		writeError(w, http.StatusBadRequest, "label harus salah satu dari: "+strings.Join(store.Categories, ", "))

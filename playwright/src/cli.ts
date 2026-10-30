@@ -10,6 +10,7 @@
  *   npx redline score                  rapor: seberapa sering tebakan aturan dan AI terbukti benar
  *   npx redline impact <file>          test yang terdampak kalau file ini berubah (import bertingkat ikut)
  *   npx redline impact GET /brands/1   test yang memanggil endpoint ini
+ *   npx redline comment                tulis/update komentar PR dengan redline-report.md
  *
  * Sebelum eksperimen, tebakan Redline dicatat dulu. Setelah terbukti, tebakan itu dinilai benar atau salah.
  * Kegagalan yang sudah terbukti dilewati; pakai `verify --force` untuk mengulang.
@@ -26,6 +27,10 @@
  *   REDLINE_VERIFY_ATTEMPTS   percobaan patch per kegagalan, default 2
  *   REDLINE_RERUNS            berapa kali rerun, default 2
  *   REDLINE_KEEP_SANDBOX=1    jangan hapus folder salinan (untuk debug)
+ *   GITHUB_TOKEN              token dengan izin pull-requests:write, untuk `comment`
+ *   GITHUB_REPOSITORY         owner/repo, diisi GitHub Actions
+ *   GITHUB_EVENT_PATH         event pull_request, diisi GitHub Actions
+ *   REDLINE_PR_NUMBER         override nomor PR kalau tidak lewat Actions
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -654,6 +659,74 @@ async function impact(args: string[]) {
     console.log(`\nJalankan hanya test ini: npx playwright test --grep "${ids.join("|")}"`);
 }
 
+// ---------- comment ----------
+
+type GithubComment = { id: number; body?: string };
+
+function pullRequestNumber(): number {
+  const explicit = Number(process.env.REDLINE_PR_NUMBER || "");
+  if (Number.isInteger(explicit) && explicit > 0) return explicit;
+
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (eventPath && existsSync(eventPath)) {
+    const event = JSON.parse(readFileSync(eventPath, "utf8")) as {
+      pull_request?: { number?: number };
+      issue?: { number?: number };
+    };
+    const number = event.pull_request?.number ?? event.issue?.number;
+    if (number) return number;
+  }
+  throw new Error(
+    "nomor PR tidak ditemukan: jalankan di GitHub Actions pull_request atau set REDLINE_PR_NUMBER",
+  );
+}
+
+async function comment(args: string[]) {
+  const file = args[0] ? path.resolve(args[0]) : path.join(RESULTS_DIR, "redline-report.md");
+  if (!existsSync(file)) {
+    throw new Error(`${file} belum ada; jalankan npx playwright test dulu`);
+  }
+
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) {
+    throw new Error("GITHUB_TOKEN dan GITHUB_REPOSITORY harus diisi (otomatis di GitHub Actions)");
+  }
+  const pr = pullRequestNumber();
+  const api = process.env.GITHUB_API_URL || "https://api.github.com";
+  const marker = "<!-- redline-report -->";
+  let body = readFileSync(file, "utf8").trim();
+  if (body.length > 60_000) body = `${body.slice(0, 60_000)}\n\n_… report truncated_`;
+  body = `${marker}\n${body}`;
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "redline",
+    "Content-Type": "application/json",
+  };
+  const base = `${api}/repos/${repo}/issues`;
+
+  const list = await fetch(`${base}/${pr}/comments?per_page=100`, { headers });
+  if (!list.ok) {
+    throw new Error(`GitHub menolak daftar komentar (${list.status}): ${(await list.text()).slice(0, 200)}`);
+  }
+  const comments = (await list.json()) as GithubComment[];
+  const existing = comments.find((item) => item.body?.includes(marker));
+
+  const url = existing ? `${api}/repos/${repo}/issues/comments/${existing.id}` : `${base}/${pr}/comments`;
+  const response = await fetch(url, {
+    method: existing ? "PATCH" : "POST",
+    headers,
+    body: JSON.stringify({ body }),
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub menolak komentar (${response.status}): ${(await response.text()).slice(0, 200)}`);
+  }
+  console.log(`[redline] komentar PR ${existing ? "diperbarui" : "dibuat"}: ${repo}#${pr}`);
+}
+
 // ---------- main ----------
 
 async function main() {
@@ -673,6 +746,8 @@ async function main() {
       return decide(args[0], "rejected");
     case "impact":
       return impact(args);
+    case "comment":
+      return comment(args);
     default:
       console.log(
         readFileSync(__filename, "utf8")

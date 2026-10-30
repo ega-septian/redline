@@ -405,6 +405,44 @@ func TestAPIKey_SessionAllowsReadsOnly(t *testing.T) {
 	}
 }
 
+func TestAPIKey_UserToken(t *testing.T) {
+	validate := func(token string) bool { return token == "user-key" }
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), AuthEnabled: true, ValidateKey: validate}).Routes()
+
+	if rec := do(h, http.MethodGet, "/api/runs", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token = %d, want 401", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	req.Header.Set("Authorization", "Bearer user-key")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("user token = %d, want 200", rec.Code)
+	}
+}
+
+func TestLabelUsesSessionUser(t *testing.T) {
+	fs := &fakeStore{}
+	session := func(*http.Request) bool { return true }
+	csrf := func(*http.Request) bool { return true }
+	user := func(*http.Request) string { return "ega" }
+	h := (&Server{Store: fs, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "secret",
+		Session: session, CSRF: csrf, User: user}).Routes()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/groups/ada/label",
+		strings.NewReader(`{"label":"test_bug","note":"n","by":"spoofed"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.label != "test_bug|n|ega" {
+		t.Errorf("label = %q, want the session user", fs.label)
+	}
+}
+
 func TestReadyz(t *testing.T) {
 	cases := []struct {
 		name  string

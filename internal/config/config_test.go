@@ -89,3 +89,42 @@ func TestLoad_RejectsInvalidPrice(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_Users(t *testing.T) {
+	t.Setenv("REDLINE_USERS", "ega:key-ega, budi:key-budi")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.Users) != 2 || cfg.Users["ega"] != "key-ega" || cfg.Users["budi"] != "key-budi" {
+		t.Errorf("users = %v", cfg.Users)
+	}
+}
+
+func TestLoad_UsersAllowPublicBind(t *testing.T) {
+	t.Setenv("HOST", "0.0.0.0")
+	t.Setenv("REDLINE_API_KEY", "")
+	t.Setenv("REDLINE_USERS", "ega:key-ega")
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("users should satisfy the public-bind rule: %v", err)
+	}
+}
+
+func TestLoad_RejectsInvalidUsers(t *testing.T) {
+	cases := []string{
+		"ega",             // no key
+		"ega:",            // empty key
+		"ega:key,ega:key", // duplicate
+		"bad name:key",    // invalid name
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("REDLINE_USERS", raw)
+			if _, err := Load(); err == nil {
+				t.Fatalf("REDLINE_USERS %q must be rejected", raw)
+			}
+		})
+	}
+}

@@ -15,7 +15,7 @@ import (
 
 func testHandler(t *testing.T, files fstest.MapFS) http.Handler {
 	t.Helper()
-	return New(files, slog.New(slog.NewTextHandler(io.Discard, nil)), auth.New(""))
+	return New(files, slog.New(slog.NewTextHandler(io.Discard, nil)), auth.New("", nil))
 }
 
 func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
@@ -100,7 +100,7 @@ func securedHandler(t *testing.T) http.Handler {
 			"assets/app.js": {Data: []byte("console.log(1)")},
 		},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		auth.New("secret"),
+		auth.New("secret", nil),
 	)
 }
 
