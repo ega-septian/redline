@@ -4,6 +4,17 @@ export type Category = "backend_bug" | "test_bug" | "environment" | "flaky" | "u
 export type FailureStatus = "new" | "recurring" | "regressed";
 export type Confidence = "high" | "medium" | "low" | "none";
 export type Source = "rule" | "ai" | "experiment" | "human" | "none";
+export type RunStatus = "passed" | "failed" | "flaky";
+
+export type FailureRun = {
+  runId: number;
+  at: string;
+  status: RunStatus;
+  retries: number;
+  source: string;
+  branch: string;
+  commit: string;
+};
 
 export type Failure = {
   fingerprint: string;
@@ -28,7 +39,7 @@ export type Failure = {
   latency: string;
   firstSeen: string;
   labelNote: string;
-  spark: Array<"pass" | "fail" | "none">;
+  runs: FailureRun[];
 };
 
 export const categoryLabel: Record<Category, string> = {
@@ -105,14 +116,24 @@ function alsoFailsOf(knowledge?: Knowledge | null): string {
   return others.size > 0 ? `${others.size} other test${others.size === 1 ? "" : "s"} in this run` : "no other test in this run";
 }
 
-function sparkOf(detail?: GroupDetail | null): Array<"pass" | "fail" | "none"> {
-  const runs = detail?.occurrences.map((occurrence) =>
-    occurrence.status === "failed" ? ("fail" as const) : ("pass" as const),
-  );
-  if (runs && runs.length > 0) {
-    return [...Array(14 - Math.min(runs.length, 14)).fill("none" as const), ...runs.slice(-14)];
-  }
-  return Array.from({ length: 14 }, () => "none" as const);
+function runsOf(detail?: GroupDetail | null): FailureRun[] {
+  const occurrences = detail?.occurrences ?? [];
+  return occurrences
+    .map((occurrence) => ({
+      runId: occurrence.run_id,
+      at: occurrence.run_created_at,
+      status:
+        occurrence.status === "failed"
+          ? ("failed" as const)
+          : occurrence.status === "flaky"
+            ? ("flaky" as const)
+            : ("passed" as const),
+      retries: occurrence.retries,
+      source: occurrence.source,
+      branch: occurrence.branch,
+      commit: occurrence.commit,
+    }))
+    .slice(-20);
 }
 
 function titleOf(group: ApiGroup): string {
@@ -156,6 +177,6 @@ export function toFailure(
     latency: "—",
     firstSeen: when(group.first_seen_at),
     labelNote: group.human_note ?? "",
-    spark: sparkOf(detail),
+    runs: runsOf(detail),
   };
 }
