@@ -41,7 +41,12 @@ const failureReturn = `
 	OPTIONAL MATCH (fr:Run {id: f.firstSeenRun})
 	OPTIONAL MATCH (lr:Run {id: f.lastSeenRun})
 	OPTIONAL MATCH (rr:Run {id: f.resolvedRun})
-	RETURN f, fr.createdAt AS firstAt, lr.createdAt AS lastAt, rr.createdAt AS resolvedAt`
+	OPTIONAL MATCH (f)-[:ANALYZED]->(a:Analysis)
+	WITH f, fr, lr, rr, a ORDER BY a.createdAt DESC
+	WITH f, fr, lr, rr, head(collect(a)) AS a
+	RETURN f, fr.createdAt AS firstAt, lr.createdAt AS lastAt, rr.createdAt AS resolvedAt,
+		a.category AS analysisCategory, a.confidence AS analysisConfidence, a.source AS analysisSource,
+		a.model AS analysisModel, a.summary AS analysisSummary, a.createdAt AS analyzedAt`
 
 func toGroup(rec *neo4j.Record) Group {
 	node, _ := rec.Get("f")
@@ -66,6 +71,16 @@ func toGroup(rec *neo4j.Record) Group {
 	if resolvedAt, _ := rec.Get("resolvedAt"); resolvedAt != nil {
 		t := local(resolvedAt)
 		g.ResolvedAt = &t
+	}
+	m := rec.AsMap()
+	g.Category = str(m, "analysisCategory")
+	g.Confidence = str(m, "analysisConfidence")
+	g.AnalysisSource = str(m, "analysisSource")
+	g.AnalysisModel = str(m, "analysisModel")
+	g.AnalysisSummary = str(m, "analysisSummary")
+	if analyzedAt, _ := m["analyzedAt"]; analyzedAt != nil {
+		t := local(analyzedAt)
+		g.AnalyzedAt = &t
 	}
 	return g
 }

@@ -8,14 +8,24 @@ type Kpi = {
   tone?: "danger" | "ok" | "brand";
 };
 
-const items: Kpi[] = [
-  { label: "Open failures", value: "12", hint: "4 new today", tone: "danger" },
-  { label: "Affected tests", value: "37", hint: "across 2 specs" },
-  { label: "Flaky (7 days)", value: "2", hint: "1 proven by experiment", tone: "ok" },
-  { label: "AI spend today", value: "$0.019", hint: "budget $5.00 · 3 analyses", tone: "brand" },
-];
+export function Kpis({
+  open,
+  occurrences,
+  newToday,
+  projects,
+}: {
+  open: number;
+  occurrences: number;
+  newToday: number;
+  projects: number;
+}) {
+  const items: Kpi[] = [
+    { label: "Open failures", value: String(open), hint: `${newToday} new today`, tone: "danger" },
+    { label: "Occurrences", value: String(occurrences), hint: "failed test results" },
+    { label: "New today", value: String(newToday), hint: "first seen today", tone: "ok" },
+    { label: "Projects", value: String(projects), hint: "reporting to this server", tone: "brand" },
+  ];
 
-export function Kpis() {
   return (
     <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {items.map((item) => (

@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { categoryLabel, statusLabel, type Failure } from "@/data/mock";
+import { categoryLabel, statusLabel, type Failure } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
 const categoryTone = {
@@ -7,6 +7,7 @@ const categoryTone = {
   test_bug: "test",
   environment: "env",
   flaky: "flaky",
+  unclear: "neutral",
 } as const;
 
 const statusStyle = {
@@ -20,6 +21,7 @@ const categoryDot = {
   test_bug: "bg-violet",
   environment: "bg-warn",
   flaky: "bg-ok",
+  unclear: "bg-faint",
 } as const;
 
 export function FailureTable({
@@ -92,7 +94,7 @@ export function FailureTable({
 }
 
 function Confidence({ value }: { value: Failure["confidence"] }) {
-  const filled = value === "medium" ? 2 : 3;
+  const filled = value === "medium" ? 2 : value === "low" ? 1 : value === "none" ? 0 : 3;
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-muted">
       <span className="flex gap-0.5">
@@ -101,12 +103,12 @@ function Confidence({ value }: { value: Failure["confidence"] }) {
             key={index}
             className={cn(
               "h-[11px] w-1 rounded-[1px]",
-              index < filled ? (value === "medium" ? "bg-warn" : "bg-ok") : "bg-line",
+              index < filled ? (value === "high" ? "bg-ok" : "bg-warn") : "bg-line",
             )}
           />
         ))}
       </span>
-      {value}
+      {value === "none" ? "—" : value}
     </span>
   );
 }

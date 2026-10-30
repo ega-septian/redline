@@ -302,3 +302,32 @@ func TestAnalyze_RecordsSpend(t *testing.T) {
 		t.Errorf("biaya AI harus tercatat untuk batas harian, dapat %v", spent)
 	}
 }
+
+func TestListGroupsIncludesLatestAnalysis(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fake := &fakeLLM{verdict: verdict{
+		Category: "backend_bug", Confidence: "high", Summary: "x",
+		Evidence: []string{"Kode test berubah: tidak"},
+	}}
+	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5",
+		Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}}
+	if _, _, err := a.Analyze(ctx, fps["order dibayar"], false); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := s.ListGroups(ctx, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range groups {
+		if group.Fingerprint != fps["order dibayar"] {
+			continue
+		}
+		if group.Category != "backend_bug" || group.Confidence != "high" || group.AnalysisSource != "ai" {
+			t.Errorf("list group analysis = %q/%q/%q", group.Category, group.Confidence, group.AnalysisSource)
+		}
+		return
+	}
+	t.Fatal("analysed group not in ListGroups")
+}

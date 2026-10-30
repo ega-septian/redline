@@ -40,15 +40,15 @@ Then `go build ./cmd/server` embeds the new `dist/`. Without a build, `/ui/` sho
 
 ```
 src/
+├── api/                     typed client for /api/groups and /api/groups/{fp}
 ├── components/
 │   ├── app-shell.tsx        layout, sidebar, health status
 │   ├── failures/            list, detail, KPI cards
 │   └── ui/                  shadcn-style primitives (button, badge, card, input)
-├── data/mock.ts             sample failures until the API is wired
-├── lib/utils.ts             cn()
-├── pages/failures.tsx       the Failures screen
+├── lib/failure.ts           API group -> view model, labels and formatting
+├── pages/failures.tsx       the Failures screen (TanStack Query + Router)
 ├── routeTree.tsx            TanStack Router tree
 └── main.tsx                 QueryClient + Router
 ```
 
-The next PR replaces `data/mock.ts` with `GET /api/groups` and adds the login cookie.
+The next PR adds labels (the first write) with a CSRF token.
