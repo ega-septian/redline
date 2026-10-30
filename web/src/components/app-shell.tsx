@@ -27,8 +27,8 @@ const nav = [
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
-  { label: "Rules", icon: Sparkles, soon: true },
-  { label: "Scoreboard", icon: BarChart3, soon: true },
+  { label: "Rules", icon: Sparkles, to: "/rules" as const },
+  { label: "Scoreboard", icon: BarChart3, to: "/scoreboard" as const },
 ];
 
 export function AppShell() {
@@ -47,8 +47,21 @@ export function AppShell() {
     ? "Runs"
     : pathname.startsWith("/impact")
       ? "Impact"
-      : "Failures";
-  const subtitle = title === "Failures" ? "open failures" : title === "Runs" ? "recent runs" : "graph";
+      : pathname.startsWith("/rules")
+        ? "Rules"
+        : pathname.startsWith("/scoreboard")
+          ? "Scoreboard"
+          : "Failures";
+  const subtitle =
+    title === "Failures"
+      ? "open failures"
+      : title === "Runs"
+        ? "recent runs"
+        : title === "Impact"
+          ? "graph"
+          : title === "Rules"
+            ? "learned from proven cases"
+            : "accuracy";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -157,7 +170,7 @@ function NavItem({
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/" | "/runs" | "/impact";
+  to?: "/" | "/runs" | "/impact" | "/rules" | "/scoreboard";
   count?: number;
   soon?: boolean;
   active?: boolean;
