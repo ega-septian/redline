@@ -58,6 +58,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.sessions.Enabled() && h.sessions.Valid(r) {
+		h.sessions.EnsureCSRF(w, r)
+	}
+
 	if info, err := fs.Stat(h.files, name); err == nil && !info.IsDir() {
 		h.serveFile(w, r, name)
 		return

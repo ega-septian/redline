@@ -27,6 +27,7 @@ export type Failure = {
   cost: string;
   latency: string;
   firstSeen: string;
+  labelNote: string;
   spark: Array<"pass" | "fail" | "none">;
 };
 
@@ -47,11 +48,12 @@ export const statusLabel: Record<FailureStatus, string> = {
 const categories: Category[] = ["backend_bug", "test_bug", "environment", "flaky"];
 
 function categoryOf(group: ApiGroup, detail?: GroupDetail | null): Category {
-  const raw = detail?.analysis?.category ?? group.category ?? group.human_label ?? "";
+  const raw = group.human_label ?? detail?.analysis?.category ?? group.category ?? "";
   return categories.includes(raw as Category) ? (raw as Category) : "unclear";
 }
 
 function confidenceOf(group: ApiGroup, detail?: GroupDetail | null): Confidence {
+  if (group.human_label) return "high";
   const raw = detail?.analysis?.confidence ?? group.confidence ?? "";
   return raw === "high" || raw === "medium" || raw === "low" ? raw : "none";
 }
@@ -74,9 +76,10 @@ function when(iso: string | undefined | null): string {
 }
 
 function sourceOf(group: ApiGroup, detail?: GroupDetail | null): Source {
+  if (group.human_label) return "human";
   const raw = detail?.analysis?.source ?? group.analysis_source ?? "";
   if (raw === "rule" || raw === "ai" || raw === "experiment" || raw === "human") return raw;
-  return group.human_label ? "human" : "none";
+  return "none";
 }
 
 function evidenceOf(group: ApiGroup, detail?: GroupDetail | null): string[] {
@@ -137,7 +140,10 @@ export function toFailure(
     lastSeen: when(group.last_seen_at),
     source: sourceOf(group, detail),
     model: analysis?.model,
-    summary: analysis?.summary || group.analysis_summary || group.summary || "No analysis yet.",
+    summary:
+      group.human_label && group.human_note
+        ? group.human_note
+        : analysis?.summary || group.analysis_summary || group.summary || "No analysis yet.",
     evidence: evidenceOf(group, detail),
     nextStep:
       analysis?.next_step ||
@@ -149,6 +155,7 @@ export function toFailure(
     cost: analysis?.cost_usd ? `$${analysis.cost_usd.toFixed(5)}` : "—",
     latency: "—",
     firstSeen: when(group.first_seen_at),
+    labelNote: group.human_note ?? "",
     spark: sparkOf(detail),
   };
 }

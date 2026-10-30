@@ -374,21 +374,34 @@ func TestAPIKey_EmptyMeansOpen(t *testing.T) {
 
 func TestAPIKey_SessionAllowsReadsOnly(t *testing.T) {
 	session := func(r *http.Request) bool { return r.Header.Get("X-Session") == "1" }
+	csrf := func(r *http.Request) bool { return r.Header.Get("X-CSRF-Token") == "token" }
 	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{},
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "secret", Session: session}).Routes()
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "secret",
+		Session: session, CSRF: csrf}).Routes()
 
-	call := func(method string) int {
-		req := httptest.NewRequest(method, "/api/runs", nil)
+	call := func(method string, body string, header string) int {
+		req := httptest.NewRequest(method, "/api/groups/ada/label", strings.NewReader(body))
 		req.Header.Set("X-Session", "1")
+		if header != "" {
+			req.Header.Set("X-CSRF-Token", header)
+		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	if got := call(http.MethodGet); got != http.StatusOK {
-		t.Errorf("GET with session = %d, want 200", got)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	getReq.Header.Set("X-Session", "1")
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Errorf("GET with session = %d, want 200", getRec.Code)
 	}
-	if got := call(http.MethodPost); got != http.StatusUnauthorized {
-		t.Errorf("POST with session = %d, want 401", got)
+	body := `{"label":"test_bug","by":"ui"}`
+	if got := call(http.MethodPut, body, ""); got != http.StatusForbidden {
+		t.Errorf("PUT without CSRF = %d, want 403", got)
+	}
+	if got := call(http.MethodPut, body, "token"); got != http.StatusOK {
+		t.Errorf("PUT with CSRF = %d, want 200", got)
 	}
 }
 

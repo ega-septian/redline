@@ -184,8 +184,8 @@ export function FailuresPage() {
       </div>
 
       <p className="text-[11px] text-faint">
-        Live data from <span className="font-mono">GET /api/groups</span>. Labels and analysis
-        actions arrive in the next PR.
+        Live data from <span className="font-mono">GET /api/groups</span>. Labels are saved with a
+        CSRF token; analysis actions stay in the CLI/API.
       </p>
     </>
   );

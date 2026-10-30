@@ -154,6 +154,7 @@ func run(log *slog.Logger) error {
 		Version: buildVersion()}
 	sessions := auth.New(cfg.APIKey)
 	srv.Session = sessions.Valid
+	srv.CSRF = sessions.CSRFValid
 	// /readyz memeriksa database; /healthz tetap liveness saja.
 	srv.Ready = db.Ping
 	if cfg.APIKey != "" {

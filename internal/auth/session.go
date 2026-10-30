@@ -7,6 +7,7 @@ package auth
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -19,6 +20,10 @@ import (
 
 // CookieName is the HttpOnly session cookie for the UI.
 const CookieName = "redline_session"
+
+// CSRFCookieName is readable by JavaScript and paired with the X-CSRF-Token
+// header for cookie-authenticated writes (double submit).
+const CSRFCookieName = "redline_csrf"
 
 const sessionTTL = 12 * time.Hour
 
@@ -90,25 +95,74 @@ func (s *Sessions) SetCookie(w http.ResponseWriter, r *http.Request) {
 		Expires:  expires,
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
+	s.setCSRFCookie(w, r, expires, newCSRFToken())
+}
+
+// EnsureCSRF issues the readable CSRF cookie for a valid session that predates
+// the CSRF upgrade (or lost the cookie).
+func (s *Sessions) EnsureCSRF(w http.ResponseWriter, r *http.Request) {
+	if !s.Enabled() {
+		return
+	}
+	if cookie, err := r.Cookie(CSRFCookieName); err == nil && cookie.Value != "" {
+		return
+	}
+	s.setCSRFCookie(w, r, s.now().Add(sessionTTL), newCSRFToken())
+}
+
+func (s *Sessions) setCSRFCookie(w http.ResponseWriter, r *http.Request, expires time.Time, value string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     CSRFCookieName,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: false,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+		Expires:  expires,
+		MaxAge:   int(sessionTTL.Seconds()),
+	})
+}
+
+// CSRFValid checks the double-submit token for a cookie-authenticated write.
+func (s *Sessions) CSRFValid(r *http.Request) bool {
+	if !s.Enabled() {
+		return true
+	}
+	cookie, err := r.Cookie(CSRFCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	header := r.Header.Get("X-CSRF-Token")
+	return subtle.ConstantTimeCompare([]byte(header), []byte(cookie.Value)) == 1
 }
 
 func (s *Sessions) ClearCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Unix(1, 0),
-		MaxAge:   -1,
-	})
+	for _, name := range []string{CookieName, CSRFCookieName} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: name == CookieName,
+			Secure:   isHTTPS(r),
+			SameSite: http.SameSiteLaxMode,
+			Expires:  time.Unix(1, 0),
+			MaxAge:   -1,
+		})
+	}
 }
 
 func (s *Sessions) sign(payload string) string {
 	mac := hmac.New(sha256.New, s.key)
 	mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newCSRFToken() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 func isHTTPS(r *http.Request) bool {

@@ -64,9 +64,10 @@ type Server struct {
 	Version string
 	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
 	Ready func(context.Context) error
-	// Session: true when the request carries a valid UI session cookie. It only
-	// allows GET/HEAD; writes still need the Bearer key (CSRF comes with labels).
+	// Session: true when the request carries a valid UI session cookie.
+	// Cookie writes also need CSRF (X-CSRF-Token matching the redline_csrf cookie).
 	Session func(*http.Request) bool
+	CSRF    func(*http.Request) bool
 }
 
 // APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
@@ -147,9 +148,13 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
-			s.Session != nil && s.Session(r) {
-			next.ServeHTTP(w, r)
+		if s.Session != nil && s.Session(r) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead ||
+				(s.CSRF != nil && s.CSRF(r)) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusForbidden, "CSRF token salah atau tidak ada: kirim header X-CSRF-Token")
 			return
 		}
 		got := []byte(r.Header.Get("Authorization"))

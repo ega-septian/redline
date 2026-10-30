@@ -22,10 +22,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+export type LabelInput = { label: string; note: string };
+export type LabelResult = { label: string; note: string; by: string };
+
+const CSRF_COOKIE = "redline_csrf";
+
+function csrfToken(): string {
+  const entry = document.cookie.split("; ").find((row) => row.startsWith(`${CSRF_COOKIE}=`));
+  return entry ? decodeURIComponent(entry.slice(CSRF_COOKIE.length + 1)) : "";
+}
+
 export const api = {
   groups: () => request<ApiGroup[]>("/api/groups"),
   group: (fingerprint: string) =>
     request<GroupDetail>(`/api/groups/${encodeURIComponent(fingerprint)}`),
   knowledge: (fingerprint: string) =>
     request<Knowledge>(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge`),
+  label: (fingerprint: string, input: LabelInput) =>
+    request<LabelResult>(`/api/groups/${encodeURIComponent(fingerprint)}/label`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ ...input, by: "ui" }),
+    }),
 };
