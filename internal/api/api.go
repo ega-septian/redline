@@ -64,6 +64,9 @@ type Server struct {
 	Version string
 	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
 	Ready func(context.Context) error
+	// Session: true when the request carries a valid UI session cookie. It only
+	// allows GET/HEAD; writes still need the Bearer key (CSRF comes with labels).
+	Session func(*http.Request) bool
 }
 
 // APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
@@ -80,7 +83,9 @@ func (s *Server) version() string {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": s.version(), "api": APIVersion})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok", "version": s.version(), "api": APIVersion, "auth": s.APIKey != "",
+		})
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
@@ -139,6 +144,11 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 	want := []byte("Bearer " + s.APIKey)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+			s.Session != nil && s.Session(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

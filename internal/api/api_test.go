@@ -372,6 +372,26 @@ func TestAPIKey_EmptyMeansOpen(t *testing.T) {
 	}
 }
 
+func TestAPIKey_SessionAllowsReadsOnly(t *testing.T) {
+	session := func(r *http.Request) bool { return r.Header.Get("X-Session") == "1" }
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "secret", Session: session}).Routes()
+
+	call := func(method string) int {
+		req := httptest.NewRequest(method, "/api/runs", nil)
+		req.Header.Set("X-Session", "1")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := call(http.MethodGet); got != http.StatusOK {
+		t.Errorf("GET with session = %d, want 200", got)
+	}
+	if got := call(http.MethodPost); got != http.StatusUnauthorized {
+		t.Errorf("POST with session = %d, want 401", got)
+	}
+}
+
 func TestReadyz(t *testing.T) {
 	cases := []struct {
 		name  string

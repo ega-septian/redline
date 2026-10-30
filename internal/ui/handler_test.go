@@ -5,14 +5,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"redline/internal/auth"
 )
 
 func testHandler(t *testing.T, files fstest.MapFS) http.Handler {
 	t.Helper()
-	return New(files, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(files, slog.New(slog.NewTextHandler(io.Discard, nil)), auth.New(""))
 }
 
 func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
@@ -86,5 +89,88 @@ func TestNotBuilt(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "not built") {
 		t.Errorf("body should explain the missing build: %q", rec.Body)
+	}
+}
+
+func securedHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return New(
+		fstest.MapFS{
+			"index.html":    {Data: []byte("<html>app</html>")},
+			"assets/app.js": {Data: []byte("console.log(1)")},
+		},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		auth.New("secret"),
+	)
+}
+
+func TestLoginRequiredForPages(t *testing.T) {
+	h := securedHandler(t)
+
+	rec := get(t, h, "/failures/abc")
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	want := "/ui/login?next=%2Ffailures%2Fabc"
+	if got := rec.Header().Get("Location"); got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+}
+
+func TestAssetsStayPublic(t *testing.T) {
+	if rec := get(t, securedHandler(t), "/assets/app.js"); rec.Code != http.StatusOK {
+		t.Errorf("asset status = %d", rec.Code)
+	}
+}
+
+func TestLoginFlow(t *testing.T) {
+	h := securedHandler(t)
+
+	if rec := get(t, h, "/login"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in") {
+		t.Fatalf("login page: %d %q", rec.Code, rec.Body)
+	}
+
+	post := func(key string) *httptest.ResponseRecorder {
+		form := url.Values{"key": {key}, "next": {"/ui/failures/abc"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := post("wrong"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong key status = %d", rec.Code)
+	}
+
+	rec := post("secret")
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/failures/abc" {
+		t.Fatalf("login: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != auth.CookieName || !cookies[0].HttpOnly {
+		t.Fatalf("cookie = %+v", cookies)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/failures/abc", nil)
+	req.AddCookie(cookies[0])
+	page := httptest.NewRecorder()
+	h.ServeHTTP(page, req)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "app") {
+		t.Errorf("authenticated page: %d %q", page.Code, page.Body)
+	}
+}
+
+func TestLogoutClearsCookie(t *testing.T) {
+	h := securedHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/login" {
+		t.Fatalf("logout: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].MaxAge >= 0 {
+		t.Errorf("logout cookie = %+v", cookies)
 	}
 }

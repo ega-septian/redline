@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type Health = { status: string; version?: string; api?: number };
+type Health = { status: string; version?: string; api?: number; auth?: boolean };
 
 async function fetchHealth(): Promise<Health> {
   const response = await fetch("/healthz");
@@ -79,6 +79,13 @@ export function AppShell() {
           <span className="font-semibold text-muted">Read-only mode</span>
           <br />
           Labels and rules are changed from the CLI or API. Nothing on this page writes to Redline.
+          {health.data?.auth && (
+            <form method="post" action="/ui/logout" className="mt-2">
+              <button type="submit" className="text-[11px] text-brand hover:underline">
+                Sign out
+              </button>
+            </form>
+          )}
         </div>
       </aside>
 

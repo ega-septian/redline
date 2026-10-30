@@ -21,6 +21,7 @@ import (
 
 	"redline/internal/analysis"
 	"redline/internal/api"
+	"redline/internal/auth"
 	"redline/internal/config"
 	"redline/internal/contract"
 	"redline/internal/embed"
@@ -151,6 +152,8 @@ func run(log *slog.Logger) error {
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		Version: buildVersion()}
+	sessions := auth.New(cfg.APIKey)
+	srv.Session = sessions.Valid
 	// /readyz memeriksa database; /healthz tetap liveness saja.
 	srv.Ready = db.Ping
 	if cfg.APIKey != "" {
@@ -169,7 +172,7 @@ func run(log *slog.Logger) error {
 	}
 	root := http.NewServeMux()
 	root.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
-	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log)))
+	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log, sessions)))
 	root.Handle("/", srv.Routes())
 
 	httpSrv := &http.Server{
