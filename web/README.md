@@ -21,6 +21,10 @@ npm run dev                  # http://localhost:5173/ui/
 Vite proxies `/api`, `/healthz` and `/readyz` to `localhost:8787`, so the UI uses the same
 origin rules as production.
 
+If the server has `REDLINE_API_KEY` set, `/ui/` redirects to `/ui/login`; sign in with that key.
+The resulting cookie is HttpOnly, SameSite=Lax and lasts 12 hours. Without a key (the loopback
+default), the UI opens directly.
+
 ## Build
 
 ```bash
