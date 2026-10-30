@@ -326,6 +326,9 @@ REDLINE_TEST_NEO4J_URI=bolt://localhost:7688 go test ./...   # without it, datab
 npm ci && npm run build                                      # the Playwright package
 ```
 
+The React UI lives in [`web/`](web/README.md). Build it before `go build` to embed it; without a
+build, `/ui/` serves a "UI not built" page.
+
 Tests create and empty their own databases (`redlinetest-*`); never point them at a server with real
 data. No real AI calls are made in tests. CI runs gofmt, vet and all tests against DozerDB on every pull
 request, and fails if the database tests are skipped.

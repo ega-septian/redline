@@ -11,8 +11,8 @@ Status: agreed after v0.6.0. Owner: Ega. Last updated: 2026-10-29.
 
 **Scope**
 
-- Read-only UI in the same repository (`internal/ui`, Go templates + `go:embed`):
-  Failures list and detail, Runs, Rules, Impact, Scoreboard.
+- Read-only UI in the same repository (`web/`, React + TypeScript + Vite, embedded with
+  `go:embed`): Failures list and detail, Runs, Rules, Impact, Scoreboard.
 - Auth: the existing Bearer key for API/CLI, plus an HttpOnly cookie for the UI. No key in
   `localStorage`.
 - Labels and rule approval from the UI (the endpoints already exist). This is the first write path.
@@ -108,8 +108,8 @@ verification instead of hope.
 
 - **Backend stays Go.** No rewrite to Node/Python. The tested core (rules, graph, AI, verify) is the
   asset.
-- **UI lives in this repository.** `internal/ui` with Go templates first; a SPA (`web/`, embedded via
-  `go:embed`) only if the UI really needs it. One binary, one release.
+- **UI lives in this repository.** `web/` uses React + TypeScript + Vite (TanStack Query,
+  TanStack Router, Tailwind, shadcn/ui) and is embedded with `go:embed`. One binary, one release.
 - **API-first.** The UI uses the public `/api/...` shape, not Neo4j directly, so it can be split later
   without rewriting the server.
 - **Rules first, AI optional.** CI runs rules only. AI is opt-in per run and capped by
