@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -23,10 +24,10 @@ async function fetchHealth(): Promise<Health> {
 
 const nav = [
   { label: "Overview", icon: LayoutDashboard, soon: true },
-  { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 5 },
-  { label: "Runs", icon: GitBranch, soon: true, count: 48 },
+  { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
+  { label: "Runs", icon: GitBranch, soon: true },
   { label: "Impact", icon: Waypoints, soon: true },
-  { label: "Rules", icon: Sparkles, soon: true, count: 7 },
+  { label: "Rules", icon: Sparkles, soon: true },
   { label: "Scoreboard", icon: BarChart3, soon: true },
 ];
 
@@ -37,10 +38,14 @@ export function AppShell() {
     refetchInterval: 30_000,
     retry: 1,
   });
+  const groups = useQuery({ queryKey: ["groups"], queryFn: api.groups });
+  const items = nav.map((item) =>
+    item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
+  );
 
   const online = health.isSuccess && !health.isError;
   const version = health.data?.version ?? "dev";
-  const api = health.data?.api ?? 1;
+  const apiVersion = health.data?.api ?? 1;
   const host = window.location.host;
 
   return (
@@ -64,13 +69,13 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {nav.slice(0, 4).map((item) => (
+          {items.slice(0, 4).map((item) => (
             <NavItem key={item.label} {...item} />
           ))}
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {nav.slice(4).map((item) => (
+          {items.slice(4).map((item) => (
             <NavItem key={item.label} {...item} />
           ))}
         </nav>
@@ -92,7 +97,7 @@ export function AppShell() {
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-14 flex-wrap items-center gap-x-3.5 gap-y-1 border-b border-line px-4 py-2 md:px-5">
           <h1 className="shrink-0 text-[15px] font-semibold">Failures</h1>
-          <span className="hidden text-xs text-faint sm:inline">toolshop · last 30 days</span>
+          <span className="hidden text-xs text-faint sm:inline">open failures</span>
           <Badge tone="env" className="gap-1.5 px-2">
             <span className="h-1.5 w-1.5 rounded-full bg-warn" />
             Read-only
@@ -108,7 +113,7 @@ export function AppShell() {
             {online ? host : "server offline"}
           </div>
           <span className="hidden font-mono text-[11.5px] text-faint lg:inline">
-            {version} · api {api}
+            {version} · api {apiVersion}
           </span>
           <div className="hidden h-[26px] w-[26px] place-items-center rounded-full bg-[#1f6feb] text-[11px] font-bold text-white sm:grid">
             ES

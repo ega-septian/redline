@@ -395,6 +395,14 @@ type Group struct {
 	HumanNote    string     `json:"human_note,omitempty"`
 	LabeledBy    string     `json:"labeled_by,omitempty"`
 	LocalOnly    bool       `json:"local_only"` // hanya terlihat di run lokal; tidak masuk daftar tim
+
+	// Latest analysis, so a list can show the category without a request per group.
+	Category        string     `json:"category,omitempty"`
+	Confidence      string     `json:"confidence,omitempty"`
+	AnalysisSource  string     `json:"analysis_source,omitempty"`
+	AnalysisModel   string     `json:"analysis_model,omitempty"`
+	AnalysisSummary string     `json:"analysis_summary,omitempty"`
+	AnalyzedAt      *time.Time `json:"analyzed_at,omitempty"`
 }
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.

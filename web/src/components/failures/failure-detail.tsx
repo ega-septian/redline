@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { categoryLabel, type Failure } from "@/data/mock";
+import { categoryLabel, type Failure } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
 const categoryTone = {
@@ -11,17 +11,24 @@ const categoryTone = {
   test_bug: "test",
   environment: "env",
   flaky: "flaky",
+  unclear: "neutral",
 } as const;
 
 const tabs = ["Analysis", "Occurrences", "Knowledge"] as const;
 type Tab = (typeof tabs)[number];
 
-export function FailureDetail({ failure }: { failure: Failure }) {
+export function FailureDetail({
+  failure,
+  loading = false,
+}: {
+  failure: Failure;
+  loading?: boolean;
+}) {
   const [tab, setTab] = useState<Tab>("Analysis");
   const [copied, setCopied] = useState(false);
 
-  async function copyCurl() {
-    await navigator.clipboard.writeText(failure.curl);
+  async function copyError() {
+    await navigator.clipboard.writeText(failure.reproduce);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
@@ -36,26 +43,34 @@ export function FailureDetail({ failure }: { failure: Failure }) {
             {failure.source === "ai" && `AI · ${failure.model ?? "model"}`}
             {failure.source === "experiment" && "PROVEN · EXPERIMENT"}
             {failure.source === "human" && "HUMAN"}
+            {failure.source === "none" && "UNANALYZED"}
           </Badge>
           <span className="ml-auto font-mono text-[11px] text-faint">
             {failure.fingerprint.slice(0, 8)}…
           </span>
+          {loading && <span className="text-[10px] text-faint">loading…</span>}
         </div>
 
         <h2 className="text-sm font-semibold leading-snug">{failure.title}</h2>
         <div className="mt-1 break-words font-mono text-[11px] text-faint">
-          {failure.file} › {failure.test} · {failure.affectedTests} tests affected
+          {failure.file} › {failure.test} · {failure.occurrences}{" "}
+          {failure.occurrences === 1 ? "occurrence" : "occurrences"}
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
-          <Button variant="default" onClick={copyCurl}>
+          <Button variant="default" onClick={copyError}>
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? "Copied" : "Copy curl"}
+            {copied ? "Copied" : "Copy error"}
           </Button>
-          <Button>
-            Open run #48 <ExternalLink className="h-3 w-3" />
+          <Button asChild>
+            <a
+              href={`/api/groups/${encodeURIComponent(failure.fingerprint)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open JSON <ExternalLink className="h-3 w-3" />
+            </a>
           </Button>
-          <Button>Allure ↗</Button>
         </div>
       </div>
 
@@ -84,8 +99,11 @@ export function FailureDetail({ failure }: { failure: Failure }) {
 
         <div className="flex items-center justify-between border-t border-line-soft pt-2.5 text-[10.5px] text-faint">
           <span>
-            Decided by <b className="font-semibold text-muted">{failure.source}</b> ·{" "}
-            {failure.latency} · {failure.cost}
+            Decided by{" "}
+            <b className="font-semibold text-muted">
+              {failure.source === "none" ? "not analyzed" : failure.source}
+            </b>{" "}
+            · {failure.latency} · {failure.cost}
           </span>
           <span>first seen {failure.firstSeen}</span>
         </div>
@@ -129,7 +147,9 @@ function Analysis({ failure }: { failure: Failure }) {
               key={index}
               className={cn(
                 "flex-1 rounded-t-sm",
-                state === "fail" ? "bg-danger" : "bg-[#2ea043]",
+                state === "fail" && "bg-danger",
+                state === "pass" && "bg-[#2ea043]",
+                state === "none" && "bg-line",
               )}
               style={{ height: `${38 + ((index * 9) % 40)}%` }}
             />
@@ -144,13 +164,17 @@ function Analysis({ failure }: { failure: Failure }) {
             <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-danger" />
             failed
           </span>
+          <span>
+            <i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-line" />
+            no data
+          </span>
         </div>
       </section>
 
       <section>
-        <BlockLabel>Reproduce</BlockLabel>
-        <pre className="max-h-40 overflow-auto rounded-md border border-line-soft bg-[#0b0f14] p-2 font-mono text-[10.5px] leading-relaxed whitespace-pre text-[#adbac7]">
-          {failure.curl}
+        <BlockLabel>Last error</BlockLabel>
+        <pre className="max-h-40 overflow-auto rounded-md border border-line-soft bg-[#0b0f14] p-2 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#adbac7]">
+          {failure.reproduce}
         </pre>
       </section>
     </>
