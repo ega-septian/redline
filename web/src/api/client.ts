@@ -1,4 +1,10 @@
-import type { ApiGroup, GroupDetail, Knowledge } from "./types";
+import type {
+  ApiGroup,
+  ApiRun,
+  GroupDetail,
+  ImpactResult,
+  Knowledge,
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -38,6 +44,9 @@ export const api = {
     request<GroupDetail>(`/api/groups/${encodeURIComponent(fingerprint)}`),
   knowledge: (fingerprint: string) =>
     request<Knowledge>(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge`),
+  runs: () => request<ApiRun[]>("/api/runs?limit=50"),
+  impact: (kind: "file" | "endpoint", query: string) =>
+    request<ImpactResult>(`/api/impact?${kind}=${encodeURIComponent(query)}`),
   label: (fingerprint: string, input: LabelInput) =>
     request<LabelResult>(`/api/groups/${encodeURIComponent(fingerprint)}/label`, {
       method: "PUT",

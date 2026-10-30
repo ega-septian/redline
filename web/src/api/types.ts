@@ -82,3 +82,35 @@ export type Knowledge = {
     without: TestSplit;
   }>;
 };
+
+export type ApiRun = {
+  id: number;
+  created_at: string;
+  started_at: string;
+  duration_ms: number;
+  source: string;
+  triggered_by: string;
+  ci_url: string;
+  branch: string;
+  commit: string;
+  app_version: string;
+  playwright_version: string;
+  total: number;
+  passed: number;
+  failed: number;
+  flaky: number;
+  skipped: number;
+  report_errors: string[];
+};
+
+export type ApiImpactedTest = {
+  test: string;
+  test_case_id?: string;
+  run_id: number;
+};
+
+export type ImpactResult = {
+  file: string;
+  endpoint: string;
+  tests: ApiImpactedTest[];
+};

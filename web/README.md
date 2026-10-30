@@ -40,16 +40,20 @@ Then `go build ./cmd/server` embeds the new `dist/`. Without a build, `/ui/` sho
 
 ```
 src/
-├── api/                     typed client for /api/groups and /api/groups/{fp}
+├── api/                     typed client for /api/groups, /runs and /impact
 ├── components/
 │   ├── app-shell.tsx        layout, sidebar, health status
-│   ├── failures/            list, detail, KPI cards
+│   ├── failures/            list, detail, label form, KPI cards
 │   └── ui/                  shadcn-style primitives (button, badge, card, input)
 ├── lib/failure.ts           API group -> view model, labels and formatting
-├── pages/failures.tsx       the Failures screen (TanStack Query + Router)
+├── pages/
+│   ├── failures.tsx         Failures (TanStack Query + Router)
+│   ├── runs.tsx             recent runs, filters and results
+│   └── impact.tsx           file/endpoint impact lookup
 ├── routeTree.tsx            TanStack Router tree
 └── main.tsx                 QueryClient + Router
 ```
 
 The Failures screen reads `/api/groups`; labels are written from the detail panel with the
-`X-CSRF-Token` double-submit cookie. Analysis and rule decisions stay in the CLI/API.
+`X-CSRF-Token` double-submit cookie. Runs and Impact are read-only. Analysis and rule decisions
+stay in the CLI/API.
