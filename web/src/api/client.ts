@@ -51,6 +51,12 @@ export const api = {
     request<ImpactResult>(`/api/impact?${kind}=${encodeURIComponent(query)}`),
   rules: () => request<ApiRule[]>("/api/rules"),
   scoreboard: () => request<Scoreboard>("/api/scoreboard?limit=50"),
+  decideRule: (id: number, status: "active" | "rejected") =>
+    request<ApiRule>(`/api/rules/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ status, by: "ui" }),
+    }),
   label: (fingerprint: string, input: LabelInput) =>
     request<LabelResult>(`/api/groups/${encodeURIComponent(fingerprint)}/label`, {
       method: "PUT",

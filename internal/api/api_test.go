@@ -443,6 +443,26 @@ func TestLabelUsesSessionUser(t *testing.T) {
 	}
 }
 
+func TestRuleDecisionUsesSessionUser(t *testing.T) {
+	session := func(*http.Request) bool { return true }
+	csrf := func(*http.Request) bool { return true }
+	user := func(*http.Request) string { return "ega" }
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), APIKey: "secret",
+		Session: session, CSRF: csrf, User: user}).Routes()
+
+	req := httptest.NewRequest(http.MethodPut, "/api/rules/1",
+		strings.NewReader(`{"status":"active","by":"spoofed"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"decided_by": "ega"`) {
+		t.Errorf("rule decision did not use the session user: %s", rec.Body)
+	}
+}
+
 func TestReadyz(t *testing.T) {
 	cases := []struct {
 		name  string

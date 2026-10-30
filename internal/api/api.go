@@ -530,6 +530,11 @@ func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"active|rejected|proposed\", \"by\": \"...\"}")
 		return
 	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
 	body.By = strings.TrimSpace(body.By)
 	if body.By == "" {
 		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang memutuskan")

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -124,8 +124,8 @@ export function RulesPage() {
       )}
 
       <p className="text-[11px] text-faint">
-        Read-only. Approve or reject with <span className="font-mono">npx redline approve &lt;id&gt;</span>{" "}
-        or <span className="font-mono">PUT /api/rules/&lt;id&gt;</span>.
+        Approve/reject is saved here with a CSRF token. Rule proposals and analysis stay in the
+        CLI/API.
       </p>
     </>
   );
@@ -133,6 +133,16 @@ export function RulesPage() {
 
 function RuleCard({ rule }: { rule: ApiRule }) {
   const category = categoryOf(rule);
+  const queryClient = useQueryClient();
+  const decision = useMutation({
+    mutationFn: (status: "active" | "rejected") => api.decideRule(rule.id, status),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rules"] }),
+        queryClient.invalidateQueries({ queryKey: ["scoreboard"] }),
+      ]);
+    },
+  });
   const tone =
     rule.status === "active" ? "flaky" : rule.status === "rejected" ? "neutral" : "env";
   return (
@@ -147,11 +157,37 @@ function RuleCard({ rule }: { rule: ApiRule }) {
         {rule.pattern}
       </code>
       <p className="mt-2 text-[12.5px] text-[#cdd9e5]">{rule.summary}</p>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-faint">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-faint">
         <span>{rule.hits} hits</span>
         <span>{rule.also_matches} also matches</span>
         <span>from {rule.learned_from.length} proven cases</span>
         {rule.decided_by && <span>decided by {rule.decided_by}</span>}
+        {decision.isSuccess && <span className="text-ok">Saved</span>}
+        {decision.isError && (
+          <span className="text-danger">
+            {decision.error instanceof Error ? decision.error.message : "Failed to save"}
+          </span>
+        )}
+        <span className="ml-auto flex gap-1.5">
+          {rule.status !== "active" && (
+            <Button
+              variant="default"
+              onClick={() => decision.mutate("active")}
+              disabled={decision.isPending}
+            >
+              Approve
+            </Button>
+          )}
+          {rule.status !== "rejected" && (
+            <Button
+              variant="outline"
+              onClick={() => decision.mutate("rejected")}
+              disabled={decision.isPending}
+            >
+              Reject
+            </Button>
+          )}
+        </span>
       </div>
     </Card>
   );
