@@ -23,7 +23,7 @@ func New(files fs.FS, log *slog.Logger, sessions *auth.Sessions) http.Handler {
 		log = slog.Default()
 	}
 	if sessions == nil {
-		sessions = auth.New("")
+		sessions = auth.New("", nil)
 	}
 	return &handler{files: files, log: log, sessions: sessions}
 }
@@ -103,11 +103,12 @@ func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	_ = r.ParseForm()
 	next := auth.NextPath(r.PostFormValue("next"))
-	if !h.sessions.CheckKey(r.PostFormValue("key")) {
+	user, ok := h.sessions.CheckKey(r.PostFormValue("key"))
+	if !ok {
 		h.loginPage(w, http.StatusUnauthorized, next, "That key does not match this server.")
 		return
 	}
-	h.sessions.SetCookie(w, r)
+	h.sessions.SetCookie(w, r, user)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 

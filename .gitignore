@@ -13,3 +13,6 @@ playwright/dist/
 # UI build output. placeholder.txt keeps `go:embed all:dist` valid on a fresh checkout.
 web/dist/*
 !web/dist/placeholder.txt
+
+# Neo4j dumps (scripts/backup.sh)
+backups/

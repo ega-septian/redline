@@ -65,7 +65,9 @@ export function LabelForm({ failure }: { failure: Failure }) {
           <Button variant="default" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
             {mutation.isPending ? "Saving…" : "Save label"}
           </Button>
-          {saved && <span className="text-[11px] text-ok">Saved</span>}
+          {saved && (
+            <span className="text-[11px] text-ok">Saved as {mutation.data?.by ?? "you"}</span>
+          )}
           {mutation.isError && (
             <span className="text-[11px] text-danger">
               {mutation.error instanceof Error ? mutation.error.message : "Failed to save"}

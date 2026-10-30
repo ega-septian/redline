@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,14 +30,27 @@ const sessionTTL = 12 * time.Hour
 
 type Sessions struct {
 	apiKey string
+	users  map[string]string // name -> key
 	key    []byte
 	now    func() time.Time
 }
 
-func New(apiKey string) *Sessions {
-	s := &Sessions{apiKey: apiKey, now: time.Now}
-	if apiKey != "" {
-		sum := sha256.Sum256([]byte("redline-ui-session|" + apiKey))
+// New builds the session signer. users maps a display name to its key; the
+// legacy single REDLINE_API_KEY is accepted as user "admin". An empty key and
+// no users means the server is open (loopback only, by config).
+func New(apiKey string, users map[string]string) *Sessions {
+	s := &Sessions{apiKey: apiKey, users: users, now: time.Now}
+	material := apiKey
+	names := make([]string, 0, len(users))
+	for name := range users {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		material += "|" + name + "=" + users[name]
+	}
+	if material != "" {
+		sum := sha256.Sum256([]byte("redline-ui-session|" + material))
 		s.key = sum[:]
 	}
 	return s
@@ -46,45 +60,75 @@ func New(apiKey string) *Sessions {
 // are open (the server refuses to bind a non-loopback host without a key).
 func (s *Sessions) Enabled() bool { return len(s.key) > 0 }
 
-// CheckKey compares the submitted key in constant time.
-func (s *Sessions) CheckKey(key string) bool {
+// CheckKey returns the user for a submitted key. Comparisons are constant time.
+func (s *Sessions) CheckKey(key string) (string, bool) {
 	if !s.Enabled() {
-		return true
+		return "local", true
 	}
-	return subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) == 1
+	for name, value := range s.users {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(value)) == 1 {
+			return name, true
+		}
+	}
+	if s.apiKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) == 1 {
+		return "admin", true
+	}
+	return "", false
+}
+
+// ValidKey reports whether a Bearer token is accepted.
+func (s *Sessions) ValidKey(key string) bool {
+	_, ok := s.CheckKey(key)
+	return ok
 }
 
 // Valid reports whether the request carries a valid, unexpired session cookie.
 func (s *Sessions) Valid(r *http.Request) bool {
+	_, ok := s.parse(r)
+	return ok
+}
+
+// User returns the session's user, or "" when the cookie is missing/invalid.
+func (s *Sessions) User(r *http.Request) string {
+	user, _ := s.parse(r)
+	return user
+}
+
+// parse validates the cookie and returns the embedded user.
+func (s *Sessions) parse(r *http.Request) (string, bool) {
 	if !s.Enabled() {
-		return true
+		return "local", true
 	}
 	cookie, err := r.Cookie(CookieName)
 	if err != nil {
-		return false
+		return "", false
 	}
 	payload, signature, ok := strings.Cut(cookie.Value, ".")
 	if !ok {
-		return false
+		return "", false
 	}
 	if subtle.ConstantTimeCompare([]byte(signature), []byte(s.sign(payload))) != 1 {
-		return false
+		return "", false
 	}
-	expires, err := strconv.ParseInt(strings.TrimPrefix(payload, "v1|"), 10, 64)
-	if err != nil {
-		return false
+	parts := strings.Split(payload, "|")
+	if len(parts) != 3 || parts[0] != "v1" {
+		return "", false
 	}
-	return s.now().Unix() < expires
+	expires, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || s.now().Unix() >= expires {
+		return "", false
+	}
+	return parts[2], true
 }
 
 // SetCookie issues a 12-hour session. Path is / so the API can accept the same
 // cookie for GET requests; it is HttpOnly and SameSite=Lax.
-func (s *Sessions) SetCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Sessions) SetCookie(w http.ResponseWriter, r *http.Request, user string) {
 	if !s.Enabled() {
 		return
 	}
 	expires := s.now().Add(sessionTTL)
-	payload := fmt.Sprintf("v1|%d", expires.Unix())
+	payload := fmt.Sprintf("v1|%d|%s", expires.Unix(), user)
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    payload + "." + s.sign(payload),

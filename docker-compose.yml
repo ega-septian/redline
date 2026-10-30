@@ -12,11 +12,40 @@ services:
       - "127.0.0.1:7475:7474" # Neo4j Browser; 7474 sudah dipakai Neo4j lain. Hanya lokal.
     volumes:
       - redline-neo4j:/data
+      - ./backups:/backups # dump/load untuk scripts/backup.sh dan scripts/restore.sh
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p redline-local 'RETURN 1' >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 30
+
+  redline:
+    # Full stack: docker compose --profile full up -d --build
+    profiles: ["full"]
+    build:
+      context: .
+      args:
+        VERSION: ${REDLINE_VERSION:-dev}
+    container_name: redline-server
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+      # Ganti untuk server yang bisa dijangkau orang lain.
+      REDLINE_API_KEY: ${REDLINE_API_KEY:-local-dev-only}
+      REDLINE_USERS: ${REDLINE_USERS:-}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: redline-local
+      NEO4J_DATABASE: redline
+      TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_DAILY_BUDGET_USD: ${AI_DAILY_BUDGET_USD:-}
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   redline-neo4j:

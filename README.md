@@ -48,6 +48,27 @@ ANTHROPIC_API_KEY=sk-ant-...
 AI_DAILY_BUDGET_USD=5      # optional: stop AI calls after $5/day
 ```
 
+### Run everything in Docker
+
+The image builds the React UI and the Go server, so Go and Node are not needed on the host:
+
+```bash
+export REDLINE_API_KEY=$(openssl rand -hex 32)
+docker compose --profile full up -d --build
+open http://localhost:8787/ui/        # sign in with REDLINE_API_KEY
+```
+
+`docker compose up -d` still starts only Neo4j for local `go run` development. The full profile binds
+the server to `127.0.0.1:8787`.
+
+Backups stop the server and database, dump the graph, and start Neo4j again:
+
+```bash
+./scripts/backup.sh
+./scripts/restore.sh backups/redline-YYYYMMDD-HHMMSS.dump   # destructive
+docker compose --profile full up -d
+```
+
 ### 2. Connect a Playwright project
 
 Install the package, pinned to a release (use the same tag as your server):
@@ -158,11 +179,16 @@ on a non-loopback host without one.
 # server .env
 HOST=0.0.0.0
 REDLINE_API_KEY=$(openssl rand -hex 32)
+# optional: one key per person, used for login and label audit
+# REDLINE_USERS=ega:key-ega,budi:key-budi
 
 # every Playwright project .env
 REDLINE_URL=http://your-server:8787
 REDLINE_API_KEY=<the same key>
 ```
+
+A user key logs in at `/ui/login` and labels are attributed to that name. The legacy `REDLINE_API_KEY`
+is accepted as user `admin`. API clients can use any of those keys as `Authorization: Bearer`.
 
 `/healthz` and `/readyz` stay open; every other `/api/...` request must send
 `Authorization: Bearer <key>`. The UI asks for the same key at `/ui/login` and keeps a signed,
@@ -233,6 +259,20 @@ The patch is saved to `test-results/redline/<id>.patch` to review. Patches that 
 ## Reports
 
 - **Markdown**: `test-results/redline-report.md`, with the cause, evidence and a curl per failed request.
+- **Sticky PR comment**: after a run, `npx redline comment` creates or updates one comment (marked
+  `<!-- redline-report -->`) with `redline-report.md`. It needs `GITHUB_TOKEN` with
+  `pull-requests: write`; `GITHUB_REPOSITORY` and `GITHUB_EVENT_PATH` come from Actions, or set
+  `REDLINE_PR_NUMBER` locally.
+
+  ```yaml
+  - run: npx playwright test
+  - run: npx redline comment
+    if: always()
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ```
+
+  Full workflow, permissions and caveats: [`docs/github-action.md`](docs/github-action.md).
 - **Allure** (`allure-playwright` in the reporter list, `REDLINE_AI=1`): Redline adds a `redline` label,
   the explanation and a proven patch. Group them by cause in `allurerc.mjs`:
 

@@ -23,7 +23,8 @@ origin rules as production.
 
 If the server has `REDLINE_API_KEY` set, `/ui/` redirects to `/ui/login`; sign in with that key.
 The resulting cookie is HttpOnly, SameSite=Lax and lasts 12 hours. Without a key (the loopback
-default), the UI opens directly.
+default), the UI opens directly. With `REDLINE_USERS=name:key,...`, sign in with a personal key;
+labels are attributed to that name. The legacy key is user `admin`.
 
 ## Build
 

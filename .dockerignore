@@ -1,0 +1,14 @@
+.git
+.github
+.DS_Store
+node_modules
+web/node_modules
+web/dist
+playwright/dist
+test-results
+playwright-report
+blob-report
+backups
+.env
+.env.*
+!.env.example
