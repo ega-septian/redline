@@ -148,12 +148,22 @@ func TestLoginFlow(t *testing.T) {
 		t.Fatalf("login: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != auth.CookieName || !cookies[0].HttpOnly {
-		t.Fatalf("cookie = %+v", cookies)
+	var session *http.Cookie
+	hasCSRF := false
+	for _, cookie := range cookies {
+		if cookie.Name == auth.CookieName {
+			session = cookie
+		}
+		if cookie.Name == auth.CSRFCookieName && !cookie.HttpOnly && cookie.Value != "" {
+			hasCSRF = true
+		}
+	}
+	if session == nil || !session.HttpOnly || !hasCSRF {
+		t.Fatalf("cookies = %+v", cookies)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/failures/abc", nil)
-	req.AddCookie(cookies[0])
+	req.AddCookie(session)
 	page := httptest.NewRecorder()
 	h.ServeHTTP(page, req)
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "app") {
@@ -170,7 +180,13 @@ func TestLogoutClearsCookie(t *testing.T) {
 		t.Fatalf("logout: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].MaxAge >= 0 {
-		t.Errorf("logout cookie = %+v", cookies)
+	cleared := map[string]bool{}
+	for _, cookie := range cookies {
+		if cookie.MaxAge < 0 {
+			cleared[cookie.Name] = true
+		}
+	}
+	if !cleared[auth.CookieName] || !cleared[auth.CSRFCookieName] {
+		t.Errorf("logout cookies = %+v", cookies)
 	}
 }

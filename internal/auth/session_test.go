@@ -21,10 +21,26 @@ func issue(t *testing.T, s *Sessions) *http.Cookie {
 	rec := httptest.NewRecorder()
 	s.SetCookie(rec, httptest.NewRequest(http.MethodPost, "/ui/login", nil))
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookies = %d, want 1", len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name == CookieName {
+			return cookie
+		}
 	}
-	return cookies[0]
+	t.Fatalf("session cookie missing: %+v", cookies)
+	return nil
+}
+
+func csrfCookie(t *testing.T, s *Sessions) *http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.SetCookie(rec, httptest.NewRequest(http.MethodPost, "/ui/login", nil))
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == CSRFCookieName {
+			return cookie
+		}
+	}
+	t.Fatal("csrf cookie missing")
+	return nil
 }
 
 func TestDisabledWithoutKey(t *testing.T) {
@@ -88,6 +104,49 @@ func TestCheckKey(t *testing.T) {
 	}
 }
 
+func TestCSRFDoubleSubmit(t *testing.T) {
+	s := New("secret")
+	cookie := csrfCookie(t, s)
+	if cookie.HttpOnly {
+		t.Error("csrf cookie must be readable by the UI")
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/groups/x/label", nil)
+	req.AddCookie(cookie)
+	if s.CSRFValid(req) {
+		t.Error("missing header must fail")
+	}
+	req.Header.Set("X-CSRF-Token", cookie.Value)
+	if !s.CSRFValid(req) {
+		t.Error("matching header must pass")
+	}
+	req.Header.Set("X-CSRF-Token", cookie.Value+"x")
+	if s.CSRFValid(req) {
+		t.Error("wrong header must fail")
+	}
+	if !New("").CSRFValid(req) {
+		t.Error("open server must not require CSRF")
+	}
+}
+
+func TestEnsureCSRFForExistingSession(t *testing.T) {
+	s := New("secret")
+	req := httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	rec := httptest.NewRecorder()
+	s.EnsureCSRF(rec, req)
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != CSRFCookieName || cookies[0].Value == "" {
+		t.Fatalf("cookies = %+v", cookies)
+	}
+
+	req.AddCookie(cookies[0])
+	rec = httptest.NewRecorder()
+	s.EnsureCSRF(rec, req)
+	if got := rec.Result().Cookies(); len(got) != 0 {
+		t.Errorf("existing CSRF cookie must not be replaced: %+v", got)
+	}
+}
+
 func TestNextPath(t *testing.T) {
 	cases := map[string]string{
 		"":                 "/ui/",
@@ -109,8 +168,13 @@ func TestSecureCookieBehindProxy(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(""))
 	r.Header.Set("X-Forwarded-Proto", "https")
 	s.SetCookie(rec, r)
-	cookie := rec.Result().Cookies()[0]
-	if !cookie.Secure {
-		t.Error("cookie must be Secure behind an HTTPS proxy")
+	var session *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == CookieName {
+			session = cookie
+		}
+	}
+	if session == nil || !session.Secure {
+		t.Error("session cookie must be Secure behind an HTTPS proxy")
 	}
 }

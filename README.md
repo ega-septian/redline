@@ -166,7 +166,8 @@ REDLINE_API_KEY=<the same key>
 
 `/healthz` and `/readyz` stay open; every other `/api/...` request must send
 `Authorization: Bearer <key>`. The UI asks for the same key at `/ui/login` and keeps a signed,
-HttpOnly cookie for 12 hours; API reads accept that cookie, writes still require the Bearer key.
+HttpOnly cookie for 12 hours. API reads accept that cookie; cookie writes also need the
+`X-CSRF-Token` header that matches the `redline_csrf` cookie.
 
 ## Commands
 

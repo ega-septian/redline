@@ -81,9 +81,9 @@ export function AppShell() {
         </nav>
 
         <div className="mt-auto border-t border-line pt-3 text-[11px] leading-relaxed text-faint">
-          <span className="font-semibold text-muted">Read-only mode</span>
+          <span className="font-semibold text-muted">Labels only</span>
           <br />
-          Labels and rules are changed from the CLI or API. Nothing on this page writes to Redline.
+          Labels and notes are saved here. Analysis and rules stay in the CLI or API.
           {health.data?.auth && (
             <form method="post" action="/ui/logout" className="mt-2">
               <button type="submit" className="text-[11px] text-brand hover:underline">
@@ -98,9 +98,9 @@ export function AppShell() {
         <header className="flex min-h-14 flex-wrap items-center gap-x-3.5 gap-y-1 border-b border-line px-4 py-2 md:px-5">
           <h1 className="shrink-0 text-[15px] font-semibold">Failures</h1>
           <span className="hidden text-xs text-faint sm:inline">open failures</span>
-          <Badge tone="env" className="gap-1.5 px-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-warn" />
-            Read-only
+          <Badge tone="brand" className="gap-1.5 px-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+            Labels only
           </Badge>
           <div className="flex-1" />
           <div className="hidden items-center gap-2 text-xs text-muted sm:flex">

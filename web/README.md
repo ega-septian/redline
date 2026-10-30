@@ -51,4 +51,5 @@ src/
 └── main.tsx                 QueryClient + Router
 ```
 
-The next PR adds labels (the first write) with a CSRF token.
+The Failures screen reads `/api/groups`; labels are written from the detail panel with the
+`X-CSRF-Token` double-submit cookie. Analysis and rule decisions stay in the CLI/API.
