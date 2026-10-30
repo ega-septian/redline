@@ -80,3 +80,22 @@ jobs:
 
       - name: Built files
         run: test -f playwright/dist/reporter.js && test -f playwright/dist/fixture.js && test -f playwright/dist/cli.js
+
+  web:
+    # UI: type-check and build. The Go job only needs dist/.gitkeep, which is committed.
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci --prefix web
+
+      - name: Type-check and build
+        run: npm run build --prefix web

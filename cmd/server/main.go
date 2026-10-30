@@ -27,6 +27,8 @@ import (
 	"redline/internal/llm"
 	"redline/internal/reportportal"
 	"redline/internal/store"
+	"redline/internal/ui"
+	"redline/web"
 )
 
 // pricing mengembalikan harga per 1 juta token. Model yang tidak dikenal dihitung 0
@@ -165,9 +167,14 @@ func run(log *slog.Logger) error {
 		}
 		log.Info("integrasi ReportPortal aktif", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
 	}
+	root := http.NewServeMux()
+	root.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
+	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log)))
+	root.Handle("/", srv.Routes())
+
 	httpSrv := &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
-		Handler:           srv.Routes(),
+		Handler:           root,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
