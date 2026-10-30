@@ -42,7 +42,10 @@ export function FailuresPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState("");
+  // Deep link from a run detail's "Failure history" button.
+  const [selected, setSelected] = useState(
+    () => new URLSearchParams(window.location.search).get("failure") ?? "",
+  );
 
   const groupsQuery = useQuery({ queryKey: ["groups"], queryFn: api.groups });
   const groups = groupsQuery.data ?? [];

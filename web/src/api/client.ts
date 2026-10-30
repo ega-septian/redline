@@ -5,6 +5,7 @@ import type {
   GroupDetail,
   ImpactResult,
   Knowledge,
+  RunDetail,
   Scoreboard,
 } from "./types";
 
@@ -47,6 +48,7 @@ export const api = {
   knowledge: (fingerprint: string) =>
     request<Knowledge>(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge`),
   runs: () => request<ApiRun[]>("/api/runs?limit=50"),
+  run: (id: number) => request<RunDetail>(`/api/runs/${id}`),
   impact: (kind: "file" | "endpoint", query: string) =>
     request<ImpactResult>(`/api/impact?${kind}=${encodeURIComponent(query)}`),
   rules: () => request<ApiRule[]>("/api/rules"),

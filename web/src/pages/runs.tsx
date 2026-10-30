@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ExternalLink, Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -132,14 +133,15 @@ export function RunsPage() {
       </div>
 
       <p className="text-[11px] text-faint">
-        <span className="font-mono">GET /api/runs?limit=50</span>. A run page for individual failures
-        can link into Failures in a later PR.
+        <span className="font-mono">GET /api/runs?limit=50</span>. Select a run to see every test,
+        its TC ID, duration, retries and failure details.
       </p>
     </>
   );
 }
 
 function RunRow({ run }: { run: ApiRun }) {
+  const navigate = useNavigate();
   const results: Array<[string, number, string]> = [
     ["passed", run.passed, "text-ok"],
     ["failed", run.failed, "text-danger"],
@@ -148,14 +150,25 @@ function RunRow({ run }: { run: ApiRun }) {
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-2 border-b border-line-soft px-3.5 py-3 text-xs last:border-b-0 hover:bg-[#1b222b] lg:grid-cols-[70px_minmax(0,1fr)_100px_150px_130px_90px] lg:items-center lg:gap-3">
+    <div
+      onClick={() => navigate({ to: "/runs/$runId", params: { runId: String(run.id) } })}
+      className="grid cursor-pointer grid-cols-1 gap-2 border-b border-line-soft px-3.5 py-3 text-xs last:border-b-0 hover:bg-[#1b222b] lg:grid-cols-[70px_minmax(0,1fr)_100px_150px_130px_90px] lg:items-center lg:gap-3"
+    >
       <div className="flex items-center gap-2">
-        <span className="font-mono text-muted">#{run.id}</span>
+        <Link
+          to="/runs/$runId"
+          params={{ runId: String(run.id) }}
+          onClick={(event) => event.stopPropagation()}
+          className="font-mono text-muted hover:text-brand hover:underline"
+        >
+          #{run.id}
+        </Link>
         {run.ci_url && (
           <a
             href={run.ci_url}
             target="_blank"
             rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
             className="text-brand hover:underline"
             aria-label={`Open run ${run.id} in CI`}
           >
