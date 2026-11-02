@@ -41,6 +41,12 @@ export type ApiAnalysis = {
   created_at: string;
 };
 
+export type AnalyzeResult = {
+  analysis: ApiAnalysis;
+  cached: boolean;
+  needs_ai?: boolean;
+};
+
 export type ApiOccurrence = {
   run_id: number;
   run_created_at: string;

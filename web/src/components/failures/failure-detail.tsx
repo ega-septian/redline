@@ -27,11 +27,21 @@ export function FailureDetail({
 }) {
   const [tab, setTab] = useState<Tab>("Analysis");
   const [copied, setCopied] = useState(false);
+  const [copiedRerun, setCopiedRerun] = useState(false);
 
   async function copyError() {
     await navigator.clipboard.writeText(failure.reproduce);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function copyRerun() {
+    const pattern = failure.testCaseId
+      ? `${failure.testCaseId}\\b`
+      : escapeRegex(failure.test || failure.title);
+    await navigator.clipboard.writeText(`npx playwright test --grep "${pattern}"`);
+    setCopiedRerun(true);
+    window.setTimeout(() => setCopiedRerun(false), 1500);
   }
 
   return (
@@ -43,7 +53,7 @@ export function FailureDetail({
             {failure.source === "rule" && "RULE · FREE"}
             {failure.source === "ai" && `AI · ${failure.model ?? "model"}`}
             {failure.source === "experiment" && "PROVEN · EXPERIMENT"}
-            {failure.source === "human" && "HUMAN"}
+            {failure.source === "human" && "CONFIRMED"}
             {failure.source === "none" && "NEEDS AI"}
           </Badge>
           <span className="ml-auto font-mono text-[11px] text-faint">
@@ -62,6 +72,10 @@ export function FailureDetail({
           <Button variant="default" onClick={copyError}>
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? "Copied" : "Copy error"}
+          </Button>
+          <Button variant="outline" onClick={copyRerun}>
+            {copiedRerun ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copiedRerun ? "Copied" : "Copy rerun"}
           </Button>
           <Button asChild>
             <a
@@ -303,4 +317,8 @@ function BlockLabel({ children }: { children: ReactNode }) {
   return (
     <div className="mb-1.5 text-[10px] uppercase tracking-[0.8px] text-faint">{children}</div>
   );
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

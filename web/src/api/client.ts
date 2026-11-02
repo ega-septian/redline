@@ -1,4 +1,5 @@
 import type {
+  AnalyzeResult,
   ApiGroup,
   ApiRule,
   ApiRun,
@@ -27,7 +28,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(401, "unauthorized");
   }
   if (!response.ok) {
-    throw new ApiError(response.status, `${path} returned ${response.status}`);
+    let message = `${path} returned ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Non-JSON errors keep the generic message.
+    }
+    throw new ApiError(response.status, message);
   }
   return (await response.json()) as T;
 }
@@ -70,4 +78,12 @@ export const api = {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
       body: JSON.stringify({ ...input, by: "ui" }),
     }),
+  analyze: (fingerprint: string, force = false) =>
+    request<AnalyzeResult>(
+      `/api/groups/${encodeURIComponent(fingerprint)}/analyze${force ? "?force=1" : ""}`,
+      {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken() },
+      },
+    ),
 };
