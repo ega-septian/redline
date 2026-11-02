@@ -415,6 +415,7 @@ type Group struct {
 	Summary      string     `json:"summary"`
 	SampleError  string     `json:"sample_error,omitempty"` // pesan error terakhir
 	Cause        string     `json:"cause,omitempty"`        // penyebab yang bisa dibaca
+	CauseID      string     `json:"cause_id,omitempty"`     // kelompok penyebab (incident) lintas test
 	Occurrences  int        `json:"occurrences"`
 	Regressions  int        `json:"regressions"`
 	FirstSeenRun int64      `json:"first_seen_run"`

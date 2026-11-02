@@ -30,6 +30,18 @@ func TestTriage(t *testing.T) {
 	if err := s.SetTriage(ctx, fp, "bukan-status", "", "", "ega"); err == nil {
 		t.Error("status triage tidak valid harus ditolak")
 	}
+	if n, err := s.SetTriageStatusBulk(ctx, []string{fp}, "in_progress", "budi"); err != nil || n != 1 {
+		t.Errorf("bulk status: n=%d err=%v", n, err)
+	}
+	if g, _ = group(t, s, fp); g.TriageStatus != "in_progress" || g.TriageUpdatedBy != "budi" {
+		t.Errorf("bulk status tidak tersimpan: %+v", g)
+	}
+	if n, err := s.SetTriageOwnerBulk(ctx, []string{fp}, "budi", "ega"); err != nil || n != 1 {
+		t.Errorf("bulk owner: n=%d err=%v", n, err)
+	}
+	if g, _ = group(t, s, fp); g.TriageOwner != "budi" || g.TriageStatus != "in_progress" {
+		t.Errorf("bulk owner tidak tersimpan: %+v", g)
+	}
 	if err := s.SetTriage(ctx, "tidakada", "open", "", "", "ega"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("kelompok tidak ada: mau ErrNotFound, dapat %v", err)
 	}

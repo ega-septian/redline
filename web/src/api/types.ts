@@ -9,6 +9,7 @@ export type ApiGroup = {
   summary: string;
   sample_error?: string;
   cause?: string;
+  cause_id?: string;
   occurrences: number;
   regressions: number;
   first_seen_run: number;

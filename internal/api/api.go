@@ -32,6 +32,8 @@ type Store interface {
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
 	SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error
+	SetTriageStatusBulk(ctx context.Context, ids []string, status, by string) (int, error)
+	SetTriageOwnerBulk(ctx context.Context, ids []string, owner, by string) (int, error)
 	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
 	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
@@ -109,6 +111,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/analyze", s.handleAnalyze)
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/label", s.handleLabel)
+	mux.HandleFunc("PUT /api/groups/triage", s.handleTriageBulk)
+	mux.HandleFunc("PUT /api/groups/triage/owner", s.handleTriageOwnerBulk)
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/triage", s.handleTriage)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/fix", s.handleFix)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/experiments", s.handleSaveExperiment)
@@ -492,6 +496,104 @@ func (s *Server) handleTriage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": body.Status, "owner": body.Owner, "note": body.Note, "by": body.By,
 	})
+}
+
+// handleTriageBulk: PUT /api/groups/triage
+// {"fingerprints":["..."],"status":"acknowledged","by":"ega"}
+func (s *Server) handleTriageBulk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Fingerprints []string `json:"fingerprints"`
+		Status       string   `json:"status"`
+		By           string   `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"fingerprints\": [...], \"status\": \"...\", \"by\": \"...\"}")
+		return
+	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.Status, body.By = strings.TrimSpace(body.Status), strings.TrimSpace(body.By)
+	if !store.ValidTriageStatus(body.Status) {
+		writeError(w, http.StatusBadRequest, "status harus salah satu dari: "+strings.Join(store.TriageStatuses, ", "))
+		return
+	}
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah triage")
+		return
+	}
+	ids, err := cleanFingerprints(body.Fingerprints)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	n, err := s.Store.SetTriageStatusBulk(r.Context(), ids, body.Status, body.By)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
+}
+
+// handleTriageOwnerBulk: PUT /api/groups/triage/owner
+// {"fingerprints":["..."],"owner":"ega","by":"ega"}
+func (s *Server) handleTriageOwnerBulk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Fingerprints []string `json:"fingerprints"`
+		Owner        string   `json:"owner"`
+		By           string   `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"fingerprints\": [...], \"owner\": \"...\", \"by\": \"...\"}")
+		return
+	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.Owner, body.By = strings.TrimSpace(body.Owner), strings.TrimSpace(body.By)
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah owner")
+		return
+	}
+	if len(body.Owner) > 80 {
+		writeError(w, http.StatusBadRequest, "owner maksimal 80 karakter")
+		return
+	}
+	ids, err := cleanFingerprints(body.Fingerprints)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	n, err := s.Store.SetTriageOwnerBulk(r.Context(), ids, body.Owner, body.By)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
+}
+
+func cleanFingerprints(ids []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("fingerprints tidak boleh kosong")
+	}
+	if len(out) > 200 {
+		return nil, errors.New("maksimal 200 fingerprint per permintaan")
+	}
+	return out, nil
 }
 
 // handleFix: POST /api/groups/{fingerprint}/fix {"files": [{"path","content"}], "attempts": [...]}
