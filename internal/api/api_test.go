@@ -68,6 +68,13 @@ func (f *fakeStore) SetLabel(_ context.Context, fp, label, note, by string) erro
 	f.label = label + "|" + note + "|" + by
 	return nil
 }
+func (f *fakeStore) SetTriage(_ context.Context, fp, status, owner, note, by string) error {
+	if fp != "ada" {
+		return store.ErrNotFound
+	}
+	f.label = status + "|" + owner + "|" + note + "|" + by
+	return nil
+}
 
 func (f *fakeStore) SaveExperiment(_ context.Context, e store.Experiment) (int64, error) {
 	f.experiment = e
@@ -448,6 +455,38 @@ func TestAPIKey_UserToken(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("user token = %d, want 200", rec.Code)
+	}
+}
+
+func TestTriage(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/groups/ada/triage",
+		strings.NewReader(`{"status":"acknowledged","owner":"ega","note":"check logs","by":"ega"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.label != "acknowledged|ega|check logs|ega" {
+		t.Errorf("triage = %q", fs.label)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/groups/ada/triage",
+		strings.NewReader(`{"status":"not-valid","by":"ega"}`))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid status = %d, want 400", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/groups/missing/triage",
+		strings.NewReader(`{"status":"open","by":"ega"}`))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing group = %d, want 404", rec.Code)
 	}
 }
 

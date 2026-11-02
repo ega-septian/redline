@@ -104,7 +104,16 @@ func toGroup(rec *neo4j.Record) Group {
 		Cause: str(p, "cause"), Occurrences: int(i64(p, "occurrences")), Regressions: int(i64(p, "regressions")),
 		FirstSeenRun: i64(p, "firstSeenRun"), LastSeenRun: i64(p, "lastSeenRun"),
 		HumanLabel: str(p, "manualCategory"), HumanNote: str(p, "manualNote"), LabeledBy: str(p, "labeledBy"),
-		LocalOnly: p["localOnly"] == true,
+		LocalOnly:    p["localOnly"] == true,
+		TriageStatus: str(p, "triageStatus"), TriageOwner: str(p, "triageOwner"),
+		TriageNote: str(p, "triageNote"), TriageUpdatedBy: str(p, "triageUpdatedBy"),
+	}
+	if g.TriageStatus == "" {
+		g.TriageStatus = "open"
+	}
+	if v, ok := p["triageUpdatedAt"]; ok && v != nil {
+		t := local(v)
+		g.TriageUpdatedAt = &t
 	}
 	g.TestKey = g.Project + " › " + g.File + " › " + g.Title
 	g.Summary = Summarize(g.SampleError)

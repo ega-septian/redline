@@ -339,6 +339,7 @@ Voyage AI.
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
 | `PUT /api/groups/{id}/label`                                       | Label it: `{"label": "test_bug", "note": "...", "by": "name"}` |
+| `PUT /api/groups/{id}/triage`                                      | Triage: `{"status": "acknowledged", "owner": "ega", "note": "...", "by": "ega"}` |
 | `GET /api/groups/{id}/knowledge`                                   | Graph facts behind a decision                                  |
 | `POST /api/groups/{id}/fix`, `.../experiments`                     | Used by `verify`                                               |
 | `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules                                                  |
@@ -349,6 +350,7 @@ Voyage AI.
 | `GET /readyz`                                                      | Readiness: the database answers                                |
 
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
+Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`

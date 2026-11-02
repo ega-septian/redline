@@ -20,6 +20,11 @@ export type ApiGroup = {
   human_note?: string;
   labeled_by?: string;
   local_only: boolean;
+  triage_status: string;
+  triage_owner?: string;
+  triage_note?: string;
+  triage_updated_by?: string;
+  triage_updated_at?: string | null;
   category?: string;
   confidence?: string;
   analysis_source?: string;
