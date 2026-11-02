@@ -101,7 +101,7 @@ func toGroup(rec *neo4j.Record) Group {
 	g := Group{
 		Fingerprint: str(p, "id"), Project: str(p, "project"), File: str(p, "file"), Title: str(p, "title"),
 		TestCaseID: str(p, "caseId"), Status: str(p, "status"), SampleError: str(p, "lastError"),
-		Cause: str(p, "cause"), Occurrences: int(i64(p, "occurrences")), Regressions: int(i64(p, "regressions")),
+		Cause: str(p, "cause"), CauseID: str(p, "causeId"), Occurrences: int(i64(p, "occurrences")), Regressions: int(i64(p, "regressions")),
 		FirstSeenRun: i64(p, "firstSeenRun"), LastSeenRun: i64(p, "lastSeenRun"),
 		HumanLabel: str(p, "manualCategory"), HumanNote: str(p, "manualNote"), LabeledBy: str(p, "labeledBy"),
 		LocalOnly:    p["localOnly"] == true,

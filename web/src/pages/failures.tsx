@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, CircleHelp, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, CircleHelp, Copy, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/api/client";
@@ -170,6 +170,11 @@ export function FailuresPage() {
   });
   // Deep link from a run detail's "Failure history" button.
   const [selected, setSelected] = useState(() => params.get("failure") ?? "");
+  const [grouped, setGrouped] = useState(() => params.get("group") !== "flat");
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [bulkOwner, setBulkOwner] = useState("");
+  const [bulkCopied, setBulkCopied] = useState(false);
+  const queryClient = useQueryClient();
 
   const groupsQuery = useQuery({ queryKey: ["groups"], queryFn: api.groups });
   const groups = groupsQuery.data ?? [];
@@ -242,13 +247,14 @@ export function FailuresPage() {
     if (query) next.set("q", query);
     if (sort !== "recent") next.set("sort", sort);
     if (triage !== "active") next.set("triage", triage);
+    if (!grouped) next.set("group", "flat");
     if (activeFingerprint) next.set("failure", activeFingerprint);
     const search = next.toString();
     const url = `${window.location.pathname}${search ? `?${search}` : ""}`;
     if (url !== `${window.location.pathname}${window.location.search}`) {
       window.history.replaceState(null, "", url);
     }
-  }, [status, category, query, sort, triage, activeFingerprint]);
+  }, [status, category, query, sort, triage, grouped, activeFingerprint]);
 
   const activeGroup = groups.find((group) => group.fingerprint === activeFingerprint);
   const detailQuery = useQuery({
@@ -267,6 +273,76 @@ export function FailuresPage() {
   const active = activeGroup
     ? toFailure(activeGroup, detailQuery.data, knowledgeQuery.data)
     : undefined;
+
+  const selectedFailures = sorted.filter((failure) => selection.has(failure.fingerprint));
+
+  async function refreshFailures() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["scoreboard"] }),
+      queryClient.invalidateQueries({ queryKey: ["rules"] }),
+      queryClient.invalidateQueries({ queryKey: ["rule-candidates"] }),
+      ...(activeFingerprint
+        ? [queryClient.invalidateQueries({ queryKey: ["group", activeFingerprint] })]
+        : []),
+    ]);
+  }
+
+  const bulkStatus = useMutation({
+    mutationFn: (status: TriageStatus) =>
+      api.triageBulk(
+        [...selection],
+        status,
+      ),
+    onSuccess: async () => {
+      setSelection(new Set());
+      await refreshFailures();
+    },
+  });
+
+  const bulkOwnerMutation = useMutation({
+    mutationFn: () => api.triageOwnerBulk([...selection], bulkOwner.trim()),
+    onSuccess: async () => {
+      setSelection(new Set());
+      setBulkOwner("");
+      await refreshFailures();
+    },
+  });
+
+  function toggleSelection(fingerprint: string) {
+    setSelection((current) => {
+      const next = new Set(current);
+      if (next.has(fingerprint)) next.delete(fingerprint);
+      else next.add(fingerprint);
+      return next;
+    });
+  }
+
+  function toggleMany(fingerprints: string[]) {
+    setSelection((current) => {
+      const next = new Set(current);
+      const allSelected = fingerprints.every((fingerprint) => next.has(fingerprint));
+      for (const fingerprint of fingerprints) {
+        if (allSelected) next.delete(fingerprint);
+        else next.add(fingerprint);
+      }
+      return next;
+    });
+  }
+
+  async function copyBulkRerun() {
+    if (selectedFailures.length === 0) return;
+    const patterns = selectedFailures.map((failure) =>
+      failure.testCaseId ? `${failure.testCaseId}\\b` : escapeRegex(failure.test || failure.title),
+    );
+    await navigator.clipboard.writeText(`npx playwright test --grep "${patterns.join("|")}"`);
+    setBulkCopied(true);
+    window.setTimeout(() => setBulkCopied(false), 1500);
+  }
+
+  useEffect(() => {
+    setSelection(new Set());
+  }, [status, category, query, triage]);
 
   const stats = useMemo(() => {
     const active = base.filter(
@@ -408,6 +484,21 @@ export function FailuresPage() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setGrouped((value) => !value)}
+            className={cn(
+              "h-8 whitespace-nowrap rounded-full border px-3 text-[12px] transition-colors",
+              grouped
+                ? "border-brand/40 bg-brand/10 text-[#79c0ff]"
+                : "border-line bg-[#0f141a] text-muted hover:border-[#3d444d] hover:text-ink",
+            )}
+            aria-pressed={grouped}
+            title={grouped ? "Switch to a flat test list" : "Group failures by cause"}
+          >
+            {grouped ? "By cause" : "Flat list"}
+          </button>
+
           <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full border border-line bg-[#0f141a] px-3 text-faint transition-colors focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:ml-auto sm:w-auto sm:min-w-[230px]">
             <Search className="h-3.5 w-3.5 shrink-0" />
             <Input
@@ -421,8 +512,82 @@ export function FailuresPage() {
         </div>
       </section>
 
+      {selection.size > 0 && (
+        <section className="flex flex-wrap items-center gap-2 rounded-[10px] border border-brand/30 bg-brand/5 px-3 py-2 text-xs">
+          <span className="font-semibold text-[#79c0ff]">{selection.size} selected</span>
+          <Button
+            variant="secondary"
+            onClick={() => bulkStatus.mutate("acknowledged")}
+            disabled={bulkStatus.isPending}
+          >
+            Acknowledge
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => bulkStatus.mutate("in_progress")}
+            disabled={bulkStatus.isPending}
+          >
+            In progress
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => bulkStatus.mutate("muted")}
+            disabled={bulkStatus.isPending}
+          >
+            Mute
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => bulkStatus.mutate("open")}
+            disabled={bulkStatus.isPending}
+          >
+            Reopen
+          </Button>
+          <div className="flex items-center gap-1.5 sm:ml-auto">
+            <input
+              value={bulkOwner}
+              onChange={(event) => setBulkOwner(event.target.value)}
+              placeholder="Owner"
+              aria-label="Bulk triage owner"
+              className="h-7 w-28 rounded-md border border-line bg-canvas px-2 text-xs text-ink outline-none placeholder:text-faint focus-visible:border-brand/60"
+            />
+            <Button
+              variant="outline"
+              onClick={() => bulkOwnerMutation.mutate()}
+              disabled={bulkOwnerMutation.isPending || selection.size === 0}
+            >
+              Assign
+            </Button>
+          </div>
+          <Button variant="outline" onClick={copyBulkRerun}>
+            <Copy className="h-3 w-3" />
+            {bulkCopied ? "Copied" : "Copy rerun"}
+          </Button>
+          <Button variant="ghost" onClick={() => setSelection(new Set())}>
+            Clear
+          </Button>
+          {(bulkStatus.isError || bulkOwnerMutation.isError) && (
+            <span className="text-[11px] text-danger">
+              {bulkStatus.error instanceof Error
+                ? bulkStatus.error.message
+                : bulkOwnerMutation.error instanceof Error
+                  ? bulkOwnerMutation.error.message
+                  : "Bulk update failed"}
+            </span>
+          )}
+        </section>
+      )}
+
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <FailureTable items={sorted} selected={activeFingerprint} onSelect={setSelected} />
+        <FailureTable
+          items={sorted}
+          selected={activeFingerprint}
+          onSelect={setSelected}
+          selection={selection}
+          onToggle={toggleSelection}
+          onToggleMany={toggleMany}
+          grouped={grouped}
+        />
         {active ? (
           <FailureDetail
             failure={active}
@@ -443,4 +608,8 @@ export function FailuresPage() {
       </p>
     </>
   );
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

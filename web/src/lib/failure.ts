@@ -24,6 +24,8 @@ export type Failure = {
   test: string;
   testCaseId: string;
   file: string;
+  cause: string;
+  causeId: string;
   category: Category;
   confidence: Confidence;
   occurrences: number;
@@ -182,6 +184,8 @@ export function toFailure(
     test: group.title,
     testCaseId: group.test_case_id ?? "",
     file: group.file,
+    cause: group.cause ?? "",
+    causeId: group.cause_id || group.fingerprint,
     category: categoryOf(group, detail),
     confidence: confidenceOf(group, detail),
     occurrences: group.occurrences,

@@ -261,6 +261,39 @@ func (s *Store) SetTriage(ctx context.Context, fingerprint, status, owner, note,
 	return nil
 }
 
+// SetTriageStatusBulk mengubah status triage beberapa kelompok sekaligus.
+func (s *Store) SetTriageStatusBulk(ctx context.Context, ids []string, status, by string) (int, error) {
+	if !ValidTriageStatus(status) {
+		return 0, fmt.Errorf("status triage %q tidak valid", status)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := s.query(ctx, `
+		MATCH (f:Failure) WHERE f.id IN $ids
+		SET f.triageStatus = $status, f.triageUpdatedBy = $by, f.triageUpdatedAt = datetime()
+		RETURN count(f) AS n`, map[string]any{"ids": ids, "status": status, "by": by})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Records[0].AsMap()["n"].(int64)), nil
+}
+
+// SetTriageOwnerBulk mengubah owner beberapa kelompok sekaligus, tanpa mengubah status.
+func (s *Store) SetTriageOwnerBulk(ctx context.Context, ids []string, owner, by string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := s.query(ctx, `
+		MATCH (f:Failure) WHERE f.id IN $ids
+		SET f.triageOwner = $owner, f.triageUpdatedBy = $by, f.triageUpdatedAt = datetime()
+		RETURN count(f) AS n`, map[string]any{"ids": ids, "owner": owner, "by": by})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Records[0].AsMap()["n"].(int64)), nil
+}
+
 // SetLabel menyimpan label manual beserta siapa yang memberinya. label kosong menghapus label.
 func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by string) error {
 	var labelArg any

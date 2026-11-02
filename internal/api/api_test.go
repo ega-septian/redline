@@ -75,6 +75,14 @@ func (f *fakeStore) SetTriage(_ context.Context, fp, status, owner, note, by str
 	f.label = status + "|" + owner + "|" + note + "|" + by
 	return nil
 }
+func (f *fakeStore) SetTriageStatusBulk(_ context.Context, ids []string, status, by string) (int, error) {
+	f.label = status + "|" + by
+	return len(ids), nil
+}
+func (f *fakeStore) SetTriageOwnerBulk(_ context.Context, ids []string, owner, by string) (int, error) {
+	f.label = owner + "|" + by
+	return len(ids), nil
+}
 
 func (f *fakeStore) SaveExperiment(_ context.Context, e store.Experiment) (int64, error) {
 	f.experiment = e
@@ -481,12 +489,24 @@ func TestTriage(t *testing.T) {
 		t.Errorf("invalid status = %d, want 400", rec.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/api/groups/missing/triage",
-		strings.NewReader(`{"status":"open","by":"ega"}`))
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
+	if rec := do(h, http.MethodPut, "/api/groups/missing/triage",
+		strings.NewReader(`{"status":"open","by":"ega"}`)); rec.Code != http.StatusNotFound {
 		t.Errorf("missing group = %d, want 404", rec.Code)
+	}
+
+	rec = do(h, http.MethodPut, "/api/groups/triage",
+		strings.NewReader(`{"fingerprints":["a","b","a"],"status":"acknowledged","by":"ega"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"updated": 2`) {
+		t.Errorf("bulk triage = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodPut, "/api/groups/triage/owner",
+		strings.NewReader(`{"fingerprints":["a","b"],"owner":"budi","by":"ega"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"updated": 2`) {
+		t.Errorf("bulk owner = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodPut, "/api/groups/triage",
+		strings.NewReader(`{"fingerprints":[],"status":"open","by":"ega"}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("bulk tanpa fingerprint = %d, want 400", rec.Code)
 	}
 }
 

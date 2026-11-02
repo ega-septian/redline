@@ -45,6 +45,7 @@ export type LabelResult = { label: string; note: string; by: string };
 
 export type TriageInput = { status: string; owner: string; note: string };
 export type TriageResult = TriageInput & { by: string };
+export type TriageBulkResult = { updated: number };
 
 const CSRF_COOKIE = "redline_csrf";
 
@@ -94,5 +95,17 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
       body: JSON.stringify({ ...input, by: "ui" }),
+    }),
+  triageBulk: (fingerprints: string[], status: string) =>
+    request<TriageBulkResult>("/api/groups/triage", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ fingerprints, status, by: "ui" }),
+    }),
+  triageOwnerBulk: (fingerprints: string[], owner: string) =>
+    request<TriageBulkResult>("/api/groups/triage/owner", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ fingerprints, owner, by: "ui" }),
     }),
 };
