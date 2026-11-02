@@ -5,6 +5,7 @@ export type FailureStatus = "new" | "recurring" | "regressed";
 export type Confidence = "high" | "medium" | "low" | "none";
 export type Source = "rule" | "ai" | "experiment" | "human" | "none";
 export type RunStatus = "passed" | "failed" | "flaky";
+export type TriageStatus = "open" | "acknowledged" | "in_progress" | "muted" | "wont_fix";
 
 export type FailureRun = {
   runId: number;
@@ -32,6 +33,11 @@ export type Failure = {
   needsAI: boolean;
   source: Source;
   model?: string;
+  triageStatus: TriageStatus;
+  triageOwner: string;
+  triageNote: string;
+  triageUpdatedBy: string;
+  triageUpdatedAt?: string;
   summary: string;
   evidence: string[];
   nextStep: string;
@@ -60,6 +66,14 @@ export const sourceLabel: Record<Source, string> = {
   experiment: "PROVEN",
   human: "CONFIRMED",
   none: "NEEDS AI",
+};
+
+export const triageLabel: Record<TriageStatus, string> = {
+  open: "Open",
+  acknowledged: "Acknowledged",
+  in_progress: "In progress",
+  muted: "Muted",
+  wont_fix: "Won't fix",
 };
 
 export const statusLabel: Record<FailureStatus, string> = {
@@ -176,6 +190,17 @@ export function toFailure(
     lastSeenRun: group.last_seen_run,
     needsAI: !group.human_label && (!group.analysis_source || group.analysis_source === "none"),
     source: sourceOf(group, detail),
+    triageStatus:
+      group.triage_status === "acknowledged" ||
+      group.triage_status === "in_progress" ||
+      group.triage_status === "muted" ||
+      group.triage_status === "wont_fix"
+        ? group.triage_status
+        : "open",
+    triageOwner: group.triage_owner ?? "",
+    triageNote: group.triage_note ?? "",
+    triageUpdatedBy: group.triage_updated_by ?? "",
+    triageUpdatedAt: group.triage_updated_at ?? undefined,
     model: analysis?.model,
     summary:
       group.human_label && group.human_note

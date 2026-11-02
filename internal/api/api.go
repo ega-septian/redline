@@ -31,6 +31,7 @@ type Store interface {
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
+	SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error
 	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
 	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
@@ -108,6 +109,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/analyze", s.handleAnalyze)
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/label", s.handleLabel)
+	mux.HandleFunc("PUT /api/groups/{fingerprint}/triage", s.handleTriage)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/fix", s.handleFix)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/experiments", s.handleSaveExperiment)
 	mux.HandleFunc("GET /api/rules", s.handleListRules)
@@ -444,6 +446,52 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note, "by": body.By})
+}
+
+// handleTriage: PUT /api/groups/{fingerprint}/triage
+// {"status":"acknowledged","owner":"ega","note":"...", "by":"ega"}
+func (s *Server) handleTriage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Status string `json:"status"`
+		Owner  string `json:"owner"`
+		Note   string `json:"note"`
+		By     string `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"...\", \"owner\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
+		return
+	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.Status, body.Owner, body.Note, body.By = strings.TrimSpace(body.Status),
+		strings.TrimSpace(body.Owner), strings.TrimSpace(body.Note), strings.TrimSpace(body.By)
+	if !store.ValidTriageStatus(body.Status) {
+		writeError(w, http.StatusBadRequest, "status harus salah satu dari: "+strings.Join(store.TriageStatuses, ", "))
+		return
+	}
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah triage")
+		return
+	}
+	if len(body.Owner) > 80 || len(body.Note) > 500 {
+		writeError(w, http.StatusBadRequest, "owner maksimal 80 karakter dan note maksimal 500 karakter")
+		return
+	}
+	err := s.Store.SetTriage(r.Context(), r.PathValue("fingerprint"), body.Status, body.Owner, body.Note, body.By)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": body.Status, "owner": body.Owner, "note": body.Note, "by": body.By,
+	})
 }
 
 // handleFix: POST /api/groups/{fingerprint}/fix {"files": [{"path","content"}], "attempts": [...]}

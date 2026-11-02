@@ -43,6 +43,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type LabelInput = { label: string; note: string };
 export type LabelResult = { label: string; note: string; by: string };
 
+export type TriageInput = { status: string; owner: string; note: string };
+export type TriageResult = TriageInput & { by: string };
+
 const CSRF_COOKIE = "redline_csrf";
 
 function csrfToken(): string {
@@ -86,4 +89,10 @@ export const api = {
         headers: { "X-CSRF-Token": csrfToken() },
       },
     ),
+  triage: (fingerprint: string, input: TriageInput) =>
+    request<TriageResult>(`/api/groups/${encodeURIComponent(fingerprint)}/triage`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ ...input, by: "ui" }),
+    }),
 };

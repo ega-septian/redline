@@ -241,6 +241,26 @@ func (s *Store) GetAnalysis(ctx context.Context, fingerprint, promptVersion stri
 	}, nil
 }
 
+// SetTriage menyimpan status kerja, owner, dan catatan triage. Status test (open/resolved) tidak berubah.
+func (s *Store) SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error {
+	if !ValidTriageStatus(status) {
+		return fmt.Errorf("status triage %q tidak valid", status)
+	}
+	res, err := s.query(ctx, `
+		MATCH (f:Failure {id: $id})
+		SET f.triageStatus = $status, f.triageOwner = $owner, f.triageNote = $note,
+			f.triageUpdatedBy = $by, f.triageUpdatedAt = datetime()
+		RETURN count(f) AS n`,
+		map[string]any{"id": fingerprint, "status": status, "owner": owner, "note": note, "by": by})
+	if err != nil {
+		return err
+	}
+	if n, _ := res.Records[0].Get("n"); n.(int64) == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetLabel menyimpan label manual beserta siapa yang memberinya. label kosong menghapus label.
 func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by string) error {
 	var labelArg any

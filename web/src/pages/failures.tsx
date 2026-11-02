@@ -12,19 +12,31 @@ import { Tooltip } from "@/components/ui/tooltip";
 import {
   categoryLabel,
   toFailure,
+  triageLabel,
   type Category,
   type FailureStatus,
+  type TriageStatus,
 } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | FailureStatus | "needs_ai";
 type CategoryFilter = "all" | Category;
 type SortMode = "recent" | "oldest" | "occurrences";
+type TriageFilter = "active" | "all" | TriageStatus;
 
 const sorts: Array<{ id: SortMode; label: string }> = [
   { id: "recent", label: "Recent first" },
   { id: "oldest", label: "Oldest first" },
   { id: "occurrences", label: "Most seen" },
+];
+
+const triageFilters: Array<{ id: TriageFilter; label: string }> = [
+  { id: "active", label: "Active queue" },
+  { id: "all", label: "All triage" },
+  ...(Object.entries(triageLabel) as Array<[TriageStatus, string]>).map(([id, label]) => ({
+    id,
+    label,
+  })),
 ];
 
 const statuses: Array<{
@@ -151,6 +163,11 @@ export function FailuresPage() {
     const value = params.get("sort");
     return value === "oldest" || value === "occurrences" ? value : "recent";
   });
+  const [triage, setTriage] = useState<TriageFilter>(() => {
+    const value = params.get("triage");
+    if (value === "all") return "all";
+    return value && value in triageLabel ? (value as TriageStatus) : "active";
+  });
   // Deep link from a run detail's "Failure history" button.
   const [selected, setSelected] = useState(() => params.get("failure") ?? "");
 
@@ -158,9 +175,19 @@ export function FailuresPage() {
   const groups = groupsQuery.data ?? [];
 
   const base = useMemo(() => groups.map((group) => toFailure(group)), [groups]);
+  const triageScoped = useMemo(
+    () =>
+      base.filter((failure) => {
+        if (triage === "active") {
+          return failure.triageStatus !== "muted" && failure.triageStatus !== "wont_fix";
+        }
+        return triage === "all" || failure.triageStatus === triage;
+      }),
+    [base, triage],
+  );
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return base.filter((failure) => {
+    return triageScoped.filter((failure) => {
       if (status === "needs_ai") {
         if (!failure.needsAI) return false;
       } else if (status !== "all" && failure.status !== status) {
@@ -175,12 +202,14 @@ export function FailuresPage() {
         failure.file,
         failure.endpoint,
         failure.fingerprint,
+        failure.triageOwner,
+        failure.triageNote,
       ]
         .join(" ")
         .toLowerCase()
         .includes(needle);
     });
-  }, [base, status, category, query]);
+  }, [triageScoped, status, category, query]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -212,13 +241,14 @@ export function FailuresPage() {
     if (category !== "all") next.set("category", category);
     if (query) next.set("q", query);
     if (sort !== "recent") next.set("sort", sort);
+    if (triage !== "active") next.set("triage", triage);
     if (activeFingerprint) next.set("failure", activeFingerprint);
     const search = next.toString();
     const url = `${window.location.pathname}${search ? `?${search}` : ""}`;
     if (url !== `${window.location.pathname}${window.location.search}`) {
       window.history.replaceState(null, "", url);
     }
-  }, [status, category, query, sort, activeFingerprint]);
+  }, [status, category, query, sort, triage, activeFingerprint]);
 
   const activeGroup = groups.find((group) => group.fingerprint === activeFingerprint);
   const detailQuery = useQuery({
@@ -238,16 +268,18 @@ export function FailuresPage() {
     ? toFailure(activeGroup, detailQuery.data, knowledgeQuery.data)
     : undefined;
 
-  const stats = useMemo(
-    () => ({
-      open: groups.length,
+  const stats = useMemo(() => {
+    const active = base.filter(
+      (failure) => failure.triageStatus !== "muted" && failure.triageStatus !== "wont_fix",
+    );
+    return {
+      open: active.length,
       occurrences: groups.reduce((total, group) => total + group.occurrences, 0),
       newToday: groups.filter((group) => isToday(group.first_seen_at)).length,
-      needsAI: base.filter((failure) => failure.needsAI).length,
+      needsAI: active.filter((failure) => failure.needsAI).length,
       projects: new Set(groups.map((group) => group.project)).size,
-    }),
-    [groups, base],
-  );
+    };
+  }, [groups, base]);
 
   if (groupsQuery.isPending) {
     return (
@@ -285,10 +317,10 @@ export function FailuresPage() {
             {statuses.map((item) => {
               const count =
                 item.id === "all"
-                  ? base.length
+                  ? triageScoped.length
                   : item.id === "needs_ai"
-                    ? base.filter((failure) => failure.needsAI).length
-                    : base.filter((failure) => failure.status === item.id).length;
+                    ? triageScoped.filter((failure) => failure.needsAI).length
+                    : triageScoped.filter((failure) => failure.status === item.id).length;
               return (
                 <StatusFilterPill
                   key={item.id}
@@ -335,6 +367,27 @@ export function FailuresPage() {
                 <CircleHelp className="h-4 w-4" />
               </button>
             </Tooltip>
+          </div>
+
+          <div className="flex h-8 w-full items-center rounded-full border border-line bg-[#0f141a] transition-colors hover:border-[#3d444d] focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:w-auto">
+            <div className="relative min-w-0 flex-1">
+              <select
+                value={triage}
+                onChange={(event) => setTriage(event.target.value as TriageFilter)}
+                className={cn(
+                  "h-8 w-full appearance-none rounded-full bg-transparent pl-3 pr-7 text-[12px] outline-none sm:min-w-[124px]",
+                  triage === "active" ? "text-muted" : "text-ink",
+                )}
+                aria-label="Filter by triage status"
+              >
+                {triageFilters.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+            </div>
           </div>
 
           <div className="flex h-8 w-full items-center rounded-full border border-line bg-[#0f141a] transition-colors hover:border-[#3d444d] focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:w-auto">

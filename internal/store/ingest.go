@@ -306,6 +306,7 @@ func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 			CREATE (f:Failure {id: $id, project: $project, file: $file, title: $title, lastError: $lastError,
 				status: 'open', occurrences: 1, regressions: 0, firstSeenRun: $runId, lastSeenRun: $runId,
 				causeId: $causeId, cause: $cause, manualNote: '', labeledBy: '', localOnly: $localOnly,
+				triageStatus: 'open', triageOwner: '', triageNote: '', triageUpdatedBy: '',
 				caseId: $caseId})-[:OF]->(t)`,
 			map[string]any{"key": o.Key(), "project": o.Project, "file": o.File, "title": o.Title, "id": fingerprint,
 				"lastError": cleanMsg, "runId": runID, "causeId": incidentKey, "cause": incidentLabel,

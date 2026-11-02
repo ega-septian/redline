@@ -18,9 +18,21 @@ import (
 // Categories adalah kategori penyebab kegagalan yang dipakai aturan, AI, dan label manual.
 var Categories = []string{"backend_bug", "test_bug", "environment", "flaky", "unknown"}
 
+// TriageStatuses adalah status kerja manusia, terpisah dari status test (open/resolved).
+var TriageStatuses = []string{"open", "acknowledged", "in_progress", "muted", "wont_fix"}
+
 func ValidCategory(c string) bool {
 	for _, x := range Categories {
 		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidTriageStatus(s string) bool {
+	for _, x := range TriageStatuses {
+		if x == s {
 			return true
 		}
 	}
@@ -415,6 +427,13 @@ type Group struct {
 	HumanNote    string     `json:"human_note,omitempty"`
 	LabeledBy    string     `json:"labeled_by,omitempty"`
 	LocalOnly    bool       `json:"local_only"` // hanya terlihat di run lokal; tidak masuk daftar tim
+
+	// Status kerja manusia, terpisah dari status test (open/resolved).
+	TriageStatus    string     `json:"triage_status"`
+	TriageOwner     string     `json:"triage_owner,omitempty"`
+	TriageNote      string     `json:"triage_note,omitempty"`
+	TriageUpdatedBy string     `json:"triage_updated_by,omitempty"`
+	TriageUpdatedAt *time.Time `json:"triage_updated_at,omitempty"`
 
 	// Latest analysis, so a list can show the category without a request per group.
 	Category        string     `json:"category,omitempty"`
