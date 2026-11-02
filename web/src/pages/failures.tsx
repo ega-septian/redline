@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { ChevronDown, CircleHelp, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { api } from "@/api/client";
@@ -8,6 +8,7 @@ import { FailureTable } from "@/components/failures/failure-table";
 import { Kpis } from "@/components/failures/kpis";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   categoryLabel,
   toFailure,
@@ -19,11 +20,38 @@ import { cn } from "@/lib/utils";
 type StatusFilter = "all" | FailureStatus;
 type CategoryFilter = "all" | Category;
 
-const statuses: Array<{ id: StatusFilter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "new", label: "New" },
-  { id: "recurring", label: "Recurring" },
-  { id: "regressed", label: "Regressed" },
+const statuses: Array<{
+  id: StatusFilter;
+  label: string;
+  hint: string;
+  align: "start" | "center" | "end";
+  mobileAlign?: "start" | "center" | "end";
+}> = [
+  {
+    id: "all",
+    label: "All",
+    hint: "Every open failure group, regardless of status.",
+    align: "start",
+  },
+  {
+    id: "new",
+    label: "New",
+    hint: "First seen in the latest run and never seen before.",
+    align: "start",
+    mobileAlign: "end",
+  },
+  {
+    id: "recurring",
+    label: "Recurring",
+    hint: "Still failing across more than one run with the same fingerprint.",
+    align: "start",
+  },
+  {
+    id: "regressed",
+    label: "Regressed",
+    hint: "A failure that was resolved, then came back in a later run.",
+    align: "end",
+  },
 ];
 
 const categories = Object.entries(categoryLabel) as Array<[Category, string]>;
@@ -35,6 +63,58 @@ function isToday(iso: string): boolean {
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate()
+  );
+}
+
+function StatusFilterPill({
+  item,
+  count,
+  active,
+  onSelect,
+}: {
+  item: (typeof statuses)[number];
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-8 w-full items-center rounded-full border transition-colors sm:w-auto",
+        active
+          ? "border-brand/40 bg-brand/10 text-[#79c0ff]"
+          : "border-line bg-[#0f141a] text-muted hover:border-[#3d444d] hover:bg-[#1b222b] hover:text-ink",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={active}
+        className="flex h-full min-w-0 flex-1 items-center justify-between gap-1.5 rounded-l-full pl-3 pr-1.5 text-[12px] font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+      >
+        {item.label}
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none",
+            active ? "bg-brand/15 text-[#79c0ff]" : "bg-[#21262d] text-faint",
+          )}
+        >
+          {count}
+        </span>
+      </button>
+      <Tooltip content={item.hint} align={item.align} mobileAlign={item.mobileAlign}>
+        <button
+          type="button"
+          aria-label={`About the ${item.label} filter`}
+          className={cn(
+            "mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60",
+            active ? "text-[#79c0ff]/80" : "text-muted",
+          )}
+        >
+          <CircleHelp className="h-4 w-4" />
+        </button>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -121,52 +201,76 @@ export function FailuresPage() {
     <>
       <Kpis {...stats} />
 
-      <section className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line bg-surface px-2.5 py-2">
-        {statuses.map((item) => {
-          const count =
-            item.id === "all"
-              ? base.length
-              : base.filter((failure) => failure.status === item.id).length;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setStatus(item.id)}
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-xs whitespace-nowrap transition-colors",
-                status === item.id
-                  ? "border-[#1f6feb66] bg-[#1f6feb22] text-[#79c0ff]"
-                  : "border-line bg-[#0f141a] text-muted hover:text-ink",
-              )}
+      <section className="rounded-[10px] border border-line bg-surface p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-wrap"
+            role="group"
+            aria-label="Filter by status"
+          >
+            {statuses.map((item) => {
+              const count =
+                item.id === "all"
+                  ? base.length
+                  : base.filter((failure) => failure.status === item.id).length;
+              return (
+                <StatusFilterPill
+                  key={item.id}
+                  item={item}
+                  count={count}
+                  active={status === item.id}
+                  onSelect={() => setStatus(item.id)}
+                />
+              );
+            })}
+          </div>
+
+          <span aria-hidden="true" className="hidden h-5 w-px bg-line sm:block" />
+
+          <div className="flex h-8 w-full items-center rounded-full border border-line bg-[#0f141a] transition-colors hover:border-[#3d444d] focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:w-auto">
+            <div className="relative min-w-0 flex-1">
+              <select
+                value={category}
+                onChange={(event) => setCategory(event.target.value as CategoryFilter)}
+                className={cn(
+                  "h-8 w-full appearance-none rounded-l-full bg-transparent pl-3 pr-7 text-[12px] outline-none sm:min-w-[112px]",
+                  category === "all" ? "text-muted" : "text-ink",
+                )}
+                aria-label="Filter by category"
+              >
+                <option value="all">Category</option>
+                {categories.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+            </div>
+            <Tooltip
+              content="Filter by the latest analysis or manual label. Unclear means no analysis has run yet."
+              align="end"
             >
-              {item.label} <span className="ml-1 text-faint">{count}</span>
-            </button>
-          );
-        })}
+              <button
+                type="button"
+                aria-label="About the category filter"
+                className="mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/60"
+              >
+                <CircleHelp className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          </div>
 
-        <select
-          value={category}
-          onChange={(event) => setCategory(event.target.value as CategoryFilter)}
-          className="h-7 rounded-full border border-line bg-[#0f141a] px-2.5 text-xs text-muted outline-none focus-visible:border-brand/60"
-          aria-label="Filter by category"
-        >
-          <option value="all">Category</option>
-          {categories.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-
-        <div className="flex w-full min-w-0 items-center gap-1.5 rounded-md border border-line bg-[#0f141a] px-2.5 py-1 text-faint sm:ml-auto sm:w-auto sm:min-w-[210px]">
-          <Search className="h-3.5 w-3.5" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search test, ID, endpoint…"
-            className="h-6 border-0 bg-transparent px-0 focus-visible:ring-0"
-            aria-label="Search failures"
-          />
+          <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full border border-line bg-[#0f141a] px-3 text-faint transition-colors focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:ml-auto sm:w-auto sm:min-w-[230px]">
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search test, ID, endpoint…"
+              className="h-7 min-w-0 border-0 bg-transparent px-0 text-[12px] focus-visible:ring-0"
+              aria-label="Search failures"
+            />
+          </div>
         </div>
       </section>
 
