@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -189,9 +190,10 @@ function RunHistory({ runs }: { runs: FailureRun[] }) {
       </BlockLabel>
       <div className="flex flex-wrap gap-1.5">
         {runs.map((run) => (
-          <button
+          <Link
             key={run.runId}
-            type="button"
+            to="/runs/$runId"
+            params={{ runId: String(run.runId) }}
             title={`Run ${run.runId} · ${whenRun(run.at)} · ${run.status}`}
             aria-label={`Run ${run.runId}, ${run.status}, ${whenRun(run.at)}`}
             onMouseEnter={() => setActive(run)}
@@ -206,7 +208,7 @@ function RunHistory({ runs }: { runs: FailureRun[] }) {
             )}
           >
             {run.status === "passed" ? "✓" : run.status === "failed" ? "✗" : "~"}
-          </button>
+          </Link>
         ))}
       </div>
       <div className="mt-2 min-h-4 text-[11px] text-muted">
@@ -270,7 +272,12 @@ function Occurrences({ failure }: { failure: Failure }) {
       ) : (
         <div className="flex flex-col divide-y divide-line-soft rounded-md border border-line-soft">
           {rows.map((row) => (
-            <div key={row.runId} className="flex items-center gap-2.5 px-2.5 py-2 text-[11.5px]">
+            <Link
+              key={row.runId}
+              to="/runs/$runId"
+              params={{ runId: String(row.runId) }}
+              className="flex items-center gap-2.5 px-2.5 py-2 text-[11.5px] transition-colors hover:bg-[#12171e]"
+            >
               <span
                 className={cn(
                   "h-1.5 w-1.5 rounded-full",
@@ -282,7 +289,7 @@ function Occurrences({ failure }: { failure: Failure }) {
               <span className="font-mono text-muted">run #{row.runId}</span>
               <span className="text-faint">{row.status}</span>
               <span className="ml-auto text-faint">{whenRun(row.at)}</span>
-            </div>
+            </Link>
           ))}
         </div>
       )}

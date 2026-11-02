@@ -4,7 +4,13 @@ import { ArrowLeft, Check, Copy, ExternalLink, Search, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { ApiRunResult, ComparedTest, RunChange, RunComparison } from "@/api/types";
+import type {
+  ApiArtifact,
+  ApiRunResult,
+  ComparedTest,
+  RunChange,
+  RunComparison,
+} from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -301,8 +307,8 @@ export function RunDetailPage() {
       </div>
 
       <p className="text-[11px] text-faint">
-        <span className="font-mono">GET /api/runs/{run.id}</span>. Trace and screenshots are paths
-        from the runner, not served by Redline.
+        <span className="font-mono">GET /api/runs/{run.id}</span>. Uploaded trace and screenshot
+        artifacts are served by Redline; local paths remain a fallback for runs from older reporters.
       </p>
     </>
   );
@@ -458,6 +464,9 @@ function TestDetail({ result }: { result: ApiRunResult }) {
   const category = categoryOf(result);
   const info = parts(result.test);
   const [copied, setCopied] = useState(false);
+  const artifacts = result.artifacts ?? [];
+  const traceArtifact = artifacts.find((artifact) => artifact.kind === "trace");
+  const screenshots = artifacts.filter((artifact) => artifact.kind === "screenshot");
 
   async function copyError() {
     await navigator.clipboard.writeText(result.error || result.error_snippet || "");
@@ -505,8 +514,8 @@ function TestDetail({ result }: { result: ApiRunResult }) {
           <BlockLabel>Details</BlockLabel>
           <Fact label="Fingerprint" value={result.fingerprint || "—"} />
           <Fact label="Location" value={result.error_location || "—"} />
-          <Fact label="Trace" value={result.trace_path || "—"} />
-          <Fact label="Screenshots" value={String(result.screenshots.length)} />
+          <ArtifactFact label="Trace" artifact={traceArtifact} fallback={result.trace_path} />
+          <ArtifactList artifacts={screenshots} fallback={result.screenshots} />
           <Fact label="Confidence" value={result.confidence || "—"} />
         </div>
       </div>
@@ -544,6 +553,69 @@ function Fact({ label, value }: { label: string; value: string }) {
       <span className="min-w-0 break-all font-mono text-[10.5px] text-[#cdd9e5]">{value}</span>
     </div>
   );
+}
+
+function ArtifactFact({
+  label,
+  artifact,
+  fallback,
+}: {
+  label: string;
+  artifact?: ApiArtifact;
+  fallback?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]">
+      <span className="w-[76px] shrink-0 text-faint">{label}</span>
+      {artifact ? (
+        <a
+          href={`/api/artifacts/${artifact.id}`}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 break-all font-mono text-[10.5px] text-brand hover:underline"
+          title={`${artifact.name} · ${formatBytes(artifact.size)}`}
+        >
+          {artifact.name}
+        </a>
+      ) : (
+        <span className="min-w-0 break-all font-mono text-[10.5px] text-[#cdd9e5]">
+          {fallback || "—"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ArtifactList({ artifacts, fallback }: { artifacts: ApiArtifact[]; fallback: string[] }) {
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]">
+      <span className="w-[76px] shrink-0 text-faint">Screenshots</span>
+      <span className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 font-mono text-[10.5px]">
+        {artifacts.length > 0
+          ? artifacts.map((artifact) => (
+              <a
+                key={artifact.id}
+                href={`/api/artifacts/${artifact.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-brand hover:underline"
+                title={`${artifact.name} · ${formatBytes(artifact.size)}`}
+              >
+                {artifact.name}
+              </a>
+            ))
+          : fallback.length > 0
+            ? `${fallback.length} local path${fallback.length === 1 ? "" : "s"}`
+            : "—"}
+      </span>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function BlockLabel({ children }: { children: ReactNode }) {

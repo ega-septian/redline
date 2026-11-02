@@ -16,3 +16,6 @@ web/dist/*
 
 # Neo4j dumps (scripts/backup.sh)
 backups/
+
+# Uploaded trace/screenshot artifacts
+artifacts/

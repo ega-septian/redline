@@ -1,13 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"strconv"
 	"strings"
@@ -28,6 +31,7 @@ type fakeStore struct {
 
 	experiment store.Experiment
 	impact     string
+	artifacts  []store.Artifact
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -62,6 +66,28 @@ func (f *fakeStore) RunResults(_ context.Context, runID int64) ([]store.RunResul
 		{TestKey: "toolshop › api.spec.ts › register", TestCaseID: "TC-USR-001", Status: "failed", DurationMs: 120, Fingerprint: "a"},
 		{TestKey: "toolshop › api.spec.ts › health", Status: "passed", DurationMs: 10},
 	}, nil
+}
+func (f *fakeStore) SaveArtifact(_ context.Context, a store.Artifact) (int64, error) {
+	a.ID = int64(len(f.artifacts) + 1)
+	f.artifacts = append(f.artifacts, a)
+	return a.ID, nil
+}
+func (f *fakeStore) ListArtifacts(_ context.Context, runID int64) ([]store.Artifact, error) {
+	out := []store.Artifact{}
+	for _, a := range f.artifacts {
+		if a.RunID == runID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+func (f *fakeStore) GetArtifact(_ context.Context, id int64) (store.Artifact, error) {
+	for _, a := range f.artifacts {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return store.Artifact{}, store.ErrNotFound
 }
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
@@ -624,6 +650,60 @@ func TestRuleCandidates(t *testing.T) {
 	rec := do(h, http.MethodPost, "/api/rules/candidates/promote", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"candidates"`) {
 		t.Errorf("promote candidate = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestArtifactUpload(t *testing.T) {
+	dir := t.TempDir()
+	fs := &fakeStore{}
+	h := (&Server{Store: fs, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ArtifactDir: dir, MaxArtifactSize: 1 << 20}).Routes()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("test", "toolshop › api.spec.ts › register")
+	_ = mw.WriteField("kind", "trace")
+	fw, _ := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="file"; filename="trace.zip"`},
+		"Content-Type":        {"application/zip"},
+	})
+	_, _ = fw.Write([]byte("zip-content"))
+	_ = mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/runs/1/artifacts", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "trace.zip") {
+		t.Fatalf("upload artifact = %d: %s", rec.Code, rec.Body)
+	}
+	detail := do(h, http.MethodGet, "/api/runs/1", nil)
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"artifacts": [`) ||
+		!strings.Contains(detail.Body.String(), `"name": "trace.zip"`) {
+		t.Errorf("run detail tanpa artifact: %d %s", detail.Code, detail.Body)
+	}
+	download := do(h, http.MethodGet, "/api/artifacts/1", nil)
+	if download.Code != http.StatusOK || download.Body.String() != "zip-content" ||
+		download.Header().Get("Content-Type") != "application/zip" ||
+		!strings.Contains(download.Header().Get("Content-Disposition"), "attachment") {
+		t.Errorf("download artifact = %d %q %v", download.Code, download.Body, download.Header())
+	}
+	fs.artifacts[0].Path = "../outside.txt" // server hanya boleh menyajikan file di dalam ARTIFACT_DIR
+	if rec := do(h, http.MethodGet, "/api/artifacts/1", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("artifact di luar ARTIFACT_DIR = %d, want 404", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/artifacts/99", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("artifact tidak ada = %d, want 404", rec.Code)
+	}
+	listed := do(h, http.MethodGet, "/api/runs/1/artifacts", nil)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"trace.zip"`) {
+		t.Errorf("daftar artifact = %d %s", listed.Code, listed.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/runs/2/artifacts", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("run tidak ada = %d, want 404", rec.Code)
+	}
+	if rec := do(h, http.MethodPost, "/api/runs/1/artifacts", nil); rec.Code == http.StatusCreated {
+		t.Errorf("upload tanpa multipart tidak boleh sukses")
 	}
 }
 

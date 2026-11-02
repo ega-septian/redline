@@ -54,6 +54,9 @@ PR number from the event; outside Actions, set `REDLINE_PR_NUMBER`.
 - The workflow has `pull-requests: write`; the default `GITHUB_TOKEN` is enough.
 - The Redline server is reachable from the runner; otherwise the report is still generated but has no
   analysis, and the comment contains only the run summary.
+- Trace and screenshot files for failed tests are uploaded automatically. Set `REDLINE_ARTIFACTS=0`
+  on the test step to keep CI uploads off, and make sure the server has a writable `ARTIFACT_DIR`.
+  Artifacts disappear with their run after `RETENTION_DAYS`.
 
 The comment is plain Markdown: run totals, grouped incidents, causes, confidence, evidence and the
 relative report path. Long reports are truncated to 60,000 characters.

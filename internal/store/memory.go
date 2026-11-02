@@ -137,7 +137,8 @@ func (s *Store) SimilarCases(ctx context.Context, groupID, model string, minSimi
 // Prune menghapus hasil test dari run yang lebih tua dari before, kecuali yang masih dibutuhkan analisis:
 // hasil lulus terakhir tiap test (pembanding) serta kemunculan pertama dan terakhir tiap kelompok kegagalan.
 // Bentuk response, kode test, kontrak, endpoint, dan file yang tidak dirujuk lagi ikut dihapus.
-// Run dan kelompok kegagalan tidak disentuh: kecil, dan dirujuk oleh data lain.
+// Artifact (trace/screenshot) milik run lama dihapus dari graph; path-nya dikembalikan supaya server
+// menghapus filenya. Run dan kelompok kegagalan tidak disentuh: kecil, dan dirujuk oleh data lain.
 func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error) {
 	var out PruneResult
 	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
@@ -180,6 +181,36 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			MATCH (x:SourceFile) WHERE NOT EXISTS { MATCH (r:Result) WHERE x.id IN r.sourceIds }
 			DELETE x RETURN count(*) AS n`, nil); err != nil {
 			return nil, err
+		}
+		// Artifact mengikuti retensi run. File di disk dihapus server setelah transaksi ini sukses.
+		res, err := tx.Run(ctx, `
+			MATCH (run:Run)-[:HAS_ARTIFACT]->(a:Artifact) WHERE run.createdAt < $before
+			RETURN count(a) AS n, collect(a.path) AS paths`, map[string]any{"before": before.UTC()})
+		if err != nil {
+			return nil, fmt.Errorf("hitung artifact lama: %w", err)
+		}
+		rec, err := res.Single(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("hitung artifact lama: %w", err)
+		}
+		n, _ := rec.Get("n")
+		out.Artifacts = n.(int64)
+		paths, _ := rec.Get("paths")
+		if out.Artifacts > 0 {
+			del, err := tx.Run(ctx, `
+				MATCH (run:Run)-[:HAS_ARTIFACT]->(a:Artifact) WHERE run.createdAt < $before
+				DETACH DELETE a`, map[string]any{"before": before.UTC()})
+			if err != nil {
+				return nil, fmt.Errorf("hapus artifact lama: %w", err)
+			}
+			if _, err := del.Consume(ctx); err != nil {
+				return nil, fmt.Errorf("hapus artifact lama: %w", err)
+			}
+			for _, path := range paths.([]any) {
+				if p, ok := path.(string); ok && p != "" {
+					out.ArtifactPaths = append(out.ArtifactPaths, p)
+				}
+			}
 		}
 		for what, cypher := range map[string]string{
 			"kontrak yatim": `MATCH (x:Contract) WHERE NOT ()-[:UNDER]->(x) DELETE x RETURN count(*) AS n`,

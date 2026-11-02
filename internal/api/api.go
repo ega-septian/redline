@@ -3,12 +3,18 @@ package api
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -28,6 +34,9 @@ type Store interface {
 	GetRun(ctx context.Context, id int64) (store.Run, error)
 	PreviousRun(ctx context.Context, id int64, branch string) (store.Run, bool, error)
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
+	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
+	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
+	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
 	ListGroups(ctx context.Context, statuses []string, limit int) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
@@ -68,7 +77,10 @@ type Server struct {
 	ReportPortal ReportPortal // nil = integrasi ReportPortal mati
 	Log          *slog.Logger
 	MaxBodySize  int64
-	APIKey       string // legacy single key; empty = no Bearer auth unless AuthEnabled
+	// ArtifactDir menyimpan trace/screenshot upload; MaxArtifactSize membatasi satu file.
+	ArtifactDir     string
+	MaxArtifactSize int64
+	APIKey          string // legacy single key; empty = no Bearer auth unless AuthEnabled
 	// AuthEnabled wraps /api with the key check even when APIKey is empty (REDLINE_USERS only).
 	AuthEnabled bool
 	// ValidateKey checks a Bearer token. nil falls back to APIKey.
@@ -108,6 +120,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
+	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
+	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
+	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
@@ -438,7 +453,187 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	artifacts, err := s.Store.ListArtifacts(r.Context(), id)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	byTest := map[string][]store.Artifact{}
+	for _, artifact := range artifacts {
+		byTest[artifact.TestKey] = append(byTest[artifact.TestKey], artifact)
+	}
+	for i := range tests {
+		tests[i].Artifacts = byTest[tests[i].TestKey]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": run, "tests": tests})
+}
+
+// handleListArtifacts: GET /api/runs/{id}/artifacts
+func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		return
+	}
+	if _, err := s.Store.GetRun(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		return
+	} else if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	artifacts, err := s.Store.ListArtifacts(r.Context(), id)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, artifacts)
+}
+
+// handleUploadArtifact: POST /api/runs/{id}/artifacts (multipart: test, kind, file)
+func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
+	runID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || runID <= 0 {
+		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		return
+	}
+	if _, err := s.Store.GetRun(r.Context(), runID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		return
+	} else if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	max := s.MaxArtifactSize
+	if max <= 0 {
+		max = 25 << 20
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, max+(1<<20))
+	if err := r.ParseMultipartForm(max); err != nil {
+		writeError(w, http.StatusBadRequest, "upload artifact tidak valid atau terlalu besar")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll() // file besar bisa ditulis ke temp; jangan tinggalkan sisa
+	}
+	test := r.FormValue("test")
+	kind := strings.TrimSpace(r.FormValue("kind"))
+	if strings.TrimSpace(test) == "" || (kind != "trace" && kind != "screenshot") {
+		writeError(w, http.StatusBadRequest, "test wajib diisi dan kind harus trace atau screenshot")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file artifact wajib diisi")
+		return
+	}
+	defer file.Close()
+	if header.Size > max {
+		writeError(w, http.StatusRequestEntityTooLarge, "artifact terlalu besar")
+		return
+	}
+	dir := filepath.Join(s.artifactDir(), strconv.FormatInt(runID, 10), testHash(test))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	name := safeArtifactName(header.Filename)
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d-%s", kind, time.Now().UnixNano(), name))
+	out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	written, copyErr := io.Copy(out, io.LimitReader(file, max+1))
+	closeErr := out.Close()
+	if copyErr != nil || closeErr != nil || written > max {
+		_ = os.Remove(path)
+		writeError(w, http.StatusRequestEntityTooLarge, "artifact terlalu besar atau gagal ditulis")
+		return
+	}
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(name))
+	}
+	artifact := store.Artifact{RunID: runID, TestKey: test, Kind: kind, Name: name, Path: path,
+		ContentType: contentType, Size: written}
+	id, err := s.Store.SaveArtifact(r.Context(), artifact)
+	if err != nil {
+		_ = os.Remove(path)
+		s.serverError(w, err)
+		return
+	}
+	artifact.ID = id
+	writeJSON(w, http.StatusCreated, artifact)
+}
+
+// handleGetArtifact: GET /api/artifacts/{id}, served from the artifact directory.
+func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "id artifact tidak valid")
+		return
+	}
+	artifact, err := s.Store.GetArtifact(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "artifact tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	path, err := filepath.Abs(artifact.Path)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	root, err := filepath.Abs(s.artifactDir())
+	if err != nil || !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		writeError(w, http.StatusNotFound, "artifact tidak ditemukan")
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "file artifact tidak ditemukan")
+		return
+	}
+	defer file.Close()
+	if artifact.ContentType != "" {
+		w.Header().Set("Content-Type", artifact.ContentType)
+	}
+	disposition := "inline"
+	if artifact.Kind == "trace" {
+		disposition = "attachment"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, artifact.Name))
+	http.ServeContent(w, r, artifact.Name, artifact.CreatedAt, file)
+}
+
+func (s *Server) artifactDir() string {
+	if s.ArtifactDir != "" {
+		return s.ArtifactDir
+	}
+	return "./artifacts"
+}
+
+func testHash(test string) string {
+	sum := sha1.Sum([]byte(test))
+	return hex.EncodeToString(sum[:8])
+}
+
+func safeArtifactName(name string) string {
+	name = filepath.Base(name)
+	name = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, name)
+	if name == "" || name == "." {
+		return "artifact"
+	}
+	return name
 }
 
 // handleListGroups: GET /api/groups?status=open,regressed (default) atau status=all.

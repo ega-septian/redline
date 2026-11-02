@@ -388,20 +388,34 @@ type Run struct {
 
 // RunResult is one test outcome in a run, with the failure group's latest analysis.
 type RunResult struct {
-	TestKey       string   `json:"test"`
-	TestCaseID    string   `json:"test_case_id,omitempty"`
-	Status        string   `json:"status"`
-	DurationMs    int      `json:"duration_ms"`
-	Retries       int      `json:"retries"`
-	ErrorMessage  string   `json:"error,omitempty"`
-	ErrorSnippet  string   `json:"error_snippet,omitempty"`
-	ErrorLocation string   `json:"error_location,omitempty"`
-	TracePath     string   `json:"trace_path,omitempty"`
-	Screenshots   []string `json:"screenshots"`
-	Fingerprint   string   `json:"fingerprint,omitempty"`
-	Category      string   `json:"category,omitempty"`
-	Confidence    string   `json:"confidence,omitempty"`
-	HumanLabel    string   `json:"human_label,omitempty"`
+	TestKey       string     `json:"test"`
+	TestCaseID    string     `json:"test_case_id,omitempty"`
+	Status        string     `json:"status"`
+	DurationMs    int        `json:"duration_ms"`
+	Retries       int        `json:"retries"`
+	ErrorMessage  string     `json:"error,omitempty"`
+	ErrorSnippet  string     `json:"error_snippet,omitempty"`
+	ErrorLocation string     `json:"error_location,omitempty"`
+	TracePath     string     `json:"trace_path,omitempty"`
+	Screenshots   []string   `json:"screenshots"`
+	Fingerprint   string     `json:"fingerprint,omitempty"`
+	Category      string     `json:"category,omitempty"`
+	Confidence    string     `json:"confidence,omitempty"`
+	HumanLabel    string     `json:"human_label,omitempty"`
+	Artifacts     []Artifact `json:"artifacts,omitempty"`
+}
+
+// Artifact adalah trace atau screenshot yang diupload reporter dan disimpan server.
+type Artifact struct {
+	ID          int64     `json:"id"`
+	RunID       int64     `json:"run_id"`
+	TestKey     string    `json:"test"`
+	Kind        string    `json:"kind"` // trace / screenshot
+	Name        string    `json:"name"`
+	Path        string    `json:"-"` // server-local; never exposed
+	ContentType string    `json:"content_type,omitempty"`
+	Size        int64     `json:"size"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Group struct {
@@ -466,6 +480,9 @@ type PruneResult struct {
 	TestResults int64 `json:"test_results"`
 	Shapes      int64 `json:"response_shapes"`
 	Sources     int64 `json:"source_files"`
+	Artifacts   int64 `json:"artifacts"`
+	// ArtifactPaths adalah file di disk yang harus dihapus pemanggil setelah transaksi selesai.
+	ArtifactPaths []string `json:"-"`
 }
 
 // ErrDuplicate dikembalikan kalau aturan dengan pola dan kategori yang sama sudah ada.
