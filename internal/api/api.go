@@ -34,6 +34,7 @@ type Store interface {
 	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
 	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
+	ListRuleCandidates(ctx context.Context, fingerprint, status string) ([]store.RuleCandidate, error)
 	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
 	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
 	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
@@ -44,6 +45,8 @@ type Store interface {
 // Analyzer menentukan penyebab kegagalan (aturan, cache, lalu AI).
 type Analyzer interface {
 	Analyze(ctx context.Context, fingerprint string, force bool) (*store.Analysis, bool, error)
+	AnalyzeLocal(ctx context.Context, fingerprint string, force bool) (*store.Analysis, error)
+	PromoteCandidates(ctx context.Context, fingerprint string) (*analysis.PromotionResult, error)
 	ProposeFix(ctx context.Context, fingerprint string, files []analysis.SourceFile, attempts []analysis.Attempt) (*analysis.Fix, error)
 	ProposeRules(ctx context.Context) (*analysis.LearnResult, error)
 	EmbedPending(ctx context.Context) (int, error)
@@ -108,6 +111,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/groups/{fingerprint}/fix", s.handleFix)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/experiments", s.handleSaveExperiment)
 	mux.HandleFunc("GET /api/rules", s.handleListRules)
+	mux.HandleFunc("GET /api/rules/candidates", s.handleListRuleCandidates)
+	mux.HandleFunc("POST /api/rules/candidates/promote", s.handlePromoteCandidates)
 	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
 	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
@@ -350,15 +355,32 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleAnalyze: POST /api/groups/{fingerprint}/analyze?force=1
-// Tanpa force, hasil cache dipakai kalau ada (tanpa biaya token).
+// handleAnalyze: POST /api/groups/{fingerprint}/analyze?force=1&ai=0
+// Tanpa force, hasil cache AI dipakai kalau ada. ai=0 menjalankan aturan/label/bukti saja tanpa AI.
 func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	if s.Analyzer == nil {
 		writeError(w, http.StatusServiceUnavailable, analysis.ErrAIDisabled.Error())
 		return
 	}
+	fingerprint := r.PathValue("fingerprint")
+	if r.URL.Query().Get("ai") == "0" {
+		force := r.URL.Query().Get("force") == "1"
+		res, err := s.Analyzer.AnalyzeLocal(r.Context(), fingerprint, force)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		case err != nil:
+			s.Log.Error("analisis lokal gagal", "fingerprint", fingerprint, "err", err)
+			writeError(w, http.StatusBadGateway, "analisis gagal, cek log server")
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{
+				"analysis": res, "cached": false, "needs_ai": res.Source == "none",
+			})
+		}
+		return
+	}
 	force := r.URL.Query().Get("force") == "1"
-	res, cached, err := s.Analyzer.Analyze(r.Context(), r.PathValue("fingerprint"), force)
+	res, cached, err := s.Analyzer.Analyze(r.Context(), fingerprint, force)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
@@ -367,7 +389,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	case err != nil:
-		s.Log.Error("analisis gagal", "fingerprint", r.PathValue("fingerprint"), "err", err)
+		s.Log.Error("analisis gagal", "fingerprint", fingerprint, "err", err)
 		writeError(w, http.StatusBadGateway, "analisis gagal, cek log server")
 		return
 	}
@@ -413,6 +435,13 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.serverError(w, err)
 		return
+	}
+	if body.Label != "" && s.Analyzer != nil {
+		if res, err := s.Analyzer.PromoteCandidates(r.Context(), r.PathValue("fingerprint")); err != nil {
+			s.Log.Warn("promosi rule candidate gagal", "fingerprint", r.PathValue("fingerprint"), "err", err)
+		} else if len(res.Promoted)+len(res.Rejected) > 0 {
+			s.Log.Info("candidate diproses setelah label", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note, "by": body.By})
 }
@@ -482,6 +511,13 @@ func (s *Server) handleSaveExperiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Log.Info("eksperimen tersimpan", "fingerprint", e.GroupID, "kind", e.Kind, "outcome", e.Outcome)
+	if e.Outcome == "passed" && s.Analyzer != nil {
+		if res, err := s.Analyzer.PromoteCandidates(r.Context(), e.GroupID); err != nil {
+			s.Log.Warn("promosi rule candidate gagal", "fingerprint", e.GroupID, "err", err)
+		} else if len(res.Promoted)+len(res.Rejected) > 0 {
+			s.Log.Info("candidate diproses setelah eksperimen", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
+		}
+	}
 	resp := map[string]any{"id": id, "verdicts": []store.ScoreEntry{}}
 	// Eksperimen yang lulus adalah jawaban: langsung nilai tebakan aturan/AI sebelumnya.
 	if e.Outcome == "passed" {
@@ -522,6 +558,37 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rules)
+}
+
+// handleListRuleCandidates: GET /api/rules/candidates?status=draft|promoted|rejected|expired
+func (s *Server) handleListRuleCandidates(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	if status != "" && !ruleCandidateStatuses[status] {
+		writeError(w, http.StatusBadRequest, "status harus draft, promoted, rejected, atau expired")
+		return
+	}
+	candidates, err := s.Store.ListRuleCandidates(r.Context(), r.URL.Query().Get("fingerprint"), status)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, candidates)
+}
+
+var ruleCandidateStatuses = map[string]bool{"draft": true, "promoted": true, "rejected": true, "expired": true}
+
+// handlePromoteCandidates: POST /api/rules/candidates/promote?fingerprint=...
+func (s *Server) handlePromoteCandidates(w http.ResponseWriter, r *http.Request) {
+	if s.Analyzer == nil {
+		writeError(w, http.StatusServiceUnavailable, "analyzer tidak aktif")
+		return
+	}
+	res, err := s.Analyzer.PromoteCandidates(r.Context(), r.URL.Query().Get("fingerprint"))
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleProposeRules: POST /api/rules/propose. AI belajar dari kasus terbukti; hasilnya berstatus proposed.

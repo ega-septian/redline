@@ -11,7 +11,7 @@ import (
 
 // PromptVersion dinaikkan setiap kali prompt atau format fakta berubah,
 // supaya cache lama tidak dipakai untuk prompt baru.
-const PromptVersion = "v9"
+const PromptVersion = "v10"
 
 const toolName = "report_verdict"
 
@@ -61,6 +61,10 @@ Aturan:
    tetap bukti kuat: perubahan file yang tidak berhubungan tidak membuatnya jadi test_bug.
 12. Urutan menjawab: tulis summary dan evidence dulu, lalu deviates (pihak yang menyimpang menurut summary itu),
    lalu category yang sejalan: test -> test_bug, api -> backend_bug, environment -> environment.
+13. Kalau kamu cukup yakin, sertakan rule_candidate: regex Go (RE2) yang menangkap MEKANISME error ini, bukan
+   nama test, endpoint, data, atau angka yang berubah-ubah. Regex harus berlaku untuk kasus serupa di masa depan.
+   Candidate ini hanya draft: belum dipakai sampai penyebabnya terbukti dan lolos backtest. Kalau tidak ada pola
+   yang aman, kosongkan rule_candidate.
 
 Jawab dengan memanggil tool report_verdict.`
 
@@ -75,18 +79,29 @@ var verdictTool = json.RawMessage(`{
     "category":   {"type": "string", "enum": ["backend_bug", "test_bug", "environment", "flaky", "unknown"],
                    "description": "Sejalan dengan deviates: test -> test_bug, api -> backend_bug, environment -> environment."},
     "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-    "next_step":  {"type": "string", "description": "Satu langkah konkret berikutnya untuk SDET."}
+    "next_step":  {"type": "string", "description": "Satu langkah konkret berikutnya untuk SDET."},
+    "rule_candidate": {
+      "type": "object",
+      "description": "Opsional. Draft regex Go (RE2) untuk error ini; tidak dipakai sampai terbukti dan lolos backtest.",
+      "properties": {
+        "pattern":   {"type": "string", "description": "Regex Go (RE2) terhadap pesan error, bukan nama test/data."},
+        "summary":   {"type": "string", "description": "Penyebab umum yang benar untuk semua error yang cocok dengan pola."},
+        "next_step": {"type": "string", "description": "Satu langkah konkret yang berlaku umum."}
+      },
+      "required": ["pattern", "summary", "next_step"]
+    }
   },
   "required": ["summary", "evidence", "deviates", "category", "confidence", "next_step"]
 }`)
 
 type verdict struct {
-	Deviates   string   `json:"deviates"`
-	Category   string   `json:"category"`
-	Confidence string   `json:"confidence"`
-	Summary    string   `json:"summary"`
-	Evidence   []string `json:"evidence"`
-	NextStep   string   `json:"next_step"`
+	Deviates      string         `json:"deviates"`
+	Category      string         `json:"category"`
+	Confidence    string         `json:"confidence"`
+	Summary       string         `json:"summary"`
+	Evidence      []string       `json:"evidence"`
+	NextStep      string         `json:"next_step"`
+	RuleCandidate *ruleCandidate `json:"rule_candidate,omitempty"`
 }
 
 // BuildFacts menyusun bagian FAKTA untuk prompt. Semua isi sudah diredaksi saat ingest.

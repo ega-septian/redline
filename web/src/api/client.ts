@@ -2,6 +2,7 @@ import type {
   ApiGroup,
   ApiRule,
   ApiRun,
+  ApiRuleCandidate,
   GroupDetail,
   ImpactResult,
   Knowledge,
@@ -52,6 +53,10 @@ export const api = {
   impact: (kind: "file" | "endpoint", query: string) =>
     request<ImpactResult>(`/api/impact?${kind}=${encodeURIComponent(query)}`),
   rules: () => request<ApiRule[]>("/api/rules"),
+  ruleCandidates: (status?: string) =>
+    request<ApiRuleCandidate[]>(
+      `/api/rules/candidates${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
   scoreboard: () => request<Scoreboard>("/api/scoreboard?limit=50"),
   decideRule: (id: number, status: "active" | "rejected") =>
     request<ApiRule>(`/api/rules/${id}`, {

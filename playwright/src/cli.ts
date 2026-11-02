@@ -4,7 +4,10 @@
  *
  *   npx redline verify                 eksperimen untuk kegagalan run terakhir
  *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
- *   npx redline learn                  AI mengusulkan aturan dari kasus yang sudah terbukti
+ *   npx redline learn                  promosikan candidate yang terbukti, lalu AI mengusulkan aturan baru
+ *   npx redline candidates             daftar rule candidate (draft/proposed/rejected)
+ *   npx redline analyze --run <id>     analisis failure pada run yang sudah ada (butuh AI di server)
+ *   npx redline analyze --run <id> --rules  analisis lokal tanpa AI (rule + needs_ai)
  *   npx redline rules                  daftar aturan
  *   npx redline approve <id>           aktifkan aturan (reject <id> untuk menolak)
  *   npx redline score                  rapor: seberapa sering tebakan aturan dan AI terbukti benar
@@ -72,6 +75,23 @@ type Rule = {
   hits: number;
   also_matches: number;
   learned_from: string[];
+};
+type Candidate = {
+  id: number;
+  fingerprint: string;
+  test: string;
+  pattern: string;
+  category: string;
+  summary: string;
+  status: string;
+  support: number;
+  also_matches: number;
+  backtest_reason?: string;
+};
+type Promotion = {
+  candidates: number;
+  promoted: Rule[];
+  rejected: { id: number; pattern: string; reason: string }[];
 };
 
 const env = (name: string, fallback: number) => Number(process.env[name] || fallback);
@@ -553,6 +573,22 @@ function indent(s: string, pad: string): string {
 // ---------- aturan ----------
 
 async function learn() {
+  console.log("Memproses rule candidate yang sudah punya bukti…\n");
+  let promotion: Promotion | undefined;
+  try {
+    promotion = await api<Promotion>("POST", "/api/rules/candidates/promote");
+  } catch (e) {
+    console.log(`(candidate dilewati: ${e instanceof Error ? e.message : e})\n`);
+  }
+  if (promotion) {
+    console.log(
+      `${promotion.candidates} candidate draft, ${promotion.promoted.length} dipromosikan, ` +
+        `${promotion.rejected.length} ditolak.\n`,
+    );
+    for (const r of promotion.promoted) printRule(r);
+    for (const r of promotion.rejected) console.log(`  ✗ candidate #${r.id} /${r.pattern}/\n      ${r.reason}\n`);
+  }
+
   console.log("AI mempelajari kasus yang sudah terbukti (label manual + eksperimen yang lulus)…\n");
   const res = await api<{
     cases: number;
@@ -572,6 +608,81 @@ async function learn() {
   if (res.proposed.length > 0)
     console.log(`Review usulan di atas, lalu: npx redline approve <id>  (atau reject <id>)`);
   if (res.cost_usd) console.log(`Biaya AI: $${res.cost_usd.toFixed(5)}`);
+}
+
+async function candidates() {
+  const list = await api<Candidate[]>("GET", "/api/rules/candidates");
+  if (list.length === 0) {
+    console.log("Belum ada rule candidate. Jalankan dengan REDLINE_AI=1, lalu beri label/eksperimen.");
+    return;
+  }
+  for (const c of list) {
+    const mark = { draft: "…", promoted: "✓", rejected: "✗", expired: "·" }[c.status] ?? " ";
+    console.log(`  ${mark} #${c.id} [${c.status}] /${c.pattern}/ → ${c.category}`);
+    console.log(`      ${c.summary}`);
+    console.log(`      ${c.test || c.fingerprint}`);
+    console.log(`      support ${c.support}, also matches ${c.also_matches}`);
+    if (c.backtest_reason) console.log(`      ${c.backtest_reason}`);
+    console.log();
+  }
+}
+
+async function analyzeRun(args: string[]) {
+  const at = args.indexOf("--run");
+  const runID = at >= 0 ? args[at + 1] : "";
+  const rulesOnly = args.includes("--rules");
+  if (!runID || !/^\d+$/.test(runID)) {
+    throw new Error("tulis run id, misalnya: npx redline analyze --run 112");
+  }
+  const run = await api<{
+    run: { id: number };
+    tests: { test: string; test_case_id?: string; status: string; fingerprint?: string }[];
+  }>("GET", `/api/runs/${runID}`);
+  const seen = new Set<string>();
+  const failed: typeof run.tests = [];
+  for (const t of run.tests) {
+    if (t.status === "failed" && t.fingerprint && !seen.has(t.fingerprint)) {
+      seen.add(t.fingerprint);
+      failed.push(t);
+    }
+  }
+  if (failed.length === 0) {
+    console.log(`Run #${runID} tidak punya failure ber-fingerprint.`);
+    return;
+  }
+  console.log(`Menganalisis ${failed.length} kegagalan di run #${runID}…\n`);
+  let needsAI = 0;
+  for (const test of failed) {
+    const fp = test.fingerprint as string;
+    try {
+      const res = await api<{
+        analysis?: { source: string; category: string; summary: string; next_step: string };
+        error?: string;
+      }>("POST", `/api/groups/${encodeURIComponent(fp)}/analyze${rulesOnly ? "?ai=0" : ""}`);
+      if (!res.analysis) {
+        console.log(`  ✗ ${test.test}\n      ${res.error ?? "tidak ada hasil"}\n`);
+        needsAI++;
+        continue;
+      }
+      if (res.analysis.source === "none") needsAI++;
+      console.log(
+        `  ${res.analysis.source === "none" ? "…" : "✓"} ${test.test}\n` +
+          `      ${res.analysis.source} · ${res.analysis.category} · ${res.analysis.summary}\n`,
+      );
+      if (res.analysis.source === "none" && res.analysis.next_step)
+        console.log(`      ${res.analysis.next_step}\n`);
+    } catch (e) {
+      console.log(`  ✗ ${test.test}\n      ${e instanceof Error ? e.message : e}\n`);
+      needsAI++;
+    }
+  }
+  if (needsAI > 0) {
+    console.log(
+      `${needsAI} kegagalan masih butuh AI. Isi ANTHROPIC_API_KEY di server, lalu jalankan ulang perintah ini.`,
+    );
+  } else {
+    console.log("Semua kegagalan sudah punya analisis. Beri label/eksperimen, lalu: npx redline learn");
+  }
 }
 
 function printRule(r: Rule) {
@@ -734,8 +845,12 @@ async function main() {
   switch (cmd) {
     case "verify":
       return verify(args);
+    case "analyze":
+      return analyzeRun(args);
     case "learn":
       return learn();
+    case "candidates":
+      return candidates();
     case "rules":
       return rules();
     case "score":

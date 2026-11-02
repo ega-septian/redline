@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,9 @@ type Store interface {
 	ActiveRules(ctx context.Context) ([]store.LearnedRule, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
 	SaveRule(ctx context.Context, r store.LearnedRule) (int64, error)
+	SaveRuleCandidate(ctx context.Context, c store.RuleCandidate) (int64, error)
+	ListRuleCandidates(ctx context.Context, fingerprint, status string) ([]store.RuleCandidate, error)
+	MarkRuleCandidate(ctx context.Context, id int64, status, reason string, ruleID int64, hits, also int) error
 	ConfirmedCases(ctx context.Context, limit int) ([]store.Case, error)
 	RecentGroupErrors(ctx context.Context, limit int) ([]store.GroupError, error)
 	SavePrediction(ctx context.Context, a store.Analysis) error
@@ -81,6 +85,73 @@ func (a *Analyzer) Analyze(ctx context.Context, fingerprint string, force bool) 
 		res.Similar = facts.Similar // supaya pengguna melihat referensi yang sama dengan yang dilihat AI
 	}
 	return res, cached, err
+}
+
+// AnalyzeLocal menjalankan bagian yang tidak butuh AI: label manual, bukti eksperimen, lalu aturan.
+// Kalau tidak ada yang cocok, hasilnya source "none" dengan next step untuk menjalankan AI.
+// Dipakai reporter tanpa REDLINE_AI=1 supaya rule tetap bekerja dan failure yang belum tertangani terlihat.
+func (a *Analyzer) AnalyzeLocal(ctx context.Context, fingerprint string, force bool) (*store.Analysis, error) {
+	facts, err := a.facts(ctx, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	if label := facts.Group.HumanLabel; label != "" {
+		summary := facts.Group.HumanNote
+		if summary == "" {
+			summary = "Dilabeli manual."
+		}
+		return &store.Analysis{Fingerprint: fingerprint, PromptVersion: PromptVersion, Source: "human",
+			Category: label, Confidence: "high", Summary: summary, Evidence: []string{}}, nil
+	}
+	if !force {
+		if proof, err := a.Store.LatestProof(ctx, fingerprint); err == nil {
+			res := fromProof(proof)
+			res.Fingerprint = fingerprint
+			res.PromptVersion = PromptVersion
+			return res, nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	learned, err := a.Store.ActiveRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res := ApplyRules(facts, learned...)
+	if res == nil {
+		// Analisis AI yang sudah ada tetap dipakai saat run tanpa AI; jangan ditimpa needs_ai.
+		if hit, err := a.Store.GetAnalysis(ctx, fingerprint, PromptVersion); err == nil && hit.Source == "ai" {
+			return &hit, nil
+		}
+		res = needsAIAnalysis(fingerprint)
+	} else {
+		res.Fingerprint = fingerprint
+		res.PromptVersion = PromptVersion
+	}
+	res.CreatedAt = time.Now()
+	if err := a.saveLocal(ctx, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func needsAIAnalysis(fingerprint string) *store.Analysis {
+	return &store.Analysis{
+		Fingerprint: fingerprint, PromptVersion: PromptVersion, Source: "none",
+		Category: "unknown", Confidence: "none",
+		Summary:  "Belum ada rule yang cocok dan AI belum menganalisis kegagalan ini.",
+		Evidence: []string{},
+		NextStep: "Jalankan REDLINE_AI=1 npx playwright test, atau npx redline analyze --run <id> setelah ANTHROPIC_API_KEY diisi.",
+	}
+}
+
+func (a *Analyzer) saveLocal(ctx context.Context, res *store.Analysis) error {
+	if err := a.Store.SaveAnalysis(ctx, *res); err != nil {
+		return err
+	}
+	// Tebakan rule/eksperimen tetap masuk rapor; source none/human diabaikan oleh SavePrediction.
+	_ = a.Store.SavePrediction(ctx, *res)
+	return nil
 }
 
 func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.Facts, force bool) (res *store.Analysis, cached bool, err error) {
@@ -156,6 +227,12 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	// Rapor: tebakan dicatat supaya nanti bisa dibandingkan dengan bukti. Gagal mencatat tidak menggagalkan analisis.
 	if err := a.Store.SavePrediction(ctx, *res); err != nil {
 		a.logger().Warn("gagal mencatat tebakan", "fingerprint", fingerprint, "err", err)
+	}
+	// Candidate hanya draft; tidak dipakai runtime sampai terbukti dan lolos backtest.
+	if res.Source == "ai" && res.RuleCandidate != nil {
+		if _, err := a.Store.SaveRuleCandidate(ctx, *res.RuleCandidate); err != nil {
+			a.logger().Warn("gagal menyimpan rule candidate", "fingerprint", fingerprint, "err", err)
+		}
 	}
 	return res, false, nil
 }
@@ -235,17 +312,48 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 		model = a.Model
 	}
 	return &store.Analysis{
-		Source:       "ai",
-		Model:        model,
-		Category:     v.Category,
-		Confidence:   v.Confidence,
-		Summary:      strings.TrimSpace(v.Summary),
-		Evidence:     evidence,
-		NextStep:     strings.TrimSpace(v.NextStep),
-		InputTokens:  resp.Usage.InputTokens,
-		OutputTokens: resp.Usage.OutputTokens,
-		CostUSD:      a.Pricing.Cost(resp.Usage),
+		Source:        "ai",
+		Model:         model,
+		Category:      v.Category,
+		Confidence:    v.Confidence,
+		Summary:       strings.TrimSpace(v.Summary),
+		Evidence:      evidence,
+		NextStep:      strings.TrimSpace(v.NextStep),
+		RuleCandidate: candidateFromVerdict(v, f, model),
+		InputTokens:   resp.Usage.InputTokens,
+		OutputTokens:  resp.Usage.OutputTokens,
+		CostUSD:       a.Pricing.Cost(resp.Usage),
 	}, nil
+}
+
+// candidateFromVerdict hanya menyimpan usulan yang bentuknya aman. Kualitas pola tetap diuji
+// oleh backtest saat penyebabnya terbukti; candidate sendiri tidak pernah dipakai runtime.
+func candidateFromVerdict(v verdict, f *store.Facts, model string) *store.RuleCandidate {
+	c := v.RuleCandidate
+	if c == nil || v.Category == "unknown" || strings.TrimSpace(c.Pattern) == "" {
+		return nil
+	}
+	re, err := regexp.Compile(c.Pattern)
+	if err != nil || re.MatchString("") {
+		return nil
+	}
+	summary := strings.TrimSpace(c.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(v.Summary)
+	}
+	next := strings.TrimSpace(c.NextStep)
+	if next == "" {
+		next = strings.TrimSpace(v.NextStep)
+	}
+	test := f.Group.TestKey
+	if test == "" {
+		test = strings.Join([]string{f.Group.Project, f.Group.File, f.Group.Title}, " › ")
+	}
+	return &store.RuleCandidate{
+		Fingerprint: f.Group.Fingerprint, Test: test, Pattern: c.Pattern, Category: v.Category,
+		Summary: summary, NextStep: next, Status: "draft", Source: "ai", Model: model,
+		PromptVersion: PromptVersion, Confidence: v.Confidence,
+	}
 }
 
 // fromProof mengubah eksperimen yang lulus menjadi kesimpulan.

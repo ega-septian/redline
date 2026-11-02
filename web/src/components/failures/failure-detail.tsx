@@ -44,7 +44,7 @@ export function FailureDetail({
             {failure.source === "ai" && `AI · ${failure.model ?? "model"}`}
             {failure.source === "experiment" && "PROVEN · EXPERIMENT"}
             {failure.source === "human" && "HUMAN"}
-            {failure.source === "none" && "UNANALYZED"}
+            {failure.source === "none" && "NEEDS AI"}
           </Badge>
           <span className="ml-auto font-mono text-[11px] text-faint">
             {failure.fingerprint.slice(0, 8)}…

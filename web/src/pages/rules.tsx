@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { ApiRule } from "@/api/types";
+import type { ApiRule, ApiRuleCandidate } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -39,7 +39,12 @@ export function RulesPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const rulesQuery = useQuery({ queryKey: ["rules"], queryFn: api.rules });
+  const candidatesQuery = useQuery({
+    queryKey: ["rule-candidates"],
+    queryFn: () => api.ruleCandidates(),
+  });
   const rules = rulesQuery.data ?? [];
+  const candidates = candidatesQuery.data ?? [];
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -84,6 +89,33 @@ export function RulesPage() {
         <Kpi label="Active" value={String(counts.active)} hint="matched by the rules engine" tone="ok" />
         <Kpi label="Rule hits" value={String(counts.hits)} hint="since they were approved" tone="brand" />
       </section>
+
+      {candidates.length > 0 && (
+        <section className="rounded-[10px] border border-line bg-surface p-3">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h2 className="text-[12.5px] font-semibold">Rule candidates</h2>
+            <span className="text-[11px] text-faint">
+              {candidates.filter((c) => c.status === "draft").length} draft ·{" "}
+              {candidates.filter((c) => c.status === "promoted").length} promoted ·{" "}
+              {candidates.filter((c) => c.status === "rejected").length} rejected
+            </span>
+            <span className="ml-auto text-[11px] text-faint">
+              Candidates become rules only after a label/experiment and backtest.
+            </span>
+          </div>
+          <div className="mt-2.5 grid gap-2 lg:grid-cols-2">
+            {candidates.slice(0, 6).map((candidate) => (
+              <CandidateCard key={candidate.id} candidate={candidate} />
+            ))}
+          </div>
+          {candidates.length > 6 && (
+            <p className="mt-2 text-[11px] text-faint">
+              Showing 6 of {candidates.length}. Use{" "}
+              <span className="font-mono">npx redline candidates</span> for the full list.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line bg-surface px-2.5 py-2">
         {statuses.map((item) => (
@@ -188,6 +220,43 @@ function RuleCard({ rule }: { rule: ApiRule }) {
             </Button>
           )}
         </span>
+      </div>
+    </Card>
+  );
+}
+
+function CandidateCard({ candidate }: { candidate: ApiRuleCandidate }) {
+  const category = candidate.category in categoryLabel ? (candidate.category as Category) : "unclear";
+  const tone =
+    candidate.status === "promoted"
+      ? "flaky"
+      : candidate.status === "rejected"
+        ? "neutral"
+        : "env";
+  return (
+    <Card className="p-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={tone}>{candidate.status.toUpperCase()}</Badge>
+        <Badge tone={categoryTone[category]}>{categoryLabel[category]}</Badge>
+        <span className="font-mono text-[10.5px] text-faint">#{candidate.id}</span>
+        <span className="ml-auto text-[10.5px] text-faint">{date(candidate.created_at)}</span>
+      </div>
+      <code className="mt-2 block overflow-x-auto rounded border border-line-soft bg-canvas px-2 py-1 font-mono text-[10.5px] text-[#adbac7]">
+        {candidate.pattern}
+      </code>
+      <div className="mt-1.5 truncate font-mono text-[10.5px] text-faint">
+        {candidate.test || candidate.fingerprint}
+      </div>
+      <p className="mt-1 text-[11.5px] text-[#cdd9e5]">{candidate.summary}</p>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-faint">
+        <span>support {candidate.support}</span>
+        <span>also matches {candidate.also_matches}</span>
+        {candidate.source && <span>from {candidate.source}</span>}
+        {candidate.promoted_rule_id && (
+          <span className="text-ok">promoted to rule #{candidate.promoted_rule_id}</span>
+        )}
+        {candidate.status === "draft" && <span>waiting for label/experiment</span>}
+        {candidate.backtest_reason && <span className="text-warn">{candidate.backtest_reason}</span>}
       </div>
     </Card>
   );

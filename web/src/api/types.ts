@@ -153,6 +153,28 @@ export type ApiRule = {
   decided_at?: string | null;
 };
 
+export type ApiRuleCandidate = {
+  id: number;
+  fingerprint: string;
+  test: string;
+  pattern: string;
+  category: string;
+  summary: string;
+  next_step: string;
+  status: string;
+  source: string;
+  model?: string;
+  prompt_version?: string;
+  confidence?: string;
+  support: number;
+  also_matches: number;
+  backtest_reason?: string;
+  promoted_rule_id?: number | null;
+  created_at: string;
+  proven_at?: string | null;
+  decided_at?: string | null;
+};
+
 export type Score = {
   source: string;
   graded: number;
