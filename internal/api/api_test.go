@@ -79,6 +79,9 @@ func (f *fakeStore) ListExperiments(context.Context, string) ([]store.Experiment
 func (f *fakeStore) ListRules(context.Context, string) ([]store.LearnedRule, error) {
 	return []store.LearnedRule{}, nil
 }
+func (f *fakeStore) ListRuleCandidates(context.Context, string, string) ([]store.RuleCandidate, error) {
+	return []store.RuleCandidate{}, nil
+}
 func (f *fakeStore) DecideRule(_ context.Context, id int64, status, by string) (store.LearnedRule, error) {
 	return store.LearnedRule{ID: id, Status: status, DecidedBy: by}, nil
 }
@@ -114,6 +117,17 @@ func (a *fakeAnalyzer) Analyze(_ context.Context, fp string, force bool) (*store
 		return nil, false, a.err
 	}
 	return &store.Analysis{Fingerprint: fp, Source: "ai", Category: "backend_bug"}, !force, nil
+}
+
+func (a *fakeAnalyzer) AnalyzeLocal(_ context.Context, fp string, _ bool) (*store.Analysis, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+	return &store.Analysis{Fingerprint: fp, Source: "none", Category: "unknown"}, nil
+}
+
+func (a *fakeAnalyzer) PromoteCandidates(context.Context, string) (*analysis.PromotionResult, error) {
+	return &analysis.PromotionResult{Promoted: []store.LearnedRule{}, Rejected: []analysis.RejectedCandidate{}}, nil
 }
 
 func (a *fakeAnalyzer) ProposeFix(context.Context, string, []analysis.SourceFile, []analysis.Attempt) (*analysis.Fix, error) {
@@ -494,6 +508,33 @@ func TestGetRun(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/runs/abc", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid id = %d, want 400", rec.Code)
+	}
+}
+
+func TestAnalyzeLocal(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+
+	rec := do(h, http.MethodPost, "/api/groups/abc/analyze?ai=0", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"needs_ai": true`) || !strings.Contains(rec.Body.String(), `"source": "none"`) {
+		t.Errorf("analisis lokal tanpa rule harus needs_ai: %s", rec.Body)
+	}
+}
+
+func TestRuleCandidates(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+
+	if rec := do(h, http.MethodGet, "/api/rules/candidates", nil); rec.Code != http.StatusOK {
+		t.Fatalf("list candidate = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/rules/candidates?status=bad", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("status candidate tidak valid = %d, want 400", rec.Code)
+	}
+	rec := do(h, http.MethodPost, "/api/rules/candidates/promote", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"candidates"`) {
+		t.Errorf("promote candidate = %d: %s", rec.Code, rec.Body)
 	}
 }
 

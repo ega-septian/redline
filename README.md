@@ -205,7 +205,10 @@ From your Playwright project:
 | `npx redline verify`                  | Prove the cause of the last run's failures           |
 | `npx redline impact schemas/brand.ts` | Tests affected by a file (or `impact GET /brands/1`) |
 | `npx redline score`                   | How often Redline's guesses turned out right         |
-| `npx redline learn`                   | Turn proven cases into rules; then `approve <id>`    |
+| `npx redline learn`                   | Promote proven candidates and turn them into proposed rules |
+| `npx redline candidates`              | List rule candidates (draft/promoted/rejected)        |
+| `npx redline analyze --run 112`       | Analyze an existing run without rerunning tests        |
+| `npx redline analyze --run 112 --rules` | Analyze with rules only (no AI, marks NEEDS AI)       |
 
 | Client env variable   | Effect                                                  |
 | --------------------- | ------------------------------------------------------- |
@@ -227,6 +230,11 @@ Redline tries the cheapest, most reliable source first:
    → test bug; response breaks the API contract → backend bug; plus rules you approved.
 4. **Claude**, with the redacted error, test code, response shapes, API contract and what changed.
    Every piece of evidence must be quoted from those facts, or the confidence is lowered.
+
+When Claude answers, it may also propose a **rule candidate**. A candidate is a draft: it is never used
+at runtime. Once the failure is labelled or proven by an experiment, the candidate is backtested and
+becomes a **proposed** rule; a human still approves it. Without AI, the deterministic rules run first
+and a failure with no matching rule is marked **NEEDS AI** instead of being guessed.
 
 The strongest signal is **what changed since the test last passed**:
 
@@ -332,6 +340,7 @@ Voyage AI.
 | `GET /api/groups/{id}/knowledge`                                   | Graph facts behind a decision                                  |
 | `POST /api/groups/{id}/fix`, `.../experiments`                     | Used by `verify`                                               |
 | `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules                                                  |
+| `GET /api/rules/candidates`, `POST /api/rules/candidates/promote` | AI rule candidates, promoted only after proof                 |
 | `GET /api/scoreboard`                                              | How often guesses matched the proof                            |
 | `GET /api/impact?file=...` or `?endpoint=...`                      | Tests affected by a file or endpoint                           |
 | `GET /healthz`                                                     | Liveness check                                                 |

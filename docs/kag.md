@@ -91,7 +91,7 @@ confidence, and K02 flips between correct and unclear.
    does not check the field the API lost. Graph facts must therefore never override a changed
    response; the existing response rules decide K06.
 3. Analysis (done): `Knowledge` is part of the facts, Claude gets a "graph knowledge" section
-   (prompt v9), and three graph rules run after the response and contract rules, so they never
+   (prompt v10), and three graph rules run after the response and contract rules, so they never
    override a changed response:
    - an endpoint fails for tests in other specs that do not use any changed file, and passes for
      none of them → backend_bug;

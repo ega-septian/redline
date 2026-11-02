@@ -57,7 +57,7 @@ type Incident = {
   fingerprints: string[];
 };
 type Analysis = {
-  source: "rule" | "ai" | "human";
+  source: "rule" | "ai" | "human" | "experiment" | "none";
   category: string;
   confidence: string;
   summary: string;
@@ -276,7 +276,7 @@ export default class RedlineReporter implements Reporter {
     ];
     const incidents = toIncidents(rows, summary.incidents ?? []);
     const ai = process.env.REDLINE_AI === "1";
-    const cost = ai ? await analyze(incidents, baseURL) : 0;
+    const cost = await analyze(incidents, baseURL, ai);
     this.enrichAllure(incidents);
     const resolved = summary.resolved.map((g) => ({ id: idOf(g), test: g.test }));
     writeLastRun(
@@ -306,8 +306,17 @@ export default class RedlineReporter implements Reporter {
         when,
       ),
     );
-    if (!ai && rows.length > 0)
-      log("jalankan dengan REDLINE_AI=1 untuk analisis penyebab kegagalan.");
+    if (!ai && rows.length > 0) {
+      const needs = incidents.filter((v) => v.analysis?.source === "none").length;
+      if (needs > 0) {
+        log(
+          `${needs} penyebab belum punya rule. Jalankan REDLINE_AI=1 npx playwright test, ` +
+            `atau analisis run ini dengan: npx redline analyze --run ${summary.run_id}`,
+        );
+      } else {
+        log("semua penyebab sudah ditangani rule; tidak perlu AI untuk run ini.");
+      }
+    }
     if (rows.length > 0) {
       const score = await scoreLine(baseURL);
       if (score) log(score);
@@ -488,6 +497,7 @@ const sourceLabel: Record<string, string> = {
   ai: "AI",
   human: "label manual",
   experiment: "eksperimen (terbukti)",
+  none: "belum dianalisis",
 };
 const statusIcon: Record<Status, string> = {
   BARU: "🆕 Baru",
@@ -532,15 +542,20 @@ function incidentName(v: IncidentView): string {
 }
 
 // Satu analisis per insiden, lewat kelompok representative. Regressed dianalisis ulang (force).
-async function analyze(incidents: IncidentView[], baseURL: string): Promise<number> {
-  const max = Number(process.env.REDLINE_AI_MAX || 10);
+async function analyze(incidents: IncidentView[], baseURL: string, ai: boolean): Promise<number> {
+  // Tanpa AI, aturan tetap dijalankan untuk semua insiden. Dengan AI, REDLINE_AI_MAX membatasi biaya.
+  const max = ai ? Number(process.env.REDLINE_AI_MAX || 10) : incidents.length;
   let cost = 0;
   for (const v of incidents.slice(0, max)) {
     const force = v.representative.status === "REGRESSED";
+    const params = new URLSearchParams();
+    if (force) params.set("force", "1");
+    if (!ai) params.set("ai", "0");
+    const query = params.toString();
     let res: Response;
     try {
       res = await fetch(
-        `${baseURL}/api/groups/${v.representative.group.fingerprint}/analyze${force ? "?force=1" : ""}`,
+        `${baseURL}/api/groups/${v.representative.group.fingerprint}/analyze${query ? `?${query}` : ""}`,
         {
           method: "POST",
           headers: authHeaders(),
@@ -551,17 +566,21 @@ async function analyze(incidents: IncidentView[], baseURL: string): Promise<numb
       v.note = "gagal menghubungi server";
       continue;
     }
-    const body = (await res.json()) as { analysis?: Analysis; cached?: boolean; error?: string };
+    const body = (await res.json()) as {
+      analysis?: Analysis;
+      cached?: boolean;
+      needs_ai?: boolean;
+      error?: string;
+    };
     if (!res.ok || !body.analysis) {
-      // 503: AI belum aktif dan tidak ada aturan yang cocok.
       v.note = body.error ?? `analisis gagal (${res.status})`;
       continue;
     }
     v.analysis = body.analysis;
     v.cached = body.cached;
-    if (!body.cached) cost += body.analysis.cost_usd;
+    if (!body.cached && body.analysis.source === "ai") cost += body.analysis.cost_usd;
   }
-  for (const v of incidents.slice(max)) v.note = "dilewati, atur REDLINE_AI_MAX";
+  for (const v of incidents.slice(max)) v.note = ai ? "dilewati, atur REDLINE_AI_MAX" : "";
   return cost;
 }
 

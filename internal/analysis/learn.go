@@ -260,6 +260,87 @@ func Backtest(c ruleCandidate, cases []store.Case, all []store.GroupError) (stor
 	}, ""
 }
 
+// BacktestCandidate menguji candidate AI yang sudah punya kebenaran (label/eksperimen).
+// Candidate belum pernah dipakai runtime; hasilnya baru menjadi Rule proposed.
+func BacktestCandidate(c store.RuleCandidate, cases []store.Case, all []store.GroupError) (store.LearnedRule, string) {
+	return Backtest(ruleCandidate{
+		Pattern: c.Pattern, Category: c.Category, Summary: c.Summary, NextStep: c.NextStep,
+		CaseIDs: []string{c.Fingerprint},
+	}, cases, all)
+}
+
+// RejectedCandidate adalah candidate yang gagal saat backtest/promosi.
+type RejectedCandidate struct {
+	ID      int64  `json:"id"`
+	Pattern string `json:"pattern"`
+	Reason  string `json:"reason"`
+}
+
+// PromotionResult adalah hasil satu putaran promosi candidate.
+type PromotionResult struct {
+	Candidates int                 `json:"candidates"`
+	Promoted   []store.LearnedRule `json:"promoted"`
+	Rejected   []RejectedCandidate `json:"rejected"`
+}
+
+// PromoteCandidates memproses candidate draft yang penyebabnya sudah terbukti. Candidate yang lolos
+// backtest menjadi Rule proposed (belum aktif); yang gagal disimpan sebagai rejected beserta alasannya.
+func (a *Analyzer) PromoteCandidates(ctx context.Context, fingerprint string) (*PromotionResult, error) {
+	candidates, err := a.Store.ListRuleCandidates(ctx, fingerprint, "draft")
+	if err != nil {
+		return nil, err
+	}
+	res := &PromotionResult{Candidates: len(candidates), Promoted: []store.LearnedRule{}, Rejected: []RejectedCandidate{}}
+	if len(candidates) == 0 {
+		return res, nil
+	}
+	cases, err := a.Store.ConfirmedCases(ctx, 1000)
+	if err != nil {
+		return nil, err
+	}
+	confirmed := map[string]bool{}
+	for _, k := range cases {
+		confirmed[k.GroupID] = true
+	}
+	all, err := a.Store.RecentGroupErrors(ctx, 5000)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		// Candidate tanpa label/eksperimen tetap draft; jangan ditolak hanya karena belum terbukti.
+		if !confirmed[c.Fingerprint] {
+			continue
+		}
+		rule, reason := BacktestCandidate(c, cases, all)
+		if reason != "" {
+			if err := a.Store.MarkRuleCandidate(ctx, c.ID, "rejected", reason, 0, 0, 0); err != nil {
+				return nil, err
+			}
+			res.Rejected = append(res.Rejected, RejectedCandidate{ID: c.ID, Pattern: c.Pattern, Reason: reason})
+			continue
+		}
+		id, err := a.Store.SaveRule(ctx, rule)
+		if errors.Is(err, store.ErrDuplicate) {
+			reason = "aturan yang sama sudah ada"
+			if err := a.Store.MarkRuleCandidate(ctx, c.ID, "rejected", reason, 0, 0, 0); err != nil {
+				return nil, err
+			}
+			res.Rejected = append(res.Rejected, RejectedCandidate{ID: c.ID, Pattern: c.Pattern, Reason: reason})
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := a.Store.MarkRuleCandidate(ctx, c.ID, "promoted", "", id, rule.Hits, rule.AlsoMatches); err != nil {
+			return nil, err
+		}
+		rule.ID, rule.Status = id, "proposed"
+		res.Promoted = append(res.Promoted, rule)
+		a.logger().Info("candidate dipromosikan", "candidate", c.ID, "rule", id, "hits", rule.Hits)
+	}
+	return res, nil
+}
+
 // sameAsRejected: usulan yang mencocokkan kelompok yang persis sama dengan aturan yang sudah ditolak
 // (dengan kategori sama) dianggap usulan ulang, walaupun teks regex-nya sedikit berbeda.
 func sameAsRejected(rule store.LearnedRule, rejected []store.LearnedRule, all []store.GroupError) string {

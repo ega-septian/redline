@@ -88,7 +88,7 @@ func DecodeCalls(raw []byte) []report.HTTPCall {
 type Analysis struct {
 	Fingerprint   string        `json:"fingerprint"`
 	PromptVersion string        `json:"prompt_version"`
-	Source        string        `json:"source"` // rule, ai, human (label manual) atau experiment (bukti eksperimen); dua terakhir tidak disimpan di tabel ini
+	Source        string        `json:"source"` // rule, ai, human, experiment, atau none (belum ada rule/AI)
 	Model         string        `json:"model,omitempty"`
 	Category      string        `json:"category"`
 	Confidence    string        `json:"confidence"`
@@ -97,10 +97,12 @@ type Analysis struct {
 	NextStep      string        `json:"next_step"`
 	Patch         string        `json:"patch,omitempty"`   // diff yang terbukti membuat test lulus (source experiment)
 	Similar       []SimilarCase `json:"similar,omitempty"` // kasus terbukti yang mirip; dihitung ulang, tidak disimpan
-	InputTokens   int           `json:"input_tokens"`      // hanya untuk analisis baru; tidak disimpan
-	OutputTokens  int           `json:"output_tokens"`     // hanya untuk analisis baru; tidak disimpan
-	CostUSD       float64       `json:"cost_usd"`
-	CreatedAt     time.Time     `json:"created_at"`
+	// RuleCandidate hanya ada pada hasil AI baru; disimpan terpisah sebagai draft, bukan bagian Analysis.
+	RuleCandidate *RuleCandidate `json:"rule_candidate,omitempty"`
+	InputTokens   int            `json:"input_tokens"`  // hanya untuk analisis baru; tidak disimpan
+	OutputTokens  int            `json:"output_tokens"` // hanya untuk analisis baru; tidak disimpan
+	CostUSD       float64        `json:"cost_usd"`
+	CreatedAt     time.Time      `json:"created_at"`
 }
 
 // Experiment adalah satu percobaan menjalankan ulang test untuk membuktikan penyebab kegagalan.
@@ -464,6 +466,30 @@ type LearnedRule struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	DecidedBy   string     `json:"decided_by,omitempty"`
 	DecidedAt   *time.Time `json:"decided_at"`
+}
+
+// RuleCandidate adalah usulan AI untuk satu error. Draft tidak dipakai runtime; saat
+// penyebabnya terbukti, candidate di-backtest lalu dipromosikan menjadi Rule proposed.
+type RuleCandidate struct {
+	ID             int64      `json:"id"`
+	Fingerprint    string     `json:"fingerprint"`
+	Test           string     `json:"test"`
+	Pattern        string     `json:"pattern"`
+	Category       string     `json:"category"`
+	Summary        string     `json:"summary"`
+	NextStep       string     `json:"next_step"`
+	Status         string     `json:"status"` // draft / promoted / rejected / expired
+	Source         string     `json:"source"` // ai
+	Model          string     `json:"model,omitempty"`
+	PromptVersion  string     `json:"prompt_version,omitempty"`
+	Confidence     string     `json:"confidence,omitempty"`
+	Support        int        `json:"support"`
+	AlsoMatches    int        `json:"also_matches"`
+	BacktestReason string     `json:"backtest_reason,omitempty"`
+	PromotedRuleID *int64     `json:"promoted_rule_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ProvenAt       *time.Time `json:"proven_at,omitempty"`
+	DecidedAt      *time.Time `json:"decided_at,omitempty"`
 }
 
 // Case adalah kegagalan yang penyebabnya sudah terbukti: dilabeli manusia, atau lulus setelah patch.

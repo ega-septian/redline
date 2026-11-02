@@ -150,6 +150,49 @@ func TestAnalyze_MatrixRules(t *testing.T) {
 	}
 }
 
+func TestAnalyzeLocalNeedsAI(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	a := &Analyzer{Store: s}
+	res, err := a.AnalyzeLocal(ctx, fps["order dibayar"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "none" || res.Category != "unknown" || res.Confidence != "none" {
+		t.Fatalf("tanpa rule/AI harus needs_ai: %+v", res)
+	}
+	saved, err := s.GetAnalysis(ctx, fps["order dibayar"], PromptVersion)
+	if err != nil || saved.Source != "none" {
+		t.Fatalf("analisis needs_ai harus tersimpan: %+v %v", saved, err)
+	}
+}
+
+func TestAnalyze_Candidate(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fake := &fakeLLM{verdict: verdict{
+		Deviates: "api", Category: "backend_bug", Confidence: "high",
+		Summary: "Response berubah.", Evidence: []string{"Kode test berubah: tidak"},
+		NextStep: "Laporkan ke backend.",
+		RuleCandidate: &ruleCandidate{
+			Pattern: `Received: 500`, Summary: "Server membalas 5xx.",
+			NextStep: "Cek log backend.", CaseIDs: []string{fps["register user"]},
+		},
+	}}
+	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5"}
+	res, _, err := a.Analyze(ctx, fps["order dibayar"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RuleCandidate == nil || res.RuleCandidate.Pattern != `Received: 500` {
+		t.Fatalf("hasil AI harus membawa candidate: %+v", res.RuleCandidate)
+	}
+	list, err := s.ListRuleCandidates(ctx, fps["order dibayar"], "draft")
+	if err != nil || len(list) != 1 || list[0].Source != "ai" || list[0].Status != "draft" || list[0].Test == "" {
+		t.Fatalf("candidate draft tidak tersimpan: %+v %v", list, err)
+	}
+}
+
 func TestAnalyze_Flow(t *testing.T) {
 	s, fps := setup(t)
 	ctx := context.Background()
