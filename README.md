@@ -224,7 +224,9 @@ From your Playwright project:
 
 Redline tries the cheapest, most reliable source first:
 
-1. **A human label**, if someone already labelled the failure.
+1. **A human diagnosis**, confirmed with one click when the rule/AI result is right, or corrected with
+   “Change cause” when it is wrong. The confirmation is stored as the answer key for the scoreboard and
+   the rule-learning loop.
 2. **Proof** from an earlier `verify`.
 3. **Rules**, free and instant: server unreachable → environment; 5xx → backend bug; missing `await`
    → test bug; response breaks the API contract → backend bug; plus rules you approved.
