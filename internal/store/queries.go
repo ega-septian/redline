@@ -36,6 +36,23 @@ func (s *Store) GetRun(ctx context.Context, id int64) (Run, error) {
 	return toRun(node.(neo4j.Node).Props), nil
 }
 
+// PreviousRun mengembalikan run sebelumnya pada branch yang sama, atau run sebelumnya secara umum
+// kalau branch kosong. found=false kalau tidak ada run sebelumnya.
+func (s *Store) PreviousRun(ctx context.Context, id int64, branch string) (Run, bool, error) {
+	res, err := s.query(ctx, `
+		MATCH (r:Run)
+		WHERE r.id < $id AND ($branch = '' OR r.branch = $branch)
+		RETURN r ORDER BY r.id DESC LIMIT 1`, map[string]any{"id": id, "branch": branch})
+	if err != nil {
+		return Run{}, false, err
+	}
+	if len(res.Records) == 0 {
+		return Run{}, false, nil
+	}
+	node, _ := res.Records[0].Get("r")
+	return toRun(node.(neo4j.Node).Props), true, nil
+}
+
 // RunResults mengembalikan semua outcome run, beserta group dan analisis terakhirnya.
 func (s *Store) RunResults(ctx context.Context, runID int64) ([]RunResult, error) {
 	res, err := s.query(ctx, `

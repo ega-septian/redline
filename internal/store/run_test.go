@@ -9,6 +9,25 @@ import (
 	"redline/internal/store"
 )
 
+func TestPreviousRun(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	first := ingest(t, s, describeReport("Brands", tagged{"get", "TC-BRD-001", ""}), store.RunMeta{Branch: "main"})
+	second := ingest(t, s, describeReport("Brands", tagged{"get", "TC-BRD-001", ""}), store.RunMeta{Branch: "main"})
+	other := ingest(t, s, describeReport("Brands", tagged{"get", "TC-BRD-001", ""}), store.RunMeta{Branch: "other"})
+
+	prev, ok, err := s.PreviousRun(ctx, second.RunID, "main")
+	if err != nil || !ok || prev.ID != first.RunID {
+		t.Errorf("previous main = %+v ok=%v err=%v, want %d", prev, ok, err, first.RunID)
+	}
+	if _, ok, err := s.PreviousRun(ctx, other.RunID, "other"); err != nil || ok {
+		t.Errorf("branch lain belum punya previous: ok=%v err=%v", ok, err)
+	}
+	if prev, ok, err := s.PreviousRun(ctx, second.RunID, ""); err != nil || !ok || prev.ID != first.RunID {
+		t.Errorf("tanpa branch harus run sebelumnya: %+v ok=%v err=%v", prev, ok, err)
+	}
+}
+
 // TestRunDetail: metadata run, semua outcome (bukan hanya yang gagal), dan analisis kelompoknya.
 func TestRunDetail(t *testing.T) {
 	ctx := context.Background()

@@ -42,12 +42,24 @@ func (f *fakeStore) GetRun(_ context.Context, id int64) (store.Run, error) {
 	}
 	return store.Run{ID: 1, Total: 2, Failed: 1}, nil
 }
+func (f *fakeStore) PreviousRun(_ context.Context, id int64, _ string) (store.Run, bool, error) {
+	if id != 1 {
+		return store.Run{}, false, nil
+	}
+	return store.Run{ID: 0, Total: 2, Failed: 2}, true, nil
+}
 func (f *fakeStore) RunResults(_ context.Context, runID int64) ([]store.RunResult, error) {
-	if runID != 1 {
+	if runID != 0 && runID != 1 {
 		return []store.RunResult{}, nil
 	}
+	if runID == 0 {
+		return []store.RunResult{
+			{TestKey: "toolshop › api.spec.ts › register", TestCaseID: "TC-USR-001", Status: "failed", Fingerprint: "a"},
+			{TestKey: "toolshop › api.spec.ts › health", Status: "failed"},
+		}, nil
+	}
 	return []store.RunResult{
-		{TestKey: "toolshop › api.spec.ts › register", TestCaseID: "TC-USR-001", Status: "failed", DurationMs: 120},
+		{TestKey: "toolshop › api.spec.ts › register", TestCaseID: "TC-USR-001", Status: "failed", DurationMs: 120, Fingerprint: "a"},
 		{TestKey: "toolshop › api.spec.ts › health", Status: "passed", DurationMs: 10},
 	}, nil
 }
@@ -567,6 +579,24 @@ func TestGetRun(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/runs/abc", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("invalid id = %d, want 400", rec.Code)
+	}
+}
+
+func TestCompareRun(t *testing.T) {
+	h := newServer(&fakeStore{}, 0)
+
+	rec := do(h, http.MethodGet, "/api/runs/1/compare", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"previous":`, `"id": 0`, `"still_failing"`, `"fixed"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("compare response harus memuat %s: %s", want, body)
+		}
+	}
+	if rec := do(h, http.MethodGet, "/api/runs/2/compare", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown run = %d, want 404", rec.Code)
 	}
 }
 

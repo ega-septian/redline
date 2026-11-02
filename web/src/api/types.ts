@@ -137,6 +137,25 @@ export type RunDetail = {
   tests: ApiRunResult[];
 };
 
+export type RunChange = "new" | "fixed" | "still_failing" | "changed_cause" | "flaky" | "removed";
+
+export type ComparedTest = {
+  test: string;
+  test_case_id?: string;
+  status: string;
+  previous_status?: string;
+  fingerprint?: string;
+  previous_fingerprint?: string;
+  change: RunChange;
+};
+
+export type RunComparison = {
+  current: ApiRun;
+  previous: ApiRun | null;
+  summary: Record<string, number>;
+  tests: ComparedTest[];
+};
+
 export type ApiImpactedTest = {
   test: string;
   test_case_id?: string;

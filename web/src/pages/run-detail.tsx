@@ -4,7 +4,7 @@ import { ArrowLeft, Check, Copy, ExternalLink, Search, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { ApiRunResult } from "@/api/types";
+import type { ApiRunResult, ComparedTest, RunChange, RunComparison } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -66,6 +66,11 @@ export function RunDetailPage() {
   const runQuery = useQuery({
     queryKey: ["run", runId],
     queryFn: () => api.run(Number(runId)),
+    retry: false,
+  });
+  const comparisonQuery = useQuery({
+    queryKey: ["run-compare", runId],
+    queryFn: () => api.compareRun(Number(runId)),
     retry: false,
   });
 
@@ -185,6 +190,13 @@ export function RunDetailPage() {
         <Kpi label="Duration" value={duration(run.duration_ms)} hint="whole run" />
       </section>
 
+      <ComparisonPanel
+        comparison={comparisonQuery.data}
+        loading={comparisonQuery.isPending}
+        error={comparisonQuery.error}
+        onSelectTest={setSelected}
+      />
+
       {run.report_errors.length > 0 && (
         <div className="rounded-[10px] border border-danger/40 bg-danger/10 p-3 text-xs text-[#ff7b72]">
           <div className="font-semibold">Report errors ({run.report_errors.length})</div>
@@ -293,6 +305,152 @@ export function RunDetailPage() {
         from the runner, not served by Redline.
       </p>
     </>
+  );
+}
+
+function ComparisonPanel({
+  comparison,
+  loading,
+  error,
+  onSelectTest,
+}: {
+  comparison?: RunComparison;
+  loading: boolean;
+  error: unknown;
+  onSelectTest: (test: string) => void;
+}) {
+  if (loading) {
+    return (
+      <section className="rounded-[10px] border border-line bg-surface px-3.5 py-2.5 text-xs text-muted">
+        Comparing with the previous run…
+      </section>
+    );
+  }
+  if (error) {
+    return (
+      <section className="rounded-[10px] border border-line bg-surface px-3.5 py-2.5 text-xs text-muted">
+        Comparison unavailable: {error instanceof Error ? error.message : "request failed"}
+      </section>
+    );
+  }
+  if (!comparison) return null;
+  if (!comparison.previous) {
+    return (
+      <section className="rounded-[10px] border border-line bg-surface px-3.5 py-2.5 text-xs text-muted">
+        No previous run {comparison.current.branch ? `on ${comparison.current.branch}` : ""} to compare
+        with.
+      </section>
+    );
+  }
+
+  const changes: RunChange[] = [
+    "new",
+    "changed_cause",
+    "still_failing",
+    "fixed",
+    "flaky",
+    "removed",
+  ];
+  const count = (change: RunChange) => comparison.summary[change] ?? 0;
+
+  return (
+    <section className="overflow-hidden rounded-[10px] border border-line bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <h2 className="text-[12.5px] font-semibold">Compared to run #{comparison.previous.id}</h2>
+        <Link
+          to="/runs/$runId"
+          params={{ runId: String(comparison.previous.id) }}
+          className="text-[11px] text-brand hover:underline"
+        >
+          open previous
+        </Link>
+        <span className="text-[11px] text-faint">{when(comparison.previous.created_at)}</span>
+        <span className="ml-auto text-[11px] text-faint">
+          {comparison.tests.length} changed {comparison.tests.length === 1 ? "test" : "tests"}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5 px-3.5 py-2.5">
+        {changes.map((change) =>
+          count(change) > 0 ? (
+            <Badge key={change} tone={changeTone[change]}>
+              {changeLabel[change]} {count(change)}
+            </Badge>
+          ) : null,
+        )}
+        {comparison.tests.length === 0 && (
+          <span className="text-[11.5px] text-muted">
+            No changes from the previous run.
+          </span>
+        )}
+      </div>
+
+      {comparison.tests.length > 0 && (
+        <div className="max-h-72 overflow-auto border-t border-line-soft">
+          {comparison.tests.map((test) => (
+            <ComparisonRow key={`${test.change}-${test.test}`} test={test} onSelect={onSelectTest} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const changeTone = {
+  new: "backend",
+  changed_cause: "env",
+  still_failing: "neutral",
+  fixed: "flaky",
+  flaky: "test",
+  removed: "neutral",
+} as const;
+
+const changeLabel = {
+  new: "NEW",
+  changed_cause: "CHANGED CAUSE",
+  still_failing: "STILL FAILING",
+  fixed: "FIXED",
+  flaky: "FLAKY",
+  removed: "REMOVED",
+} as const;
+
+function ComparisonRow({
+  test,
+  onSelect,
+}: {
+  test: ComparedTest;
+  onSelect: (test: string) => void;
+}) {
+  const info = parts(test.test);
+  const selectable = test.change !== "removed";
+  return (
+    <div
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onClick={() => selectable && onSelect(test.test)}
+      onKeyDown={(event) => {
+        if (selectable && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onSelect(test.test);
+        }
+      }}
+      className={cn(
+        "grid grid-cols-1 gap-1.5 border-b border-line-soft px-3.5 py-2.5 text-xs last:border-b-0 lg:grid-cols-[112px_82px_minmax(0,1fr)_150px] lg:items-center lg:gap-3",
+        selectable && "cursor-pointer hover:bg-[#1b222b]",
+      )}
+    >
+      <Badge tone={changeTone[test.change]}>{changeLabel[test.change]}</Badge>
+      <span className="truncate font-mono text-[11px] text-muted">{test.test_case_id || "—"}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-[12.5px] text-ink">{info.title}</span>
+        <span className="block truncate font-mono text-[10.5px] text-faint">{info.file}</span>
+      </span>
+      <span className="font-mono text-[10.5px] text-faint">
+        {test.change === "removed"
+          ? `was ${test.previous_status ?? "failed"}`
+          : `now ${test.status} · was ${test.previous_status || "not seen"}`}
+      </span>
+    </div>
   );
 }
 
