@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil } from "lucide-react";
+import { Check, Pencil, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/api/client";
@@ -42,17 +42,27 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
     onSuccess: async () => {
       setSaved(true);
       setEditing(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["groups"] }),
-        queryClient.invalidateQueries({ queryKey: ["group", failure.fingerprint] }),
-        queryClient.invalidateQueries({ queryKey: ["knowledge", failure.fingerprint] }),
-        queryClient.invalidateQueries({ queryKey: ["scoreboard"] }),
-        queryClient.invalidateQueries({ queryKey: ["rules"] }),
-        queryClient.invalidateQueries({ queryKey: ["rule-candidates"] }),
-      ]);
+      await refresh();
     },
     onMutate: () => setSaved(false),
   });
+
+  const analyzeMutation = useMutation({
+    mutationFn: () => api.analyze(failure.fingerprint),
+    onSuccess: refresh,
+    onMutate: () => setSaved(false),
+  });
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["groups"] }),
+      queryClient.invalidateQueries({ queryKey: ["group", failure.fingerprint] }),
+      queryClient.invalidateQueries({ queryKey: ["knowledge", failure.fingerprint] }),
+      queryClient.invalidateQueries({ queryKey: ["scoreboard"] }),
+      queryClient.invalidateQueries({ queryKey: ["rules"] }),
+      queryClient.invalidateQueries({ queryKey: ["rule-candidates"] }),
+    ]);
+  }
 
   const hasDiagnosis = failure.source === "rule" || failure.source === "ai";
   const proven = failure.source === "experiment";
@@ -109,19 +119,36 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
                 {mutation.isPending ? "Saving…" : "Confirm diagnosis"}
               </Button>
             )}
-            {!confirmed && !needsAI && (
+            {confirmed || needsAI ? (
+              <>
+                {needsAI && (
+                  <Button
+                    variant="default"
+                    onClick={() => analyzeMutation.mutate()}
+                    disabled={analyzeMutation.isPending}
+                    title="Reads the stored failure; it does not rerun the test"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {analyzeMutation.isPending ? "Analyzing…" : "Analyze with AI"}
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setEditing(true)}>
+                  <Pencil className="h-3 w-3" />
+                  {confirmed ? "Edit diagnosis" : "Set cause manually"}
+                </Button>
+              </>
+            ) : (
               <Button variant="outline" onClick={() => setEditing(true)}>
                 <Pencil className="h-3 w-3" />
                 Change cause
               </Button>
             )}
-            {(confirmed || needsAI) && (
-              <Button variant="outline" onClick={() => setEditing(true)}>
-                <Pencil className="h-3 w-3" />
-                {confirmed ? "Edit diagnosis" : "Set cause manually"}
-              </Button>
-            )}
           </div>
+          {needsAI && (
+            <p className="mt-1.5 text-[10.5px] text-faint">
+              Uses the last stored failure. No test rerun; rerun only if you need fresh facts.
+            </p>
+          )}
         </div>
       )}
 
@@ -173,6 +200,18 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
       {saved && (
         <p className="mt-2 text-[11px] text-ok">
           Saved as {mutation.data?.by ?? "you"}. This is now the answer key for this failure.
+        </p>
+      )}
+      {analyzeMutation.isSuccess && (
+        <p className="mt-2 text-[11px] text-ok">
+          {analyzeMutation.data.cached ? "Used the cached AI analysis." : "AI analysis saved."}
+        </p>
+      )}
+      {analyzeMutation.isError && (
+        <p className="mt-2 text-[11px] text-danger">
+          {analyzeMutation.error instanceof Error
+            ? analyzeMutation.error.message
+            : "AI analysis failed"}
         </p>
       )}
       {mutation.isError && (

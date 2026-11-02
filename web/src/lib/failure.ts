@@ -21,11 +21,15 @@ export type Failure = {
   status: FailureStatus;
   title: string;
   test: string;
+  testCaseId: string;
   file: string;
   category: Category;
   confidence: Confidence;
   occurrences: number;
   lastSeen: string;
+  lastSeenAt: string;
+  lastSeenRun: number;
+  needsAI: boolean;
   source: Source;
   model?: string;
   summary: string;
@@ -48,6 +52,14 @@ export const categoryLabel: Record<Category, string> = {
   environment: "Environment",
   flaky: "Flaky",
   unclear: "Unclear",
+};
+
+export const sourceLabel: Record<Source, string> = {
+  rule: "RULE",
+  ai: "AI",
+  experiment: "PROVEN",
+  human: "CONFIRMED",
+  none: "NEEDS AI",
 };
 
 export const statusLabel: Record<FailureStatus, string> = {
@@ -154,11 +166,15 @@ export function toFailure(
     status: statusOf(group),
     title: titleOf(group),
     test: group.title,
+    testCaseId: group.test_case_id ?? "",
     file: group.file,
     category: categoryOf(group, detail),
     confidence: confidenceOf(group, detail),
     occurrences: group.occurrences,
     lastSeen: when(group.last_seen_at),
+    lastSeenAt: group.last_seen_at,
+    lastSeenRun: group.last_seen_run,
+    needsAI: !group.human_label && (!group.analysis_source || group.analysis_source === "none"),
     source: sourceOf(group, detail),
     model: analysis?.model,
     summary:

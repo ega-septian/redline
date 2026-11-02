@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, CircleHelp, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/api/client";
 import { FailureDetail } from "@/components/failures/failure-detail";
@@ -17,8 +17,15 @@ import {
 } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | FailureStatus;
+type StatusFilter = "all" | FailureStatus | "needs_ai";
 type CategoryFilter = "all" | Category;
+type SortMode = "recent" | "oldest" | "occurrences";
+
+const sorts: Array<{ id: SortMode; label: string }> = [
+  { id: "recent", label: "Recent first" },
+  { id: "oldest", label: "Oldest first" },
+  { id: "occurrences", label: "Most seen" },
+];
 
 const statuses: Array<{
   id: StatusFilter;
@@ -26,6 +33,7 @@ const statuses: Array<{
   hint: string;
   align: "start" | "center" | "end";
   mobileAlign?: "start" | "center" | "end";
+  wide?: boolean;
 }> = [
   {
     id: "all",
@@ -51,6 +59,13 @@ const statuses: Array<{
     label: "Regressed",
     hint: "A failure that was resolved, then came back in a later run.",
     align: "end",
+  },
+  {
+    id: "needs_ai",
+    label: "Needs AI",
+    hint: "No rule, AI or human diagnosis yet. Run AI or set the cause manually.",
+    align: "end",
+    wide: true,
   },
 ];
 
@@ -81,6 +96,7 @@ function StatusFilterPill({
     <div
       className={cn(
         "flex h-8 w-full items-center rounded-full border transition-colors sm:w-auto",
+        item.wide && "col-span-2 sm:col-span-1",
         active
           ? "border-brand/40 bg-brand/10 text-[#79c0ff]"
           : "border-line bg-[#0f141a] text-muted hover:border-[#3d444d] hover:bg-[#1b222b] hover:text-ink",
@@ -119,13 +135,24 @@ function StatusFilterPill({
 }
 
 export function FailuresPage() {
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [category, setCategory] = useState<CategoryFilter>("all");
-  const [query, setQuery] = useState("");
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const [status, setStatus] = useState<StatusFilter>(() => {
+    const value = params.get("status");
+    return value === "new" || value === "recurring" || value === "regressed" || value === "needs_ai"
+      ? value
+      : "all";
+  });
+  const [category, setCategory] = useState<CategoryFilter>(() => {
+    const value = params.get("category");
+    return categories.some(([id]) => id === value) ? (value as Category) : "all";
+  });
+  const [query, setQuery] = useState(() => params.get("q") ?? "");
+  const [sort, setSort] = useState<SortMode>(() => {
+    const value = params.get("sort");
+    return value === "oldest" || value === "occurrences" ? value : "recent";
+  });
   // Deep link from a run detail's "Failure history" button.
-  const [selected, setSelected] = useState(
-    () => new URLSearchParams(window.location.search).get("failure") ?? "",
-  );
+  const [selected, setSelected] = useState(() => params.get("failure") ?? "");
 
   const groupsQuery = useQuery({ queryKey: ["groups"], queryFn: api.groups });
   const groups = groupsQuery.data ?? [];
@@ -134,19 +161,65 @@ export function FailuresPage() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return base.filter((failure) => {
-      if (status !== "all" && failure.status !== status) return false;
+      if (status === "needs_ai") {
+        if (!failure.needsAI) return false;
+      } else if (status !== "all" && failure.status !== status) {
+        return false;
+      }
       if (category !== "all" && failure.category !== category) return false;
       if (!needle) return true;
-      return [failure.title, failure.test, failure.file, failure.endpoint, failure.fingerprint]
+      return [
+        failure.title,
+        failure.test,
+        failure.testCaseId,
+        failure.file,
+        failure.endpoint,
+        failure.fingerprint,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(needle);
     });
   }, [base, status, category, query]);
 
+  const sorted = useMemo(() => {
+    const copy = [...filtered];
+    switch (sort) {
+      case "oldest":
+        copy.sort((a, b) => Date.parse(a.lastSeenAt) - Date.parse(b.lastSeenAt));
+        break;
+      case "occurrences":
+        copy.sort((a, b) => b.occurrences - a.occurrences);
+        break;
+      default:
+        copy.sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
+    }
+    return copy;
+  }, [filtered, sort]);
+
   const activeFingerprint =
-    (filtered.some((failure) => failure.fingerprint === selected) ? selected : filtered[0]?.fingerprint) ??
-    "";
+    (sorted.some((failure) => failure.fingerprint === selected)
+      ? selected
+      : sorted[0]?.fingerprint) ?? "";
+
+  useEffect(() => {
+    if (selected !== activeFingerprint) setSelected(activeFingerprint);
+  }, [activeFingerprint, selected]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (status !== "all") next.set("status", status);
+    if (category !== "all") next.set("category", category);
+    if (query) next.set("q", query);
+    if (sort !== "recent") next.set("sort", sort);
+    if (activeFingerprint) next.set("failure", activeFingerprint);
+    const search = next.toString();
+    const url = `${window.location.pathname}${search ? `?${search}` : ""}`;
+    if (url !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", url);
+    }
+  }, [status, category, query, sort, activeFingerprint]);
+
   const activeGroup = groups.find((group) => group.fingerprint === activeFingerprint);
   const detailQuery = useQuery({
     queryKey: ["group", activeFingerprint],
@@ -170,9 +243,10 @@ export function FailuresPage() {
       open: groups.length,
       occurrences: groups.reduce((total, group) => total + group.occurrences, 0),
       newToday: groups.filter((group) => isToday(group.first_seen_at)).length,
+      needsAI: base.filter((failure) => failure.needsAI).length,
       projects: new Set(groups.map((group) => group.project)).size,
     }),
-    [groups],
+    [groups, base],
   );
 
   if (groupsQuery.isPending) {
@@ -212,7 +286,9 @@ export function FailuresPage() {
               const count =
                 item.id === "all"
                   ? base.length
-                  : base.filter((failure) => failure.status === item.id).length;
+                  : item.id === "needs_ai"
+                    ? base.filter((failure) => failure.needsAI).length
+                    : base.filter((failure) => failure.status === item.id).length;
               return (
                 <StatusFilterPill
                   key={item.id}
@@ -261,6 +337,24 @@ export function FailuresPage() {
             </Tooltip>
           </div>
 
+          <div className="flex h-8 w-full items-center rounded-full border border-line bg-[#0f141a] transition-colors hover:border-[#3d444d] focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:w-auto">
+            <div className="relative min-w-0 flex-1">
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as SortMode)}
+                className="h-8 w-full appearance-none rounded-full bg-transparent pl-3 pr-7 text-[12px] text-muted outline-none sm:min-w-[118px]"
+                aria-label="Sort failures"
+              >
+                {sorts.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+            </div>
+          </div>
+
           <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full border border-line bg-[#0f141a] px-3 text-faint transition-colors focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/60 sm:ml-auto sm:w-auto sm:min-w-[230px]">
             <Search className="h-3.5 w-3.5 shrink-0" />
             <Input
@@ -275,7 +369,7 @@ export function FailuresPage() {
       </section>
 
       <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_390px]">
-        <FailureTable items={filtered} selected={activeFingerprint} onSelect={setSelected} />
+        <FailureTable items={sorted} selected={activeFingerprint} onSelect={setSelected} />
         {active ? (
           <FailureDetail
             failure={active}
@@ -291,8 +385,8 @@ export function FailuresPage() {
       </div>
 
       <p className="text-[11px] text-faint">
-        Live data from <span className="font-mono">GET /api/groups</span>. Labels are saved with a
-        CSRF token; analysis actions stay in the CLI/API.
+        Live data from <span className="font-mono">GET /api/groups</span>. Confirm the diagnosis or
+        analyze the stored failure with AI; neither action reruns the tests.
       </p>
     </>
   );
