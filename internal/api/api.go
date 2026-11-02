@@ -26,6 +26,7 @@ type Store interface {
 	IngestReport(ctx context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error)
 	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
 	GetRun(ctx context.Context, id int64) (store.Run, error)
+	PreviousRun(ctx context.Context, id int64, branch string) (store.Run, bool, error)
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
 	ListGroups(ctx context.Context, statuses []string, limit int) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
@@ -106,6 +107,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
+	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
@@ -284,6 +286,135 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, runs)
+}
+
+// handleCompareRun: GET /api/runs/{id}/compare. Bandingkan run dengan run sebelumnya di branch yang sama.
+func (s *Server) handleCompareRun(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		return
+	}
+	current, err := s.Store.GetRun(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	previous, found, err := s.Store.PreviousRun(r.Context(), id, current.Branch)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	currentResults, err := s.Store.RunResults(r.Context(), id)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusOK, runComparison{
+			Current: current, Summary: map[string]int{}, Tests: []comparedTest{},
+		})
+		return
+	}
+	previousResults, err := s.Store.RunResults(r.Context(), previous.ID)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	cmp := compareRuns(current, previous, currentResults, previousResults)
+	writeJSON(w, http.StatusOK, cmp)
+}
+
+type runComparison struct {
+	Current  store.Run      `json:"current"`
+	Previous *store.Run     `json:"previous"`
+	Summary  map[string]int `json:"summary"`
+	Tests    []comparedTest `json:"tests"`
+}
+
+type comparedTest struct {
+	Test                string `json:"test"`
+	TestCaseID          string `json:"test_case_id,omitempty"`
+	Status              string `json:"status"`
+	PreviousStatus      string `json:"previous_status,omitempty"`
+	Fingerprint         string `json:"fingerprint,omitempty"`
+	PreviousFingerprint string `json:"previous_fingerprint,omitempty"`
+	Change              string `json:"change"`
+}
+
+const (
+	changeNew          = "new"
+	changeFixed        = "fixed"
+	changeStillFailing = "still_failing"
+	changeChangedCause = "changed_cause"
+	changeFlaky        = "flaky"
+	changeRemoved      = "removed"
+	changeUnchanged    = "unchanged"
+)
+
+var changePriority = map[string]int{
+	changeNew: 0, changeChangedCause: 1, changeStillFailing: 2,
+	changeFixed: 3, changeFlaky: 4, changeRemoved: 5, changeUnchanged: 6,
+}
+
+func compareRuns(current, previous store.Run, currentResults, previousResults []store.RunResult) runComparison {
+	prev := map[string]store.RunResult{}
+	for _, result := range previousResults {
+		prev[result.TestKey] = result
+	}
+	cur := map[string]bool{}
+	tests := []comparedTest{}
+	summary := map[string]int{}
+	for _, result := range currentResults {
+		cur[result.TestKey] = true
+		before, exists := prev[result.TestKey]
+		change := changeUnchanged
+		currentFailed := result.Status == "failed"
+		previousFailed := exists && before.Status == "failed"
+		switch {
+		case currentFailed && (!exists || !previousFailed):
+			change = changeNew
+		case currentFailed && previousFailed && result.Fingerprint != before.Fingerprint:
+			change = changeChangedCause
+		case currentFailed && previousFailed:
+			change = changeStillFailing
+		case result.Status == "flaky":
+			change = changeFlaky
+		case previousFailed && result.Status == "passed":
+			change = changeFixed
+		}
+		if change == changeUnchanged {
+			continue
+		}
+		summary[change]++
+		tests = append(tests, comparedTest{
+			Test: result.TestKey, TestCaseID: result.TestCaseID, Status: result.Status,
+			PreviousStatus: before.Status, Fingerprint: result.Fingerprint,
+			PreviousFingerprint: before.Fingerprint, Change: change,
+		})
+	}
+	for _, result := range previousResults {
+		if cur[result.TestKey] || result.Status != "failed" {
+			continue
+		}
+		summary[changeRemoved]++
+		tests = append(tests, comparedTest{
+			Test: result.TestKey, TestCaseID: result.TestCaseID, Status: "removed",
+			PreviousStatus: result.Status, PreviousFingerprint: result.Fingerprint, Change: changeRemoved,
+		})
+	}
+	sort.SliceStable(tests, func(i, j int) bool {
+		pi, pj := changePriority[tests[i].Change], changePriority[tests[j].Change]
+		if pi != pj {
+			return pi < pj
+		}
+		return tests[i].Test < tests[j].Test
+	})
+	return runComparison{Current: current, Previous: &previous, Summary: summary, Tests: tests}
 }
 
 // handleGetRun: GET /api/runs/{id} mengembalikan metadata run dan semua outcome-nya.
