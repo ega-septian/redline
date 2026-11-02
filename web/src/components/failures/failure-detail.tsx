@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LabelForm } from "@/components/failures/label-form";
+import { DiagnosisPanel } from "@/components/failures/diagnosis-panel";
 import { categoryLabel, type Failure, type FailureRun } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
@@ -98,7 +98,7 @@ export function FailureDetail({
         {tab === "Occurrences" && <Occurrences failure={failure} />}
         {tab === "Knowledge" && <Knowledge failure={failure} />}
 
-        <LabelForm key={failure.fingerprint} failure={failure} />
+        <DiagnosisPanel key={failure.fingerprint} failure={failure} />
 
         <div className="flex items-center justify-between border-t border-line-soft pt-2.5 text-[10.5px] text-faint">
           <span>
