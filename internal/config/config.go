@@ -19,6 +19,10 @@ type Config struct {
 	Port string
 	// MaxReportMB membatasi ukuran results.json yang boleh diupload.
 	MaxReportMB int64
+	// ArtifactDir adalah folder penyimpanan trace/screenshot yang diupload reporter. Kosong = ./artifacts.
+	ArtifactDir string
+	// MaxArtifactMB membatasi ukuran satu file artifact.
+	MaxArtifactMB int64
 	// RetentionDays: detail hasil test lebih tua dari ini dihapus (yang dibutuhkan analisis tetap). 0 = mati.
 	RetentionDays int
 	// StatusSources: source run yang boleh mengubah status kelompok bersama. Kosong = semua.
@@ -80,6 +84,10 @@ func Load() (Config, error) {
 	if err != nil || maxMB <= 0 {
 		return Config{}, fmt.Errorf("MAX_REPORT_MB harus angka positif")
 	}
+	maxArtifactMB, err := strconv.ParseInt(getenv("MAX_ARTIFACT_MB", "25"), 10, 64)
+	if err != nil || maxArtifactMB <= 0 {
+		return Config{}, fmt.Errorf("MAX_ARTIFACT_MB harus angka positif")
+	}
 	retention, err := strconv.Atoi(getenv("RETENTION_DAYS", "30"))
 	if err != nil || retention < 0 {
 		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
@@ -126,6 +134,8 @@ func Load() (Config, error) {
 		StatusSources: sources,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		MaxReportMB:   maxMB,
+		ArtifactDir:   getenv("ARTIFACT_DIR", "./artifacts"),
+		MaxArtifactMB: maxArtifactMB,
 		APIKey:        apiKey,
 		Users:         users,
 

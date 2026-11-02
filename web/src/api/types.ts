@@ -130,6 +130,18 @@ export type ApiRunResult = {
   category?: string;
   confidence?: string;
   human_label?: string;
+  artifacts?: ApiArtifact[];
+};
+
+export type ApiArtifact = {
+  id: number;
+  run_id: number;
+  test: string;
+  kind: "trace" | "screenshot" | string;
+  name: string;
+  content_type?: string;
+  size: number;
+  created_at: string;
 };
 
 export type RunDetail = {

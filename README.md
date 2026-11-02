@@ -61,6 +61,11 @@ open http://localhost:8787/ui/        # sign in with REDLINE_API_KEY
 `docker compose up -d` still starts only Neo4j for local `go run` development. The full profile binds
 the server to `127.0.0.1:8787`.
 
+The Playwright reporter uploads trace and screenshot files for failed tests. The full compose profile
+stores them in the `redline-artifacts` volume; locally they go to `ARTIFACT_DIR` (default `./artifacts`).
+Disable uploads with `REDLINE_ARTIFACTS=0`. Open a downloaded trace with
+`npx playwright show-trace trace.zip`. For a stable public URL, see [`docs/deploy.md`](docs/deploy.md).
+
 Backups stop the server and database, dump the graph, and start Neo4j again:
 
 ```bash
@@ -149,9 +154,11 @@ Everything has a default that works on a laptop. The settings you are most likel
 | `PORT`            | `8787`         | HTTP port                                                        |
 | `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host     |
 | `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all`     |
-| `RETENTION_DAYS`  | `30`           | Old test details are cleaned up (`0` = never)                    |
+| `RETENTION_DAYS`  | `30`           | Old test details and artifacts are cleaned up (`0` = never)      |
 | `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                                   |
 | `MAX_REPORT_MB`   | `50`           | Largest accepted Playwright JSON report                           |
+| `ARTIFACT_DIR`    | `./artifacts`  | Where uploaded trace/screenshot files are stored                 |
+| `MAX_ARTIFACT_MB` | `25`           | Largest accepted trace or screenshot file                        |
 
 | AI setting                                                 | Default           | Meaning                                                       |
 | ---------------------------------------------------------- | ----------------- | ------------------------------------------------------------- |
@@ -216,6 +223,7 @@ From your Playwright project:
 | `REDLINE_API_KEY`     | The server's API key, if it has one                     |
 | `REDLINE_AI=1`        | Explain failures with Claude                            |
 | `REDLINE_AI_MAX`      | Maximum AI analyses per run, default `10`               |
+| `REDLINE_ARTIFACTS=0` | Do not upload trace/screenshot files for failed tests   |
 | `REDLINE_VERIFY=1`    | Prove each new failure after the run (local only)       |
 | `REDLINE_APP_VERSION` | Version of the app under test, e.g. `sprint5`           |
 | `REDLINE=0`           | Turn Redline off                                        |
@@ -335,6 +343,9 @@ Voyage AI.
 | ------------------------------------------------------------------ | -------------------------------------------------------------- |
 | `POST /api/runs`                                                   | Send a Playwright JSON report                                  |
 | `GET /api/runs`                                                    | Recent runs                                                    |
+| `GET /api/runs/{id}`, `GET /api/runs/{id}/compare`                 | Run detail, and comparison with the previous run               |
+| `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
+| `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |

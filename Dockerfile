@@ -15,11 +15,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
+RUN mkdir -p /out/artifacts
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.versionOverride=${VERSION}" -o /out/redline ./cmd/server
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/redline /redline
+COPY --from=build --chown=nonroot:nonroot /out/artifacts /data/artifacts
+ENV ARTIFACT_DIR=/data/artifacts
 EXPOSE 8787
 USER nonroot
 ENTRYPOINT ["/redline"]

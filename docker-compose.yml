@@ -38,10 +38,14 @@ services:
       NEO4J_PASSWORD: redline-local
       NEO4J_DATABASE: redline
       TIMEZONE: ${TIMEZONE:-Asia/Jakarta}
+      ARTIFACT_DIR: /data/artifacts
+      MAX_ARTIFACT_MB: ${MAX_ARTIFACT_MB:-25}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_DAILY_BUDGET_USD: ${AI_DAILY_BUDGET_USD:-}
     ports:
       - "127.0.0.1:8787:8787"
+    volumes:
+      - redline-artifacts:/data/artifacts
     depends_on:
       neo4j:
         condition: service_healthy
@@ -49,3 +53,4 @@ services:
 
 volumes:
   redline-neo4j:
+  redline-artifacts:

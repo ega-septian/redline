@@ -7,6 +7,7 @@
  *   REDLINE=0            matikan (REDLINE_AI=1 atau REDLINE_VERIFY=1 tetap menyalakannya)
  *   REDLINE_APP_VERSION  versi backend, misalnya sprint5-with-bugs
  *   REDLINE_AI=1         analisis penyebab kegagalan
+ *   REDLINE_ARTIFACTS=0  jangan upload trace/screenshot (default: upload untuk test yang gagal)
  *   REDLINE_AI_MAX       default 10
  *   REDLINE_VERIFY=1     setelah run, langsung buktikan penyebab kegagalan dengan eksperimen
  *                        (npx redline verify; maksimal REDLINE_VERIFY_MAX, default 3). Diabaikan di CI.
@@ -68,6 +69,13 @@ type Analysis = {
   similar?: Similar[]; // kasus terbukti yang mirip maknanya (referensi untuk AI, bukan bukti)
 };
 type Similar = { test: string; category: string; source: string; similarity: number };
+type ArtifactUpload = {
+  testKey: string;
+  kind: "trace" | "screenshot";
+  name: string;
+  path: string;
+  contentType?: string;
+};
 type IngestResult = {
   run_id: number;
   total: number;
@@ -112,6 +120,9 @@ export default class RedlineReporter implements Reporter {
   private ids: Record<string, string> = {};
   /** "project › file › judul" -> curl dari fixture Redline, hanya untuk test yang gagal. */
   private curls: Record<string, string> = {};
+  /** Trace/screenshot yang akan diupload setelah run tersimpan. */
+  private artifacts: ArtifactUpload[] = [];
+  private artifactSeen = new Set<string>();
 
   constructor(options: Options = {}) {
     this.options = options;
@@ -140,6 +151,28 @@ export default class RedlineReporter implements Reporter {
     if (id) this.ids[testKey] = id.slice(1);
     const curl = result.attachments.find((a) => a.name === "curl" && a.body);
     if (curl?.body) this.curls[testKey] = curl.body.toString();
+    if (process.env.REDLINE_ARTIFACTS !== "0" && result.status !== "passed" && result.status !== "skipped") {
+      for (const attachment of result.attachments) {
+        if (!attachment.path) continue;
+        const kind =
+          attachment.name === "trace" || attachment.contentType === "application/zip"
+            ? "trace"
+            : attachment.name.includes("screenshot") || attachment.contentType?.startsWith("image/")
+              ? "screenshot"
+              : "";
+        if (!kind) continue;
+        const key = `${testKey}\0${kind}\0${attachment.path}`;
+        if (this.artifactSeen.has(key)) continue;
+        this.artifactSeen.add(key);
+        this.artifacts.push({
+          testKey,
+          kind,
+          name: attachment.name || path.basename(attachment.path),
+          path: attachment.path,
+          contentType: attachment.contentType,
+        });
+      }
+    }
     if (!(key in this.hashes)) {
       const hash = sourceHash(file, line, column);
       if (hash) this.hashes[key] = hash;
@@ -285,6 +318,7 @@ export default class RedlineReporter implements Reporter {
       summary,
       incidents,
     );
+    await this.uploadArtifacts(summary.run_id, baseURL);
 
     if (process.env.REPORTPORTAL === "1" && summary.failed > 0) {
       await requestReportPortal(baseURL, summary.run_id);
@@ -326,6 +360,44 @@ export default class RedlineReporter implements Reporter {
           "buktikan penyebabnya dengan eksperimen: npx redline verify (atau jalankan dengan REDLINE_VERIFY=1)",
         );
     }
+  }
+
+  /** Upload trace/screenshot files after the run exists. Failures never fail the test run. */
+  private async uploadArtifacts(runId: number, baseURL: string) {
+    if (process.env.REDLINE_ARTIFACTS === "0" || this.artifacts.length === 0) return;
+    let uploaded = 0;
+    let failed = 0;
+    for (const artifact of this.artifacts) {
+      if (!existsSync(artifact.path)) continue;
+      try {
+        const form = new FormData();
+        form.append("test", artifact.testKey);
+        form.append("kind", artifact.kind);
+        form.append(
+          "file",
+          new Blob([readFileSync(artifact.path)], {
+            type: artifact.contentType || "application/octet-stream",
+          }),
+          path.basename(artifact.path),
+        );
+        const res = await fetch(`${baseURL}/api/runs/${runId}/artifacts`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: form,
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (res.ok) uploaded++;
+        else {
+          failed++;
+          log(`artifact ${artifact.name} ditolak (${res.status})`);
+        }
+      } catch (e) {
+        failed++;
+        log(`artifact ${artifact.name} gagal diupload: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    if (uploaded > 0) log(`${uploaded} trace/screenshot diupload ke Redline.`);
+    if (failed > 0) log(`${failed} artifact gagal diupload.`);
   }
 
   /**

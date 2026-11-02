@@ -157,7 +157,7 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
-		Version: buildVersion()}
+		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion()}
 	sessions := auth.New(cfg.APIKey, cfg.Users)
 	srv.AuthEnabled = sessions.Enabled()
 	srv.ValidateKey = sessions.ValidKey
@@ -234,9 +234,14 @@ func pruneLoop(ctx context.Context, db *store.Store, days int, log *slog.Logger)
 		before := time.Now().AddDate(0, 0, -days)
 		if res, err := db.Prune(ctx, before); err != nil {
 			log.Error("retensi gagal", "err", err)
-		} else if res.TestResults+res.Shapes+res.Sources > 0 {
+		} else if res.TestResults+res.Shapes+res.Sources+res.Artifacts > 0 {
+			for _, path := range res.ArtifactPaths {
+				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+					log.Warn("hapus file artifact gagal", "path", path, "err", err)
+				}
+			}
 			log.Info("retensi selesai", "hari", days, "test_results", res.TestResults, "response_shapes", res.Shapes,
-				"source_files", res.Sources)
+				"source_files", res.Sources, "artifacts", res.Artifacts)
 		}
 		select {
 		case <-ctx.Done():
