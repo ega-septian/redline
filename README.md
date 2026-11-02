@@ -79,7 +79,7 @@ docker compose --profile full up -d
 Install the package, pinned to a release (use the same tag as your server):
 
 ```bash
-npm i -D github:ega-septian/redline#v0.6.0
+npm i -D github:ega-septian/redline#v0.7.0
 ```
 
 Add the reporter **after** the JSON reporter in `playwright.config.ts`:
@@ -415,6 +415,7 @@ failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
+| `v0.7.0` | Triage UI, cause grouping, run comparison, trace/screenshot artifacts, Render/VPS deploy guide |
 | `v0.6.0` | Safe binding and `/readyz`, PII redaction, AI pricing and daily budget, version handshake |
 | `v0.5.0` | Playwright package installed from GitHub, optional API key, MIT license |
 | `v0.4.0` | Fills ReportPortal with the cause of each failed test                   |
