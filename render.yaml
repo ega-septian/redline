@@ -1,0 +1,38 @@
+# Render blueprint for the Redline server.
+#
+# The database is Neo4j AuraDB Free (no credit card required):
+#   https://console.neo4j.io
+# Use NEO4J_URI=neo4j+s://<id>.databases.neo4j.io and NEO4J_DATABASE=neo4j.
+#
+# Free Render services sleep after 15 minutes. Keep the service warm with an
+# external GET /healthz every 5-10 minutes (UptimeRobot, cron-job.org, etc.).
+# Artifacts are stored on the local filesystem; the free plan has no persistent
+# disk, so traces/screenshots are lost on redeploy or restart. Add a paid disk
+# and set ARTIFACT_DIR=/data/artifacts for durable artifacts.
+services:
+  - type: web
+    name: redline
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: REDLINE_API_KEY
+        sync: false
+      - key: REDLINE_USERS
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        value: neo4j
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: NEO4J_DATABASE
+        value: neo4j
+      - key: TIMEZONE
+        value: Asia/Jakarta
+      - key: ARTIFACT_DIR
+        value: /tmp/redline-artifacts
+      - key: MAX_ARTIFACT_MB
+        value: "25"
