@@ -3,6 +3,10 @@ import type {
   ApiGroup,
   ApiQuarantine,
   ApiCoverage,
+  ApiConfig,
+  ApiContractSource,
+  ApiNotifications,
+  ApiSourceCheck,
   ApiRule,
   ApiRun,
   ApiRuleCandidate,
@@ -134,4 +138,43 @@ export const api = {
     }),
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
+  config: () => request<ApiConfig>("/api/config"),
+  validateSource: (url: string) =>
+    request<ApiSourceCheck>("/api/config/contracts/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ url }),
+    }),
+  saveSource: (project: string, url: string) =>
+    request<ApiContractSource>("/api/config/contracts", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ project, url }),
+    }),
+  deleteSource: (project: string) =>
+    request<{ deleted: string }>(`/api/config/contracts?project=${encodeURIComponent(project)}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken() },
+    }),
+  checkSource: (project: string) =>
+    request<ApiSourceCheck>("/api/config/contracts/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ project }),
+    }),
+  saveNotifications: (input: {
+    enabled: boolean;
+    webhook_url: string;
+    events: string[];
+  }) =>
+    request<ApiNotifications>("/api/config/notifications", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify(input),
+    }),
+  testNotification: () =>
+    request<{ sent: boolean; mock: boolean; message: string }>(
+      "/api/config/notifications/test",
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken() } },
+    ),
 };

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"redline/internal/analysis"
+	"redline/internal/contract"
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
@@ -42,6 +43,13 @@ type Store interface {
 	ActiveQuarantines(ctx context.Context) ([]store.Quarantine, error)
 	ContractSnapshots(ctx context.Context, project string, limit int) ([]store.ContractSnapshot, error)
 	EndpointCalls(ctx context.Context, project string) ([]store.EndpointCall, error)
+	ContractSources(ctx context.Context) ([]store.ContractSource, error)
+	ContractSource(ctx context.Context, project string) (store.ContractSource, error)
+	SetContractSource(ctx context.Context, src store.ContractSource) (store.ContractSource, error)
+	DeleteContractSource(ctx context.Context, project string) error
+	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
+	NotificationSettings(ctx context.Context) (store.NotificationSettings, error)
+	SetNotificationSettings(ctx context.Context, settings store.NotificationSettings) (store.NotificationSettings, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
@@ -103,6 +111,12 @@ type Server struct {
 	// Cookie writes also need CSRF (X-CSRF-Token matching the redline_csrf cookie).
 	Session func(*http.Request) bool
 	CSRF    func(*http.Request) bool
+	// Contracts is the runtime OpenAPI registry: Config writes are applied without a restart.
+	Contracts *contract.Registry
+	// EnvSpecs is the startup OPENAPI_SPECS map, used as fallback when a database source is removed.
+	EnvSpecs map[string]string
+	// SourceCheck validates one spec URL; nil uses contract.ValidateSource (tests stub the network).
+	SourceCheck func(context.Context, string) contract.SourceCheck
 }
 
 // APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
@@ -134,6 +148,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/tests/quarantine", s.handleSetQuarantine)
 	mux.HandleFunc("DELETE /api/tests/quarantine", s.handleReleaseQuarantine)
 	mux.HandleFunc("GET /api/coverage", s.handleCoverage)
+	mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	mux.HandleFunc("PUT /api/config/contracts", s.handleSaveContract)
+	mux.HandleFunc("DELETE /api/config/contracts", s.handleDeleteContract)
+	mux.HandleFunc("POST /api/config/contracts/validate", s.handleValidateSource)
+	mux.HandleFunc("POST /api/config/contracts/check", s.handleCheckContract)
+	mux.HandleFunc("PUT /api/config/notifications", s.handleSaveNotifications)
+	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)

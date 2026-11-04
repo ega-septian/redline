@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), **coverage** (contract endpoints vs tests), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), **coverage** (contract endpoints vs tests), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -354,6 +354,13 @@ Voyage AI.
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
 | `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes and changes |
+| `GET /api/config`                                                  | Contract sources (database + env fallback) and notification settings |
+| `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
+| `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |
+| `POST /api/config/contracts/check`                                 | Re-check a saved source: `{"project": "toolshop"}`             |
+| `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
+| `PUT /api/config/notifications`                                    | Save webhook/events (mock, nothing is delivered yet)           |
+| `POST /api/config/notifications/test`                              | Returns a mock result; nothing leaves the server               |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -375,6 +382,22 @@ Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every activ
 Coverage compares the newest contract snapshot with the calls recorded by the Redline fixture. `OPENAPI_SPECS`
 must point to a URL the **server** can reach: inside a container `localhost` is the container, so use
 `host.docker.internal` for a service on the host or a public docs URL.
+
+### Config page
+
+`/ui/config` changes contract sources without editing `.env` or restarting. A saved source is applied to
+the running registry immediately, so the next run and the Coverage page use it. The database value
+overrides `OPENAPI_SPECS` for the same project; deleting it falls back to the environment value. Old
+contract snapshots are never deleted, so Coverage still shows drift.
+
+The URL is validated by fetching and parsing it **from the server**: only `http`/`https`, 10 MB and a
+20 second timeout. A Swagger UI page is rejected with an explanation, and when the HTML contains the
+JSON URL it loads (for example `url: ".../docs?api-docs.json"`), the form offers it as a one-click
+fix. Cloud metadata hosts are blocked; private hosts stay allowed because local Toolshop is a valid
+source.
+
+Notifications are saved but **not delivered** in this version. The webhook is masked when read, and the
+UI sends the masked value back when only the events change, so the secret is preserved.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`

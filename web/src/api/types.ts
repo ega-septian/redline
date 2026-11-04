@@ -362,3 +362,50 @@ export type ApiCoverage = {
   endpoints: ApiCoverageEndpoint[];
   changes: ApiCoverageChange[];
 };
+
+export type ApiContractSource = {
+  project: string;
+  url: string;
+  enabled: boolean;
+  origin: "database" | "environment" | string;
+  by?: string;
+  updated_at?: string | null;
+  last_checked_at?: string | null;
+  last_status?: "valid" | "invalid" | "unknown" | string;
+  last_error?: string;
+  last_version?: string;
+  last_endpoints?: number;
+  last_duration_ms?: number;
+};
+
+export type ApiSourceCheck = {
+  ok: boolean;
+  url: string;
+  kind?: string;
+  status_code?: number;
+  content_type?: string;
+  title?: string;
+  openapi?: string;
+  endpoints: number;
+  error?: string;
+  hint?: string;
+  candidates?: string[];
+  checked_at: string;
+  duration_ms: number;
+};
+
+export type ApiNotifications = {
+  enabled: boolean;
+  webhook_url: string;
+  webhook_set: boolean;
+  events: string[];
+  available_events: string[];
+  by?: string;
+  updated_at?: string | null;
+  delivery: boolean;
+};
+
+export type ApiConfig = {
+  contracts: ApiContractSource[];
+  notifications: ApiNotifications;
+};
