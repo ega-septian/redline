@@ -81,7 +81,7 @@ docker compose --profile full up -d
 Install the package, pinned to a release (use the same tag as your server):
 
 ```bash
-npm i -D github:ega-septian/redline#v0.7.0
+npm i -D github:ega-septian/redline#v0.8.0
 ```
 
 Add the reporter **after** the JSON reporter in `playwright.config.ts`:
@@ -469,6 +469,7 @@ failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
+| `v0.8.0` | Test health, quarantine and quality gate, contract coverage and drift, Config with contract sources (UI-only) and mock notifications |
 | `v0.7.0` | Triage UI, cause grouping, run comparison, trace/screenshot artifacts, Render/VPS deploy guide |
 | `v0.6.0` | Safe binding and `/readyz`, PII redaction, AI pricing and daily budget, version handshake |
 | `v0.5.0` | Playwright package installed from GitHub, optional API key, MIT license |
