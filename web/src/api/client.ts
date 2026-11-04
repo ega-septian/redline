@@ -1,6 +1,7 @@
 import type {
   AnalyzeResult,
   ApiGroup,
+  ApiQuarantine,
   ApiRule,
   ApiRun,
   ApiRuleCandidate,
@@ -118,4 +119,16 @@ export const api = {
     ),
   testHistory: (test: string, days: number) =>
     request<TestHistory>(`/api/tests/history?test=${encodeURIComponent(test)}&days=${days}`),
+  quarantines: () => request<ApiQuarantine[]>("/api/tests/quarantine"),
+  quarantine: (input: { test: string; owner: string; reason: string; days: number }) =>
+    request<ApiQuarantine>("/api/tests/quarantine", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify(input),
+    }),
+  releaseQuarantine: (test: string) =>
+    request<ApiQuarantine>(`/api/tests/quarantine?test=${encodeURIComponent(test)}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken() },
+    }),
 };

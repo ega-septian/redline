@@ -278,6 +278,24 @@ export type TestHealthRow = {
   last_failure_at?: string | null;
   triage_owner?: string;
   triage_status?: string;
+  quarantined: boolean;
+  quarantine_owner?: string;
+  quarantine_reason?: string;
+  quarantine_until?: string | null;
+};
+
+export type ApiQuarantine = {
+  key: string;
+  test?: string;
+  test_case_id?: string;
+  project?: string;
+  owner: string;
+  reason: string;
+  by: string;
+  created_at: string;
+  until: string;
+  released_at?: string | null;
+  released_by?: string;
 };
 
 export type TestRunPoint = {

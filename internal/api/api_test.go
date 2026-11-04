@@ -29,9 +29,10 @@ type fakeStore struct {
 	statuses []string
 	label    string
 
-	experiment store.Experiment
-	impact     string
-	artifacts  []store.Artifact
+	experiment         store.Experiment
+	impact             string
+	artifacts          []store.Artifact
+	quarantineReleased bool
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -107,6 +108,31 @@ func (f *fakeStore) TestHistory(_ context.Context, test string, _ int, _ int) (s
 		Total: 1, Failed: 1, PassRate: 0, LastStatus: "failed",
 	}
 	return row, []store.TestRunPoint{{RunID: 1, Status: "failed", DurationMs: 12}}, nil
+}
+func (f *fakeStore) FindTest(_ context.Context, test string) (store.TestIdentity, error) {
+	if test != "TC-BRD-001" && test != "toolshop › brand.spec.ts › get all" {
+		return store.TestIdentity{}, store.ErrNotFound
+	}
+	return store.TestIdentity{
+		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all",
+		TestCaseID: "TC-BRD-001", Project: "toolshop",
+	}, nil
+}
+func (f *fakeStore) SetQuarantine(_ context.Context, q store.Quarantine) (store.Quarantine, error) {
+	return q, nil
+}
+func (f *fakeStore) ReleaseQuarantine(_ context.Context, key, by string) (store.Quarantine, error) {
+	if key != "TC-BRD-001" || f.quarantineReleased {
+		return store.Quarantine{}, store.ErrNotFound
+	}
+	f.quarantineReleased = true
+	return store.Quarantine{Key: key, ReleasedBy: by}, nil
+}
+func (f *fakeStore) ActiveQuarantines(context.Context) ([]store.Quarantine, error) {
+	return []store.Quarantine{{
+		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all",
+		TestCaseID: "TC-BRD-001", Project: "toolshop", Owner: "ega", Reason: "flaky",
+	}}, nil
 }
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
@@ -747,6 +773,33 @@ func TestTestHealth(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/tests/history?test=TC-NONE-999", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("history test tidak ada = %d, want 404", rec.Code)
+	}
+}
+
+func TestQuarantine(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+
+	if rec := do(h, http.MethodGet, "/api/tests/quarantine", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"TC-BRD-001"`) {
+		t.Errorf("list quarantine = %d: %s", rec.Code, rec.Body)
+	}
+	body := `{"test":"TC-BRD-001","owner":"ega","reason":"flaky login","days":7}`
+	if rec := do(h, http.MethodPut, "/api/tests/quarantine", strings.NewReader(body)); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"owner": "ega"`) {
+		t.Errorf("set quarantine = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodPut, "/api/tests/quarantine", strings.NewReader(`{"test":"TC-BRD-001","days":7}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("quarantine tanpa owner = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPut, "/api/tests/quarantine", strings.NewReader(`{"test":"TC-NONE","owner":"ega","reason":"x"}`)); rec.Code != http.StatusNotFound {
+		t.Errorf("quarantine test tidak ada = %d, want 404", rec.Code)
+	}
+	if rec := do(h, http.MethodDelete, "/api/tests/quarantine?test=TC-BRD-001", nil); rec.Code != http.StatusOK {
+		t.Errorf("release quarantine = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodDelete, "/api/tests/quarantine?test=TC-BRD-001", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("release tanpa quarantine aktif = %d, want 404", rec.Code)
 	}
 }
 
