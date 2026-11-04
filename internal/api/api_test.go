@@ -1113,6 +1113,13 @@ func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
 		t.Errorf("event tidak dikenal = %d, want 400", rec.Code)
 	}
 
+	rec = do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://hooks.example.com/hook?token=QUERYSECRET","events":["new_failure"]}`))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "QUERYSECRET") ||
+		!strings.Contains(rec.Body.String(), "?••••") {
+		t.Errorf("query webhook tidak disamarkan: %d %s", rec.Code, rec.Body)
+	}
+
 	rec = do(h, http.MethodPost, "/api/config/notifications/test", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mock": true`) ||
 		!strings.Contains(rec.Body.String(), `"sent": false`) {

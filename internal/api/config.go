@@ -353,10 +353,15 @@ func maskWebhook(raw string) string {
 		}
 	}
 	path := strings.Join(segments, "/")
-	if path == "" {
-		return parsed.Scheme + "://" + parsed.Host
+	masked := parsed.Scheme + "://" + parsed.Host
+	if path != "" {
+		masked += "/" + path
 	}
-	return parsed.Scheme + "://" + parsed.Host + "/" + path
+	// Query strings often carry the real token (for example ?token=...); keep only the fact that one exists.
+	if parsed.RawQuery != "" {
+		masked += "?••••"
+	}
+	return masked
 }
 
 func normalizeEvents(events []string) ([]string, error) {
