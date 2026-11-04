@@ -134,6 +134,34 @@ func (f *fakeStore) ActiveQuarantines(context.Context) ([]store.Quarantine, erro
 		TestCaseID: "TC-BRD-001", Project: "toolshop", Owner: "ega", Reason: "flaky",
 	}}, nil
 }
+func (f *fakeStore) ContractSnapshots(_ context.Context, project string, _ int) ([]store.ContractSnapshot, error) {
+	if project != "toolshop" {
+		return nil, nil
+	}
+	now := time.Now()
+	return []store.ContractSnapshot{
+		{RunID: 2, At: now, ContractID: "new", SourceURL: "http://example/docs", Document: `{
+			"openapi":"3.0.0","paths":{
+				"/brands":{"get":{"responses":{"200":{"description":"ok"},"401":{"description":"auth"}}}},
+				"/products":{"get":{"responses":{"200":{"description":"ok"}}}}
+			}}`},
+		{RunID: 1, At: now.Add(-time.Hour), ContractID: "old", Document: `{
+			"openapi":"3.0.0","paths":{
+				"/brands":{"get":{"responses":{"200":{"description":"ok"}}}},
+				"/old":{"get":{"responses":{"200":{"description":"ok"}}}}
+			}}`},
+	}, nil
+}
+func (f *fakeStore) EndpointCalls(_ context.Context, project string) ([]store.EndpointCall, error) {
+	if project != "toolshop" {
+		return []store.EndpointCall{}, nil
+	}
+	now := time.Now()
+	return []store.EndpointCall{
+		{Method: "GET", Path: "/brands", Status: 200, TestKey: "toolshop › api.spec.ts › get", At: now},
+		{Method: "GET", Path: "/brands", Status: 401, TestKey: "toolshop › api.spec.ts › auth", At: now},
+	}, nil
+}
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
 	return []store.Group{}, nil
@@ -800,6 +828,28 @@ func TestQuarantine(t *testing.T) {
 	}
 	if rec := do(h, http.MethodDelete, "/api/tests/quarantine?test=TC-BRD-001", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("release tanpa quarantine aktif = %d, want 404", rec.Code)
+	}
+}
+
+func TestCoverage(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/coverage?project=toolshop", nil)
+	if rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"documented": 2`) ||
+		!strings.Contains(rec.Body.String(), `"covered": 1`) ||
+		!strings.Contains(rec.Body.String(), `"uncovered": 1`) ||
+		!strings.Contains(rec.Body.String(), `"status_codes_seen": 2`) ||
+		!strings.Contains(rec.Body.String(), `"path": "/products"`) {
+		t.Errorf("coverage = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/coverage", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("coverage tanpa project = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/coverage?project=other", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"available": false`) {
+		t.Errorf("coverage project lain = %d: %s", rec.Code, rec.Body)
 	}
 }
 

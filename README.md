@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), **coverage** (contract endpoints vs tests), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -172,7 +172,7 @@ Everything has a default that works on a laptop. The settings you are most likel
 
 | Integration                | Default | Meaning                                                     |
 | -------------------------- | ------- | ----------------------------------------------------------- |
-| `OPENAPI_SPECS`            | empty   | API contract per project, e.g. `toolshop=http://localhost:8091/docs` |
+| `OPENAPI_SPECS`            | empty   | Contract URL per project, reachable from the server, e.g. `toolshop=https://api.practicesoftwaretesting.com/docs` |
 | `REPORTPORTAL_URL`, `REPORTPORTAL_API_KEY` | empty | Fill ReportPortal with causes (optional) |
 | `NEO4J_URI`                | `bolt://localhost:7688` | Neo4j/DozerDB address                        |
 
@@ -353,6 +353,7 @@ Voyage AI.
 | `GET /api/tests/quarantine`                                        | Active quarantined tests                                       |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
+| `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes and changes |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -370,6 +371,10 @@ Voyage AI.
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
 Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
+
+Coverage compares the newest contract snapshot with the calls recorded by the Redline fixture. `OPENAPI_SPECS`
+must point to a URL the **server** can reach: inside a container `localhost` is the container, so use
+`host.docker.internal` for a service on the host or a public docs URL.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`

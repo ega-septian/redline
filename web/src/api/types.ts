@@ -319,3 +319,46 @@ export type TestHistory = {
   summary: TestHealthRow;
   runs: TestRunPoint[];
 };
+
+export type ApiCoverageEndpoint = {
+  method: string;
+  path: string;
+  summary?: string;
+  status_codes: string[];
+  observed_status_codes: string[];
+  covered: boolean;
+  tests: number;
+  last_tested_at?: string | null;
+};
+
+export type ApiCoverageChange = {
+  kind: "added" | "changed" | "removed" | string;
+  method: string;
+  path: string;
+  detail: string;
+};
+
+export type ApiCoverageSnapshot = {
+  run_id: number;
+  at: string;
+  contract_id: string;
+  source_url?: string;
+};
+
+export type ApiCoverage = {
+  available: boolean;
+  project: string;
+  message?: string;
+  snapshot?: ApiCoverageSnapshot;
+  previous?: ApiCoverageSnapshot;
+  summary: {
+    documented: number;
+    covered: number;
+    uncovered: number;
+    status_codes_documented: number;
+    status_codes_seen: number;
+    changes: number;
+  };
+  endpoints: ApiCoverageEndpoint[];
+  changes: ApiCoverageChange[];
+};
