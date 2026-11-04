@@ -34,6 +34,15 @@ import (
 
 // pricing mengembalikan harga per 1 juta token. Model yang tidak dikenal dihitung 0
 // (token tetap dicatat, hanya biayanya yang tidak).
+func sourcesProjects(sources []store.ContractSource) []string {
+	out := make([]string, 0, len(sources))
+	for _, source := range sources {
+		out = append(out, source.Project)
+	}
+	slices.Sort(out)
+	return out
+}
+
 func pricing(model string) llm.Pricing {
 	switch {
 	case strings.HasPrefix(model, "claude-haiku-5-5"):
@@ -140,13 +149,31 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Info("analisis AI mati (ANTHROPIC_API_KEY kosong); hanya aturan deterministik yang jalan")
 	}
+	specs := map[string]string{}
 	if cfg.OpenAPISpecs != "" {
-		specs, err := contract.ParseSpecs(cfg.OpenAPISpecs)
+		parsed, err := contract.ParseSpecs(cfg.OpenAPISpecs)
 		if err != nil {
 			return err
 		}
-		analyzer.Contracts = contract.NewRegistry(specs)
-		log.Info("kontrak API aktif", "project", strings.Join(slices.Sorted(maps.Keys(specs)), ","))
+		specs = parsed
+		log.Info("kontrak API dari OPENAPI_SPECS", "project", strings.Join(slices.Sorted(maps.Keys(specs)), ","))
+	} else {
+		log.Info("OPENAPI_SPECS kosong; contract source bisa diatur dari halaman Config")
+	}
+	registry := contract.NewRegistry(specs)
+	analyzer.Contracts = registry
+	// Sumber dari database menimpa OPENAPI_SPECS untuk project yang sama, tanpa perlu restart.
+	if sources, err := db.ContractSources(ctx); err != nil {
+		log.Warn("gagal membaca contract sources dari database; memakai OPENAPI_SPECS", "err", err)
+	} else if len(sources) > 0 {
+		for _, source := range sources {
+			if source.Enabled && source.URL != "" {
+				registry.Set(source.Project, source.URL)
+			} else {
+				registry.Delete(source.Project)
+			}
+		}
+		log.Info("contract sources dari database aktif", "project", strings.Join(sourcesProjects(sources), ","))
 	}
 	if cfg.VoyageAPIKey != "" {
 		analyzer.Embed = embed.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel, cfg.VoyageBaseURL)
@@ -157,7 +184,8 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
-		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion()}
+		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion(),
+		Contracts: registry, EnvSpecs: specs}
 	sessions := auth.New(cfg.APIKey, cfg.Users)
 	srv.AuthEnabled = sessions.Enabled()
 	srv.ValidateKey = sessions.ValidKey

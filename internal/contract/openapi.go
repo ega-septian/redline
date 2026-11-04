@@ -4,74 +4,14 @@
 package contract
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"redline/internal/report"
 )
-
-// Registry memetakan project Playwright ke URL dokumen OpenAPI-nya.
-// Dokumen diambil setiap run (tidak di-cache) karena kontrak bisa berubah antar versi aplikasi.
-type Registry struct {
-	Specs map[string]string // project -> URL OpenAPI (JSON)
-	HTTP  *http.Client
-}
-
-func NewRegistry(specs map[string]string) *Registry {
-	return &Registry{Specs: specs, HTTP: &http.Client{Timeout: 10 * time.Second}}
-}
-
-// ParseSpecs membaca "toolshop=http://localhost:8091/docs,gorest=https://..." (format env OPENAPI_SPECS).
-func ParseSpecs(s string) (map[string]string, error) {
-	out := map[string]string{}
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		project, url, ok := strings.Cut(part, "=")
-		if !ok || strings.TrimSpace(project) == "" || !strings.HasPrefix(strings.TrimSpace(url), "http") {
-			return nil, fmt.Errorf("OPENAPI_SPECS: %q harus berbentuk project=http(s)://url", part)
-		}
-		out[strings.TrimSpace(project)] = strings.TrimSpace(url)
-	}
-	return out, nil
-}
-
-// Fetch mengambil dokumen kontrak project. url kosong (tanpa error) kalau project tidak punya kontrak.
-func (r *Registry) Fetch(ctx context.Context, project string) (url string, document []byte, err error) {
-	url, ok := r.Specs[project]
-	if !ok {
-		return "", nil, nil
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return url, nil, err
-	}
-	resp, err := r.HTTP.Do(req)
-	if err != nil {
-		return url, nil, fmt.Errorf("ambil kontrak %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return url, nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return url, nil, fmt.Errorf("ambil kontrak %s: HTTP %d", url, resp.StatusCode)
-	}
-	if _, err := Parse(body); err != nil {
-		return url, nil, fmt.Errorf("kontrak %s: %w", url, err)
-	}
-	return url, body, nil
-}
 
 var parsed sync.Map // id potret kontrak -> *Document
 

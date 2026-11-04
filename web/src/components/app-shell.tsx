@@ -7,6 +7,7 @@ import {
   GitBranch,
   LayoutDashboard,
   Layers,
+  Settings2,
   Sparkles,
   Waypoints,
   type LucideIcon,
@@ -33,6 +34,7 @@ const nav = [
   { label: "Coverage", icon: Layers, to: "/coverage" as const },
   { label: "Rules", icon: Sparkles, to: "/rules" as const },
   { label: "Scoreboard", icon: BarChart3, to: "/scoreboard" as const },
+  { label: "Config", icon: Settings2, to: "/config" as const },
 ];
 
 export function AppShell() {
@@ -59,7 +61,9 @@ export function AppShell() {
             ? "Rules"
             : pathname.startsWith("/scoreboard")
               ? "Scoreboard"
-              : "Failures";
+              : pathname.startsWith("/config")
+                ? "Config"
+                : "Failures";
   const subtitle =
     title === "Failures"
       ? "open failures"
@@ -73,7 +77,9 @@ export function AppShell() {
               ? "contract vs tests"
               : title === "Rules"
                 ? "learned from proven cases"
-                : "accuracy";
+                : title === "Config"
+                  ? "contract sources and notifications"
+                  : "accuracy";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -115,7 +121,17 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {items.slice(6).map((item) => (
+          {items.slice(6, 8).map((item) => (
+            <NavItem
+              key={item.label}
+              {...item}
+              active={"to" in item && isActive(item.to)}
+            />
+          ))}
+          <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
+            Settings
+          </div>
+          {items.slice(8).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -182,7 +198,7 @@ function NavItem({
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/" | "/runs" | "/health" | "/impact" | "/coverage" | "/rules" | "/scoreboard";
+  to?: "/" | "/runs" | "/health" | "/impact" | "/coverage" | "/rules" | "/scoreboard" | "/config";
   count?: number;
   soon?: boolean;
   active?: boolean;

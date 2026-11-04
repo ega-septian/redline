@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute } from "@tanstack/react-router";
+import { createRootRoute, createRoute, lazyRouteComponent } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell";
 import { CoveragePage } from "@/pages/coverage";
@@ -48,6 +48,12 @@ const coverageRoute = createRoute({
   component: CoveragePage,
 });
 
+const configRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/config",
+  component: lazyRouteComponent(() => import("@/pages/config"), "ConfigPage"),
+});
+
 const rulesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/rules",
@@ -67,6 +73,7 @@ export const routeTree = rootRoute.addChildren([
   healthRoute,
   impactRoute,
   coverageRoute,
+  configRoute,
   rulesRoute,
   scoreboardRoute,
 ]);

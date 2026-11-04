@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"redline/internal/analysis"
+	"redline/internal/contract"
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
@@ -33,6 +34,8 @@ type fakeStore struct {
 	impact             string
 	artifacts          []store.Artifact
 	quarantineReleased bool
+	sources            []store.ContractSource
+	notifications      store.NotificationSettings
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -165,6 +168,61 @@ func (f *fakeStore) EndpointCalls(_ context.Context, project string) ([]store.En
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
 	return []store.Group{}, nil
+}
+func (f *fakeStore) ContractSources(context.Context) ([]store.ContractSource, error) {
+	return f.sources, nil
+}
+func (f *fakeStore) ContractSource(_ context.Context, project string) (store.ContractSource, error) {
+	for _, source := range f.sources {
+		if source.Project == project {
+			return source, nil
+		}
+	}
+	return store.ContractSource{}, store.ErrNotFound
+}
+func (f *fakeStore) SetContractSource(_ context.Context, src store.ContractSource) (store.ContractSource, error) {
+	src.UpdatedAt = time.Now()
+	for i := range f.sources {
+		if f.sources[i].Project == src.Project {
+			src.LastCheckedAt = f.sources[i].LastCheckedAt
+			f.sources[i] = src
+			return src, nil
+		}
+	}
+	f.sources = append(f.sources, src)
+	return src, nil
+}
+func (f *fakeStore) DeleteContractSource(_ context.Context, project string) error {
+	for i := range f.sources {
+		if f.sources[i].Project == project {
+			f.sources = append(f.sources[:i], f.sources[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+func (f *fakeStore) RecordSourceCheck(_ context.Context, project string, record store.SourceCheckRecord) error {
+	for i := range f.sources {
+		if f.sources[i].Project != project {
+			continue
+		}
+		now := time.Now()
+		f.sources[i].LastCheckedAt = &now
+		f.sources[i].LastStatus = record.Status
+		f.sources[i].LastError = record.Error
+		f.sources[i].LastVersion = record.Version
+		f.sources[i].LastEndpoints = record.Endpoints
+		return nil
+	}
+	return store.ErrNotFound
+}
+func (f *fakeStore) NotificationSettings(context.Context) (store.NotificationSettings, error) {
+	return f.notifications, nil
+}
+func (f *fakeStore) SetNotificationSettings(_ context.Context, settings store.NotificationSettings) (store.NotificationSettings, error) {
+	settings.UpdatedAt = time.Now()
+	f.notifications = settings
+	return settings, nil
 }
 func (f *fakeStore) GetGroup(_ context.Context, fp string) (store.Group, []store.Occurrence, error) {
 	return store.Group{}, nil, store.ErrNotFound
@@ -912,5 +970,159 @@ func TestVersionDefault(t *testing.T) {
 	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
 	if got := do(h, "GET", "/healthz", nil).Header().Get("X-Redline-Version"); got != "dev" {
 		t.Errorf("versi default = %q, harusnya dev", got)
+	}
+}
+
+func configServer(fs *fakeStore) (*Server, http.Handler) {
+	env := map[string]string{"legacy": "https://env.example/docs"}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Contracts: contract.NewRegistry(env), EnvSpecs: env,
+		SourceCheck: func(_ context.Context, raw string) contract.SourceCheck {
+			switch {
+			case strings.Contains(raw, "documentation"):
+				return contract.SourceCheck{OK: false, URL: raw, Kind: "html",
+					Error: "URL mengembalikan halaman HTML (Swagger UI), bukan dokumen JSON"}
+			case strings.Contains(raw, "broken"):
+				return contract.SourceCheck{OK: false, URL: raw, Kind: "status", Error: "URL membalas HTTP 404"}
+			default:
+				return contract.SourceCheck{OK: true, URL: raw, Version: "OpenAPI 3.2.0",
+					Title: "Toolshop API", Endpoints: 19}
+			}
+		},
+	}
+	return srv, srv.Routes()
+}
+
+func TestConfigShowsDatabaseAndEnvironmentSources(t *testing.T) {
+	fs := &fakeStore{sources: []store.ContractSource{{
+		Project: "toolshop", URL: "https://db.example/docs", Enabled: true,
+		LastStatus: "valid", LastVersion: "OpenAPI 3.2.0", LastEndpoints: 19,
+	}}}
+	_, h := configServer(fs)
+
+	rec := do(h, http.MethodGet, "/api/config", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("config = %d: %s", rec.Code, rec.Body)
+	}
+	for _, want := range []string{
+		`"project": "toolshop"`, `"origin": "database"`, `"project": "legacy"`, `"origin": "environment"`,
+		`"last_endpoints": 19`, `"delivery": false`, `"available_events"`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("config tidak memuat %s: %s", want, rec.Body)
+		}
+	}
+}
+
+func TestSaveContractSourceRejectsHTMLAndAppliesValid(t *testing.T) {
+	fs := &fakeStore{}
+	srv, h := configServer(fs)
+
+	rec := do(h, http.MethodPut, "/api/config/contracts",
+		strings.NewReader(`{"project":"toolshop","url":"https://api.example.com/api/documentation"}`))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "HTML") {
+		t.Fatalf("URL HTML = %d: %s", rec.Code, rec.Body)
+	}
+	if len(fs.sources) != 0 {
+		t.Errorf("source invalid tidak boleh disimpan: %+v", fs.sources)
+	}
+
+	rec = do(h, http.MethodPut, "/api/config/contracts",
+		strings.NewReader(`{"project":"toolshop","url":"https://api.example.com/docs"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"last_endpoints": 19`) {
+		t.Fatalf("save valid = %d: %s", rec.Code, rec.Body)
+	}
+	if url, _ := srv.Contracts.URL("toolshop"); url != "https://api.example.com/docs" {
+		t.Errorf("registry tidak diperbarui: %q", url)
+	}
+	if len(fs.sources) != 1 || fs.sources[0].LastStatus != "valid" {
+		t.Errorf("source tidak tersimpan dengan status valid: %+v", fs.sources)
+	}
+
+	rec = do(h, http.MethodPut, "/api/config/contracts",
+		strings.NewReader(`{"project":"bad project","url":"https://api.example.com/docs"}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("project invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestDeleteContractSourceRestoresEnvironmentFallback(t *testing.T) {
+	fs := &fakeStore{sources: []store.ContractSource{{Project: "legacy", URL: "https://db.example/docs", Enabled: true}}}
+	srv, h := configServer(fs)
+	srv.Contracts.Set("legacy", "https://db.example/docs")
+
+	rec := do(h, http.MethodDelete, "/api/config/contracts?project=legacy", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", rec.Code, rec.Body)
+	}
+	if url, _ := srv.Contracts.URL("legacy"); url != "https://env.example/docs" {
+		t.Errorf("fallback env tidak dipakai: %q", url)
+	}
+	if rec := do(h, http.MethodDelete, "/api/config/contracts?project=legacy", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("delete kedua = %d, want 404", rec.Code)
+	}
+}
+
+func TestContractCheckPersistsResult(t *testing.T) {
+	fs := &fakeStore{sources: []store.ContractSource{{Project: "toolshop", URL: "https://api.example.com/docs", Enabled: true}}}
+	srv, h := configServer(fs)
+	srv.Contracts.Set("toolshop", "https://api.example.com/docs")
+
+	rec := do(h, http.MethodPost, "/api/config/contracts/check", strings.NewReader(`{"project":"toolshop"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok": true`) {
+		t.Fatalf("check = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.sources[0].LastStatus != "valid" || fs.sources[0].LastEndpoints != 19 {
+		t.Errorf("hasil check tidak disimpan: %+v", fs.sources[0])
+	}
+	if rec := do(h, http.MethodPost, "/api/config/contracts/check", strings.NewReader(`{"project":"missing"}`)); rec.Code != http.StatusNotFound {
+		t.Errorf("check project tanpa source = %d, want 404", rec.Code)
+	}
+}
+
+func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
+	fs := &fakeStore{}
+	_, h := configServer(fs)
+
+	rec := do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://hooks.slack.com/services/T000/B000/SECRET","events":["new_failure"]}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save notifications = %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "SECRET") || !strings.Contains(rec.Body.String(), "••••") {
+		t.Errorf("webhook tidak disamarkan: %s", rec.Body)
+	}
+	if fs.notifications.WebhookURL != "https://hooks.slack.com/services/T000/B000/SECRET" {
+		t.Errorf("webhook asli tidak tersimpan: %q", fs.notifications.WebhookURL)
+	}
+
+	// The UI sends the masked value back when the operator edits another field; keep the stored secret.
+	rec = do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://hooks.slack.com/services/••••/••••","events":["new_failure","regressed"]}`))
+	if rec.Code != http.StatusOK || fs.notifications.WebhookURL != "https://hooks.slack.com/services/T000/B000/SECRET" {
+		t.Errorf("masked round-trip menghapus secret: %d %q", rec.Code, fs.notifications.WebhookURL)
+	}
+
+	if rec := do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"","events":["new_failure"]}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("enabled tanpa webhook = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":false,"webhook_url":"","events":["bogus"]}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("event tidak dikenal = %d, want 400", rec.Code)
+	}
+
+	rec = do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://hooks.example.com/hook?token=QUERYSECRET","events":["new_failure"]}`))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "QUERYSECRET") ||
+		!strings.Contains(rec.Body.String(), "?••••") {
+		t.Errorf("query webhook tidak disamarkan: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = do(h, http.MethodPost, "/api/config/notifications/test", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mock": true`) ||
+		!strings.Contains(rec.Body.String(), `"sent": false`) {
+		t.Errorf("test notification = %d: %s", rec.Code, rec.Body)
 	}
 }
