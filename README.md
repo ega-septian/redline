@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -350,6 +350,9 @@ Voyage AI.
 | `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
 | `GET /api/tests`                                                   | Test health: pass/flake rates, top failures, per-test rows     |
 | `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
+| `GET /api/tests/quarantine`                                        | Active quarantined tests                                       |
+| `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
+| `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -366,6 +369,7 @@ Voyage AI.
 
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
+Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`

@@ -28,23 +28,27 @@ type TestHealthSummary struct {
 
 // TestHealthRow is one test across runs, keyed by @TC- ID when it has one.
 type TestHealthRow struct {
-	Key           string     `json:"key"`
-	TestKey       string     `json:"test"`
-	TestCaseID    string     `json:"test_case_id,omitempty"`
-	Project       string     `json:"project,omitempty"`
-	Total         int        `json:"total"`
-	Passed        int        `json:"passed"`
-	Failed        int        `json:"failed"`
-	Flaky         int        `json:"flaky"`
-	Skipped       int        `json:"skipped"`
-	PassRate      float64    `json:"pass_rate"`
-	FlakeRate     float64    `json:"flake_rate"`
-	AvgDurationMs int        `json:"avg_duration_ms"`
-	LastStatus    string     `json:"last_status"`
-	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
-	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
-	TriageOwner   string     `json:"triage_owner,omitempty"`
-	TriageStatus  string     `json:"triage_status,omitempty"`
+	Key              string     `json:"key"`
+	TestKey          string     `json:"test"`
+	TestCaseID       string     `json:"test_case_id,omitempty"`
+	Project          string     `json:"project,omitempty"`
+	Total            int        `json:"total"`
+	Passed           int        `json:"passed"`
+	Failed           int        `json:"failed"`
+	Flaky            int        `json:"flaky"`
+	Skipped          int        `json:"skipped"`
+	PassRate         float64    `json:"pass_rate"`
+	FlakeRate        float64    `json:"flake_rate"`
+	AvgDurationMs    int        `json:"avg_duration_ms"`
+	LastStatus       string     `json:"last_status"`
+	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
+	LastFailureAt    *time.Time `json:"last_failure_at,omitempty"`
+	TriageOwner      string     `json:"triage_owner,omitempty"`
+	TriageStatus     string     `json:"triage_status,omitempty"`
+	Quarantined      bool       `json:"quarantined"`
+	QuarantineOwner  string     `json:"quarantine_owner,omitempty"`
+	QuarantineReason string     `json:"quarantine_reason,omitempty"`
+	QuarantineUntil  *time.Time `json:"quarantine_until,omitempty"`
 }
 
 // TestRunPoint is one result in a test's timeline.
@@ -122,7 +126,13 @@ func (s *Store) TestHealth(ctx context.Context, project string, days int) (TestH
 	summary.ResolvedFailures = resolved
 	summary.MTTRHours = mttr
 
-	return summary, aggregateTests(rows), nil
+	tests := aggregateTests(rows)
+	active, err := s.ActiveQuarantines(ctx)
+	if err != nil {
+		return TestHealthSummary{}, nil, err
+	}
+	applyQuarantine(tests, active)
+	return summary, tests, nil
 }
 
 // TestHistory returns one test's aggregate and its timeline, newest first.
@@ -141,6 +151,11 @@ func (s *Store) TestHistory(ctx context.Context, test string, days, limit int) (
 	}
 
 	tests := aggregateTests(rows)
+	active, err := s.ActiveQuarantines(ctx)
+	if err != nil {
+		return TestHealthRow{}, nil, err
+	}
+	applyQuarantine(tests, active)
 	row := tests[0]
 	for _, candidate := range tests {
 		if candidate.Key == test || candidate.TestKey == test {

@@ -36,6 +36,10 @@ type Store interface {
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
 	TestHealth(ctx context.Context, project string, days int) (store.TestHealthSummary, []store.TestHealthRow, error)
 	TestHistory(ctx context.Context, test string, days, limit int) (store.TestHealthRow, []store.TestRunPoint, error)
+	FindTest(ctx context.Context, test string) (store.TestIdentity, error)
+	SetQuarantine(ctx context.Context, q store.Quarantine) (store.Quarantine, error)
+	ReleaseQuarantine(ctx context.Context, key, by string) (store.Quarantine, error)
+	ActiveQuarantines(ctx context.Context) ([]store.Quarantine, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
@@ -124,6 +128,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
 	mux.HandleFunc("GET /api/tests/history", s.handleTestHistory)
 	mux.HandleFunc("GET /api/tests", s.handleTestHealth)
+	mux.HandleFunc("GET /api/tests/quarantine", s.handleListQuarantine)
+	mux.HandleFunc("PUT /api/tests/quarantine", s.handleSetQuarantine)
+	mux.HandleFunc("DELETE /api/tests/quarantine", s.handleReleaseQuarantine)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)
@@ -350,6 +357,107 @@ func queryInt(r *http.Request, name string, fallback, minValue, maxValue int) (i
 		return 0, fmt.Errorf("%s harus angka antara %d dan %d", name, minValue, maxValue)
 	}
 	return value, nil
+}
+
+func (s *Server) handleListQuarantine(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Store.ActiveQuarantines(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleSetQuarantine(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Test   string `json:"test"`
+		Owner  string `json:"owner"`
+		Reason string `json:"reason"`
+		By     string `json:"by"`
+		Days   int    `json:"days"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"test\": \"...\", \"owner\": \"...\", \"reason\": \"...\", \"days\": 7}")
+		return
+	}
+	body.Test = strings.TrimSpace(body.Test)
+	body.Owner = strings.TrimSpace(body.Owner)
+	body.Reason = strings.TrimSpace(body.Reason)
+	if body.Test == "" || body.Owner == "" || body.Reason == "" {
+		writeError(w, http.StatusBadRequest, "test, owner dan reason wajib diisi")
+		return
+	}
+	if body.Days == 0 {
+		body.Days = 7
+	}
+	if body.Days < 1 || body.Days > 90 {
+		writeError(w, http.StatusBadRequest, "days harus antara 1 dan 90")
+		return
+	}
+	by := strings.TrimSpace(body.By)
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			by = user
+		}
+	}
+	if by == "" {
+		by = "api"
+	}
+	identity, err := s.Store.FindTest(r.Context(), body.Test)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "test tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	q, err := s.Store.SetQuarantine(r.Context(), store.Quarantine{
+		Key: identity.Key, TestKey: identity.TestKey, TestCaseID: identity.TestCaseID,
+		Project: identity.Project, Owner: body.Owner, Reason: body.Reason, By: by,
+		Until: time.Now().AddDate(0, 0, body.Days),
+	})
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) handleReleaseQuarantine(w http.ResponseWriter, r *http.Request) {
+	test := strings.TrimSpace(r.URL.Query().Get("test"))
+	if test == "" {
+		writeError(w, http.StatusBadRequest, "test wajib diisi")
+		return
+	}
+	by := strings.TrimSpace(r.URL.Query().Get("by"))
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			by = user
+		}
+	}
+	if by == "" {
+		by = "api"
+	}
+	identity, err := s.Store.FindTest(r.Context(), test)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "test tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	q, err := s.Store.ReleaseQuarantine(r.Context(), identity.Key, by)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "quarantine aktif tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {

@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Activity, AlertTriangle, Clock, Search, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import type { TestHealthRow, TestRunPoint } from "@/api/types";
@@ -27,6 +27,7 @@ export function HealthPage() {
   });
   const summary = healthQuery.data?.summary;
   const tests = healthQuery.data?.tests ?? [];
+  const quarantined = tests.filter((test) => test.quarantined).length;
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -118,7 +119,7 @@ export function HealthPage() {
         </div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Kpi label="Runs" value={String(summary?.runs ?? 0)} hint={`${summary?.results ?? 0} results`} />
         <Kpi
           label="Pass rate"
@@ -135,6 +136,12 @@ export function HealthPage() {
         <Kpi label="Open failures" value={String(summary?.open_failures ?? 0)} hint="open or regressed" tone="danger" />
         <Kpi label="New failures" value={String(summary?.new_failures ?? 0)} hint={`in the last ${days}d`} />
         <Kpi label="Resolved" value={String(summary?.resolved_failures ?? 0)} hint={`in the last ${days}d`} tone="ok" />
+        <Kpi
+          label="Quarantined"
+          value={String(quarantined)}
+          hint="active exceptions"
+          tone="warn"
+        />
         <Kpi
           label="MTTR"
           value={summary && summary.mttr_hours > 0 ? `${summary.mttr_hours.toFixed(1)} h` : "—"}
@@ -208,7 +215,7 @@ export function HealthPage() {
         </div>
 
         {selectedTest && (
-          <TestDetail row={selectedTest} days={days} onClose={() => setSelected(null)} />
+          <TestDetail key={selectedTest.key} row={selectedTest} days={days} onClose={() => setSelected(null)} />
         )}
       </div>
       {!selectedTest && (
@@ -231,7 +238,14 @@ function TestRow({ test, active, onSelect }: { test: TestHealthRow; active: bool
       )}
     >
       <div className="min-w-0">
-        <div className="truncate text-[12.5px] text-ink">{shortTitle(test.test)}</div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[12.5px] text-ink">{shortTitle(test.test)}</span>
+          {test.quarantined && (
+            <Badge tone="env" className="shrink-0">
+              Q
+            </Badge>
+          )}
+        </div>
         <div className="truncate font-mono text-[10.5px] text-faint">{test.test}</div>
       </div>
       <span className="truncate font-mono text-[10.5px] text-muted">{test.test_case_id || "—"}</span>
@@ -290,6 +304,7 @@ function TestDetail({ row, days, onClose }: { row: TestHealthRow; days: number; 
       </div>
 
       <div className="p-4">
+        <QuarantinePanel row={row} />
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-[0.8px] text-faint">Timeline</span>
           <span className="text-[10.5px] text-faint">last {days}d</span>
@@ -310,6 +325,132 @@ function TestDetail({ row, days, onClose }: { row: TestHealthRow; days: number; 
         </div>
       </div>
     </Card>
+  );
+}
+
+function QuarantinePanel({ row }: { row: TestHealthRow }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [owner, setOwner] = useState(row.triage_owner ?? "");
+  const [reason, setReason] = useState("");
+  const [days, setDays] = useState("7");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["test-health"] }),
+      queryClient.invalidateQueries({ queryKey: ["test-history"] }),
+    ]);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!owner.trim() || !reason.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.quarantine({
+        test: row.key,
+        owner: owner.trim(),
+        reason: reason.trim(),
+        days: Number(days),
+      });
+      setOpen(false);
+      setReason("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Quarantine failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function release() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.releaseQuarantine(row.key);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Release failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (row.quarantined) {
+    return (
+      <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 px-2.5 py-2 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="env">quarantined</Badge>
+          <span className="text-faint">
+            until {row.quarantine_until ? when(row.quarantine_until) : "—"}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            onClick={release}
+            disabled={busy}
+          >
+            {busy ? "Releasing…" : "Release"}
+          </Button>
+        </div>
+        <div className="mt-1 text-muted">
+          {row.quarantine_owner || "—"} · {row.quarantine_reason || "no reason"}
+        </div>
+        {error && <div className="mt-1 text-danger">{error}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setOpen((value) => !value)}>
+          {open ? "Cancel" : "Quarantine"}
+        </Button>
+        <span className="text-[10.5px] text-faint">Known failure, reviewed and time-boxed.</span>
+      </div>
+      {open && (
+        <form
+          onSubmit={submit}
+          className="mt-2 flex flex-col gap-1.5 rounded-md border border-line-soft bg-canvas p-2"
+        >
+          <Input
+            value={owner}
+            onChange={(event) => setOwner(event.target.value)}
+            placeholder="owner, e.g. ega"
+            aria-label="Quarantine owner"
+            className="h-7 text-[11px]"
+          />
+          <Input
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="reason or issue link"
+            aria-label="Quarantine reason"
+            className="h-7 text-[11px]"
+          />
+          <div className="flex items-center gap-1.5">
+            <select
+              value={days}
+              onChange={(event) => setDays(event.target.value)}
+              aria-label="Quarantine days"
+              className="h-7 rounded-md border border-line bg-canvas px-1.5 text-[11px] text-ink outline-none focus-visible:border-brand/60"
+            >
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+            </select>
+            <Button type="submit" size="sm" disabled={busy || !owner.trim() || !reason.trim()}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </form>
+      )}
+      {error && <div className="mt-1 text-[11px] text-danger">{error}</div>}
+    </div>
   );
 }
 
