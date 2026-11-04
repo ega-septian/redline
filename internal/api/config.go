@@ -21,13 +21,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(dst)
 }
 
-// contractSourceView is one row of the Config page. Origin tells whether the source comes from the
-// database (editable) or from OPENAPI_SPECS (fallback, read-only).
+// contractSourceView is one row of the Config page.
 type contractSourceView struct {
 	Project        string     `json:"project"`
 	URL            string     `json:"url"`
 	Enabled        bool       `json:"enabled"`
-	Origin         string     `json:"origin"`
 	By             string     `json:"by,omitempty"`
 	UpdatedAt      *time.Time `json:"updated_at,omitempty"`
 	LastCheckedAt  *time.Time `json:"last_checked_at,omitempty"`
@@ -55,31 +53,16 @@ type configView struct {
 	Notifications notificationView     `json:"notifications"`
 }
 
-// handleGetConfig: GET /api/config — database sources plus the environment fallback, and the saved
-// notification settings. The database value wins for the same project.
+// handleGetConfig: GET /api/config — every stored contract source and the notification settings.
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	sources, err := s.Store.ContractSources(r.Context())
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	env := map[string]string{}
-	if s.EnvSpecs != nil {
-		env = s.EnvSpecs
-	}
-	rows := make([]contractSourceView, 0, len(sources)+len(env))
-	seen := map[string]bool{}
+	rows := make([]contractSourceView, 0, len(sources))
 	for _, source := range sources {
-		seen[source.Project] = true
-		rows = append(rows, sourceView(source, "database"))
-	}
-	for project, url := range env {
-		if seen[project] {
-			continue
-		}
-		rows = append(rows, contractSourceView{
-			Project: project, URL: url, Enabled: true, Origin: "environment", LastStatus: "unknown",
-		})
+		rows = append(rows, sourceView(source))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Project < rows[j].Project })
 
@@ -146,11 +129,10 @@ func (s *Server) handleSaveContract(w http.ResponseWriter, r *http.Request) {
 		source = saved
 	}
 	s.applyContractSource(project, specURL)
-	writeJSON(w, http.StatusOK, sourceView(source, "database"))
+	writeJSON(w, http.StatusOK, sourceView(source))
 }
 
-// handleDeleteContract: DELETE /api/config/contracts?project=... — remove the override and fall back
-// to OPENAPI_SPECS when the project also exists there.
+// handleDeleteContract: DELETE /api/config/contracts?project=... — remove the source and stop using it.
 func (s *Server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project == "" {
@@ -165,9 +147,7 @@ func (s *Server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	if url, ok := s.EnvSpecs[project]; ok {
-		s.applyContractSource(project, url)
-	} else if s.Contracts != nil {
+	if s.Contracts != nil {
 		s.Contracts.Delete(project)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": project})
@@ -301,9 +281,9 @@ func (s *Server) actor(r *http.Request, body string) string {
 	return by
 }
 
-func sourceView(src store.ContractSource, origin string) contractSourceView {
+func sourceView(src store.ContractSource) contractSourceView {
 	view := contractSourceView{
-		Project: src.Project, URL: src.URL, Enabled: src.Enabled, Origin: origin,
+		Project: src.Project, URL: src.URL, Enabled: src.Enabled,
 		By: src.By, LastCheckedAt: src.LastCheckedAt, LastStatus: src.LastStatus,
 		LastError: src.LastError, LastVersion: src.LastVersion, LastEndpoints: src.LastEndpoints,
 		LastDurationMS: src.LastDuration,

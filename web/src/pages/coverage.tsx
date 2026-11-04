@@ -63,12 +63,15 @@ export function CoveragePage() {
           <div className="font-semibold text-ink">No contract snapshot for {coverage?.project || appliedProject}</div>
           <p className="mt-1 text-xs leading-relaxed">
             {coverage?.message ||
-              "Set OPENAPI_SPECS on the server, then send a run so Redline can store the contract."}
+              "Add a contract source in Config, then send a run so Redline can store the contract."}
           </p>
           <p className="mt-2 text-[11px] text-faint">
-            The URL must be reachable from inside the Redline container, for example
-            <span className="ml-1 font-mono">toolshop=https://api.practicesoftwaretesting.com/docs</span>.
+            The URL must be reachable from the Redline server, not only from your browser. For Docker,
+            use <span className="font-mono">host.docker.internal</span> for a service on the host.
           </p>
+          <Link to="/config" className="mt-3 inline-block text-[11px] text-brand hover:underline">
+            Open Config →
+          </Link>
         </State>
       </>
     );

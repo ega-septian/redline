@@ -113,8 +113,6 @@ type Server struct {
 	CSRF    func(*http.Request) bool
 	// Contracts is the runtime OpenAPI registry: Config writes are applied without a restart.
 	Contracts *contract.Registry
-	// EnvSpecs is the startup OPENAPI_SPECS map, used as fallback when a database source is removed.
-	EnvSpecs map[string]string
 	// SourceCheck validates one spec URL; nil uses contract.ValidateSource (tests stub the network).
 	SourceCheck func(context.Context, string) contract.SourceCheck
 }

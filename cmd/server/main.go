@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -149,23 +148,14 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Info("analisis AI mati (ANTHROPIC_API_KEY kosong); hanya aturan deterministik yang jalan")
 	}
-	specs := map[string]string{}
-	if cfg.OpenAPISpecs != "" {
-		parsed, err := contract.ParseSpecs(cfg.OpenAPISpecs)
-		if err != nil {
-			return err
-		}
-		specs = parsed
-		log.Info("kontrak API dari OPENAPI_SPECS", "project", strings.Join(slices.Sorted(maps.Keys(specs)), ","))
-	} else {
-		log.Info("OPENAPI_SPECS kosong; contract source bisa diatur dari halaman Config")
-	}
-	registry := contract.NewRegistry(specs)
+	// Contract sources live in the database and are managed from the Config page; no environment override.
+	registry := contract.NewRegistry(nil)
 	analyzer.Contracts = registry
-	// Sumber dari database menimpa OPENAPI_SPECS untuk project yang sama, tanpa perlu restart.
 	if sources, err := db.ContractSources(ctx); err != nil {
-		log.Warn("gagal membaca contract sources dari database; memakai OPENAPI_SPECS", "err", err)
-	} else if len(sources) > 0 {
+		log.Warn("gagal membaca contract sources; analisis kontrak dan Coverage mati sampai database bisa dibaca", "err", err)
+	} else if len(sources) == 0 {
+		log.Warn("belum ada contract source; analisis kontrak dan Coverage mati sampai source ditambahkan di halaman Config")
+	} else {
 		for _, source := range sources {
 			if source.Enabled && source.URL != "" {
 				registry.Set(source.Project, source.URL)
@@ -174,6 +164,9 @@ func run(log *slog.Logger) error {
 			}
 		}
 		log.Info("contract sources dari database aktif", "project", strings.Join(sourcesProjects(sources), ","))
+	}
+	if os.Getenv("OPENAPI_SPECS") != "" {
+		log.Warn("OPENAPI_SPECS diabaikan; atur contract source di halaman Config")
 	}
 	if cfg.VoyageAPIKey != "" {
 		analyzer.Embed = embed.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel, cfg.VoyageBaseURL)
@@ -185,7 +178,7 @@ func run(log *slog.Logger) error {
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion(),
-		Contracts: registry, EnvSpecs: specs}
+		Contracts: registry}
 	sessions := auth.New(cfg.APIKey, cfg.Users)
 	srv.AuthEnabled = sessions.Enabled()
 	srv.ValidateKey = sessions.ValidKey

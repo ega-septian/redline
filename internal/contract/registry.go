@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -21,19 +20,10 @@ type Registry struct {
 
 func NewRegistry(specs map[string]string) *Registry {
 	r := &Registry{specs: map[string]string{}, HTTP: &http.Client{Timeout: 20 * time.Second}}
-	r.Replace(specs)
-	return r
-}
-
-// Specs returns a copy of the configured sources, so callers cannot mutate the registry by accident.
-func (r *Registry) Specs() map[string]string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make(map[string]string, len(r.specs))
-	for project, url := range r.specs {
-		out[project] = url
+	for project, url := range specs {
+		r.specs[project] = url
 	}
-	return out
+	return r
 }
 
 // URL returns the spec URL for one project.
@@ -42,16 +32,6 @@ func (r *Registry) URL(project string) (string, bool) {
 	defer r.mu.RUnlock()
 	url, ok := r.specs[project]
 	return url, ok
-}
-
-// Replace swaps every source at once. Used at startup after the database config is loaded.
-func (r *Registry) Replace(specs map[string]string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.specs = make(map[string]string, len(specs))
-	for project, url := range specs {
-		r.specs[project] = url
-	}
 }
 
 // Set adds or replaces one project source at runtime.
@@ -66,23 +46,6 @@ func (r *Registry) Delete(project string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.specs, project)
-}
-
-// ParseSpecs reads "toolshop=http://localhost:8091/docs,gorest=https://..." (the OPENAPI_SPECS format).
-func ParseSpecs(s string) (map[string]string, error) {
-	out := map[string]string{}
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		project, url, ok := strings.Cut(part, "=")
-		if !ok || strings.TrimSpace(project) == "" || !strings.HasPrefix(strings.TrimSpace(url), "http") {
-			return nil, fmt.Errorf("OPENAPI_SPECS: %q harus berbentuk project=http(s)://url", part)
-		}
-		out[strings.TrimSpace(project)] = strings.TrimSpace(url)
-	}
-	return out, nil
 }
 
 // Fetch mengambil dokumen kontrak project. url kosong (tanpa error) kalau project tidak punya kontrak.

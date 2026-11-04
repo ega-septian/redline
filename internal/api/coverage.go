@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strconv"
@@ -54,9 +55,13 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(snapshots) == 0 {
+		message := "No contract snapshot for this project yet. Add a contract source in Config, then send a run."
+		if s.hasContractSource(r.Context(), project) {
+			message = "Contract source is configured. Send a run so Redline can store the first snapshot."
+		}
 		writeJSON(w, http.StatusOK, coverageResponse{
 			Available: false, Project: project,
-			Message:   "Belum ada snapshot kontrak untuk project ini. Isi OPENAPI_SPECS dan jalankan ulang.",
+			Message:   message,
 			Endpoints: []coverageEndpoint{}, Changes: []contract.ContractChange{},
 		})
 		return
@@ -134,6 +139,19 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Summary.Uncovered = response.Summary.Documented - response.Summary.Covered
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) hasContractSource(ctx context.Context, project string) bool {
+	sources, err := s.Store.ContractSources(ctx)
+	if err != nil {
+		return false
+	}
+	for _, source := range sources {
+		if source.Project == project && source.Enabled && source.URL != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedSet(set map[string]bool) []string {

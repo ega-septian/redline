@@ -172,9 +172,11 @@ Everything has a default that works on a laptop. The settings you are most likel
 
 | Integration                | Default | Meaning                                                     |
 | -------------------------- | ------- | ----------------------------------------------------------- |
-| `OPENAPI_SPECS`            | empty   | Contract URL per project, reachable from the server, e.g. `toolshop=https://api.practicesoftwaretesting.com/docs` |
 | `REPORTPORTAL_URL`, `REPORTPORTAL_API_KEY` | empty | Fill ReportPortal with causes (optional) |
 | `NEO4J_URI`                | `bolt://localhost:7688` | Neo4j/DozerDB address                        |
+
+Contract sources are not an environment setting: add them in **Config** (`/ui/config`) and they are
+stored in Neo4j. See [Config page](#config-page).
 
 Only CI changes a failure's status by default, so a half-written test on a laptop does not become a team
 failure. Working alone? Use `STATUS_FROM=all`.
@@ -379,16 +381,32 @@ Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
 Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
 
-Coverage compares the newest contract snapshot with the calls recorded by the Redline fixture. `OPENAPI_SPECS`
-must point to a URL the **server** can reach: inside a container `localhost` is the container, so use
-`host.docker.internal` for a service on the host or a public docs URL.
+Coverage compares the newest contract snapshot with the calls recorded by the Redline fixture. Contract
+sources are configured in **Config**; the URL must be reachable from the **server**, not only from the
+browser. Inside a container `localhost` is the container, so use `host.docker.internal` for a service
+on the host or a public docs URL.
 
 ### Config page
 
-`/ui/config` changes contract sources without editing `.env` or restarting. A saved source is applied to
-the running registry immediately, so the next run and the Coverage page use it. The database value
-overrides `OPENAPI_SPECS` for the same project; deleting it falls back to the environment value. Old
-contract snapshots are never deleted, so Coverage still shows drift.
+`/ui/config` is the only place to manage contract sources: they are stored in Neo4j and loaded when the
+server starts, and a saved source is applied to the running registry immediately. There is no
+environment override. Old contract snapshots are never deleted, so Coverage still shows drift after a
+source changes. Because the configuration lives in the database, backing up the Neo4j volume also backs
+up the contract sources.
+
+A fresh install starts with no source. Add the OpenAPI JSON URL in Config, then run the suite. For a
+headless install (CI, a script) seed the same API instead:
+
+```bash
+curl -X PUT http://localhost:8787/api/config/contracts \
+  -H "Authorization: Bearer $REDLINE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"project": "toolshop", "url": "https://api.practicesoftwaretesting.com/docs"}'
+```
+
+The check returns the OpenAPI version and endpoint count, so a bad URL fails immediately instead of
+silently disabling contract analysis. `OPENAPI_SPECS` is no longer read; if it is still set the server
+logs a warning and ignores it.
 
 The URL is validated by fetching and parsing it **from the server**: only `http`/`https`, 10 MB and a
 20 second timeout. A Swagger UI page is rejected with an explanation, and when the HTML contains the
