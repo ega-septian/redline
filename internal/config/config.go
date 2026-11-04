@@ -56,9 +56,6 @@ type Config struct {
 	// Neo4jDatabaseReset MENGHAPUS isi database Neo4j itu saat server start (untuk benchmark).
 	Neo4jDatabaseReset bool
 
-	// Kontrak API per project Playwright: "toolshop=http://localhost:8091/docs,gorest=https://...". Kosong = tanpa kontrak.
-	OpenAPISpecs string
-
 	// ReportPortal: Redline mengisi jenis defect dan komentar untuk test yang masih "To Investigate".
 	// Kosongkan REPORTPORTAL_URL untuk mematikannya.
 	ReportPortalURL     string
@@ -146,8 +143,6 @@ func Load() (Config, error) {
 		AnthropicInputPrice:  inputPrice,
 		AnthropicOutputPrice: outputPrice,
 		AIDailyBudgetUSD:     budget,
-
-		OpenAPISpecs: os.Getenv("OPENAPI_SPECS"),
 
 		Neo4jURI:      getenv("NEO4J_URI", "bolt://localhost:7688"),
 		Neo4jUsername: getenv("NEO4J_USERNAME", "neo4j"),

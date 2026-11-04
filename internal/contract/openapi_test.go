@@ -56,11 +56,7 @@ func TestFetchAndDescribe(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(data) }))
 	defer srv.Close()
 
-	specs, err := ParseSpecs("toolshop=" + srv.URL + ", bench=" + srv.URL)
-	if err != nil || len(specs) != 2 {
-		t.Fatalf("ParseSpecs: %v %v", specs, err)
-	}
-	r := NewRegistry(specs)
+	r := NewRegistry(map[string]string{"toolshop": srv.URL, "bench": srv.URL})
 	url, doc, err := r.Fetch(context.Background(), "toolshop")
 	if err != nil || url != srv.URL || len(doc) == 0 {
 		t.Fatalf("Fetch: %q %d %v", url, len(doc), err)
@@ -76,9 +72,6 @@ func TestFetchAndDescribe(t *testing.T) {
 	text := d.Describe(calls)
 	if strings.Count(text, "GET /brands/:id") != 1 || !strings.Contains(text, "GET /brand/:id: tidak ada di kontrak") {
 		t.Errorf("ringkasan salah:\n%s", text)
-	}
-	if _, err := ParseSpecs("toolshop"); err == nil {
-		t.Errorf("format salah harus error")
 	}
 }
 

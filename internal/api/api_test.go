@@ -974,10 +974,9 @@ func TestVersionDefault(t *testing.T) {
 }
 
 func configServer(fs *fakeStore) (*Server, http.Handler) {
-	env := map[string]string{"legacy": "https://env.example/docs"}
 	srv := &Server{
 		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Contracts: contract.NewRegistry(env), EnvSpecs: env,
+		Contracts: contract.NewRegistry(nil),
 		SourceCheck: func(_ context.Context, raw string) contract.SourceCheck {
 			switch {
 			case strings.Contains(raw, "documentation"):
@@ -994,7 +993,7 @@ func configServer(fs *fakeStore) (*Server, http.Handler) {
 	return srv, srv.Routes()
 }
 
-func TestConfigShowsDatabaseAndEnvironmentSources(t *testing.T) {
+func TestConfigListsSources(t *testing.T) {
 	fs := &fakeStore{sources: []store.ContractSource{{
 		Project: "toolshop", URL: "https://db.example/docs", Enabled: true,
 		LastStatus: "valid", LastVersion: "OpenAPI 3.2.0", LastEndpoints: 19,
@@ -1006,12 +1005,26 @@ func TestConfigShowsDatabaseAndEnvironmentSources(t *testing.T) {
 		t.Fatalf("config = %d: %s", rec.Code, rec.Body)
 	}
 	for _, want := range []string{
-		`"project": "toolshop"`, `"origin": "database"`, `"project": "legacy"`, `"origin": "environment"`,
-		`"last_endpoints": 19`, `"delivery": false`, `"available_events"`,
+		`"project": "toolshop"`, `"last_endpoints": 19`, `"delivery": false`, `"available_events"`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("config tidak memuat %s: %s", want, rec.Body)
 		}
+	}
+	if strings.Contains(rec.Body.String(), `"origin"`) {
+		t.Errorf("config masih memakai konsep origin: %s", rec.Body)
+	}
+}
+
+func TestConfigEmptyOnFreshInstall(t *testing.T) {
+	_, h := configServer(&fakeStore{})
+	rec := do(h, http.MethodGet, "/api/config", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"contracts": []`) {
+		t.Fatalf("fresh install = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"enabled": false`) ||
+		!strings.Contains(rec.Body.String(), `"delivery": false`) {
+		t.Errorf("notifikasi default salah: %s", rec.Body)
 	}
 }
 
@@ -1047,7 +1060,7 @@ func TestSaveContractSourceRejectsHTMLAndAppliesValid(t *testing.T) {
 	}
 }
 
-func TestDeleteContractSourceRestoresEnvironmentFallback(t *testing.T) {
+func TestDeleteContractSourceRemovesFromRegistry(t *testing.T) {
 	fs := &fakeStore{sources: []store.ContractSource{{Project: "legacy", URL: "https://db.example/docs", Enabled: true}}}
 	srv, h := configServer(fs)
 	srv.Contracts.Set("legacy", "https://db.example/docs")
@@ -1056,8 +1069,8 @@ func TestDeleteContractSourceRestoresEnvironmentFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete = %d: %s", rec.Code, rec.Body)
 	}
-	if url, _ := srv.Contracts.URL("legacy"); url != "https://env.example/docs" {
-		t.Errorf("fallback env tidak dipakai: %q", url)
+	if url, ok := srv.Contracts.URL("legacy"); ok {
+		t.Errorf("source masih aktif setelah delete: %q", url)
 	}
 	if rec := do(h, http.MethodDelete, "/api/config/contracts?project=legacy", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("delete kedua = %d, want 404", rec.Code)
@@ -1124,5 +1137,21 @@ func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mock": true`) ||
 		!strings.Contains(rec.Body.String(), `"sent": false`) {
 		t.Errorf("test notification = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestCoverageEmptyMessages(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/coverage?project=other", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Add a contract source in Config") {
+		t.Errorf("tanpa source = %d: %s", rec.Code, rec.Body)
+	}
+
+	fs.sources = []store.ContractSource{{Project: "other", URL: "https://api.example.com/docs", Enabled: true}}
+	rec = do(h, http.MethodGet, "/api/coverage?project=other", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Contract source is configured") {
+		t.Errorf("dengan source = %d: %s", rec.Code, rec.Body)
 	}
 }

@@ -96,7 +96,7 @@ export function ConfigPage() {
           <span className="text-[12.5px] font-semibold">Contract sources</span>
           <Badge tone={valid > 0 ? "flaky" : "neutral"} className="gap-1.5">
             <span className={cn("h-1.5 w-1.5 rounded-full", valid > 0 ? "bg-ok" : "bg-faint")} />
-            {valid} valid
+            {sources.length === 0 ? "no sources" : `${valid} valid`}
           </Badge>
           <span className="hidden text-[11px] text-faint md:inline">
             OpenAPI JSON used for contract analysis and coverage
@@ -167,9 +167,9 @@ export function ConfigPage() {
         )}
 
         <div className="border-t border-line px-3.5 py-2.5 text-[11px] leading-relaxed text-faint">
-          The database source overrides <span className="font-mono">OPENAPI_SPECS</span> for the same
-          project; the environment value is only a fallback. Changing a source does not delete old
-          snapshots, so Coverage can still show contract drift.
+          Sources are stored in the database and applied to the running server immediately. Changing a
+          source does not delete old snapshots, so Coverage can still show contract drift. Back up the
+          Neo4j volume to keep this configuration.
         </div>
       </Card>
 
@@ -202,13 +202,12 @@ function SourceRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const environment = source.origin === "environment";
   return (
     <div className="grid grid-cols-[150px_minmax(0,1fr)_170px_110px_80px_150px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0 hover:bg-[#1b222b]">
       <div className="flex min-w-0 flex-col">
         <span className="truncate font-mono font-semibold text-[#cdd9e5]">{source.project}</span>
         <span className="truncate text-[10px] text-faint">
-          {environment ? "OPENAPI_SPECS" : source.by ? `by ${source.by}` : "database"}
+          {source.by ? `by ${source.by}` : "database"}
         </span>
       </div>
       <a
@@ -238,33 +237,23 @@ function SourceRow({
         </Button>
         <Button size="sm" variant="ghost" onClick={onEdit} title="Use another URL for this project">
           <Pencil className="h-3 w-3" />
-          {environment ? "Override" : "Edit"}
+          Edit
         </Button>
-        {!environment && (
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onDelete}
-            title="Remove this source"
-            aria-label={`Remove ${source.project}`}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        )}
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onDelete}
+          title="Remove this source"
+          aria-label={`Remove ${source.project}`}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
       </div>
     </div>
   );
 }
 
 function SourceStatus({ source }: { source: ApiContractSource }) {
-  if (source.origin === "environment") {
-    return (
-      <span className="flex flex-wrap items-center gap-1">
-        <Badge tone="brand">env fallback</Badge>
-        {source.last_status === "valid" && <Badge tone="flaky">valid</Badge>}
-      </span>
-    );
-  }
   if (source.last_status === "valid") {
     return (
       <span className="flex flex-wrap items-center gap-1">

@@ -7,8 +7,8 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// ContractSource is one OpenAPI document configured from the UI. The database value overrides
-// OPENAPI_SPECS, so changing it does not need a restart.
+// ContractSource is one OpenAPI document configured from the UI. It is loaded at server start and
+// applied to the running registry on save, so changing it does not need a restart.
 type ContractSource struct {
 	Project       string     `json:"project"`
 	URL           string     `json:"url"`

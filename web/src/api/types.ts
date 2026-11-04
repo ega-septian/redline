@@ -367,7 +367,6 @@ export type ApiContractSource = {
   project: string;
   url: string;
   enabled: boolean;
-  origin: "database" | "environment" | string;
   by?: string;
   updated_at?: string | null;
   last_checked_at?: string | null;

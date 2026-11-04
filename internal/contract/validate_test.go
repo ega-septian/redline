@@ -98,11 +98,6 @@ func TestRegistryRuntimeUpdates(t *testing.T) {
 	if _, ok := r.URL("toolshop"); ok {
 		t.Error("toolshop harus terhapus")
 	}
-	copy := r.Specs()
-	copy["coba2"] = "https://changed.example.com/docs"
-	if url, _ := r.URL("coba2"); url != "https://coba2.example.com/docs" {
-		t.Errorf("Specs harus menyalin map: %q", url)
-	}
 }
 
 func TestRegistryFetch(t *testing.T) {
