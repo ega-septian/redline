@@ -89,6 +89,25 @@ func (f *fakeStore) GetArtifact(_ context.Context, id int64) (store.Artifact, er
 	}
 	return store.Artifact{}, store.ErrNotFound
 }
+func (f *fakeStore) TestHealth(context.Context, string, int) (store.TestHealthSummary, []store.TestHealthRow, error) {
+	row := store.TestHealthRow{
+		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all", TestCaseID: "TC-BRD-001",
+		Total: 2, Passed: 1, Failed: 1, PassRate: 0.5, LastStatus: "failed",
+	}
+	return store.TestHealthSummary{
+		Days: 30, Runs: 1, Results: 2, Passed: 1, Failed: 1, PassRate: 0.5, OpenFailures: 1,
+	}, []store.TestHealthRow{row}, nil
+}
+func (f *fakeStore) TestHistory(_ context.Context, test string, _ int, _ int) (store.TestHealthRow, []store.TestRunPoint, error) {
+	if test != "TC-BRD-001" {
+		return store.TestHealthRow{}, nil, store.ErrNotFound
+	}
+	row := store.TestHealthRow{
+		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all", TestCaseID: "TC-BRD-001",
+		Total: 1, Failed: 1, PassRate: 0, LastStatus: "failed",
+	}
+	return row, []store.TestRunPoint{{RunID: 1, Status: "failed", DurationMs: 12}}, nil
+}
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
 	f.statuses = st
 	return []store.Group{}, nil
@@ -704,6 +723,30 @@ func TestArtifactUpload(t *testing.T) {
 	}
 	if rec := do(h, http.MethodPost, "/api/runs/1/artifacts", nil); rec.Code == http.StatusCreated {
 		t.Errorf("upload tanpa multipart tidak boleh sukses")
+	}
+}
+
+func TestTestHealth(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+
+	if rec := do(h, http.MethodGet, "/api/tests?days=7", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"TC-BRD-001"`) ||
+		!strings.Contains(rec.Body.String(), `"pass_rate": 0.5`) {
+		t.Errorf("test health = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests?days=nope", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("days tidak valid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/history?test=TC-BRD-001", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"run_id": 1`) {
+		t.Errorf("test history = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/history", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("history tanpa test = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/history?test=TC-NONE-999", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("history test tidak ada = %d, want 404", rec.Code)
 	}
 }
 

@@ -111,7 +111,7 @@ func TestLoginRequiredForPages(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	want := "/ui/login?next=%2Ffailures%2Fabc"
+	want := "/ui/login?next=%2Fui%2Ffailures%2Fabc"
 	if got := rec.Header().Get("Location"); got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}

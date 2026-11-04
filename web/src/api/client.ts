@@ -10,6 +10,8 @@ import type {
   RunComparison,
   RunDetail,
   Scoreboard,
+  TestHealth,
+  TestHistory,
 } from "./types";
 
 export class ApiError extends Error {
@@ -110,4 +112,10 @@ export const api = {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
       body: JSON.stringify({ fingerprints, owner, by: "ui" }),
     }),
+  testHealth: (days: number, project: string) =>
+    request<TestHealth>(
+      `/api/tests?days=${days}${project ? `&project=${encodeURIComponent(project)}` : ""}`,
+    ),
+  testHistory: (test: string, days: number) =>
+    request<TestHistory>(`/api/tests/history?test=${encodeURIComponent(test)}&days=${days}`),
 };

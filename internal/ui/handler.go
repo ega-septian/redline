@@ -53,7 +53,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(name, "assets/"):
 		// Public: the login page and the authenticated app both need the bundle.
 	case h.sessions.Enabled() && !h.sessions.Valid(r):
-		target := "/ui/login?next=" + url.QueryEscape(r.URL.Path)
+		target := "/ui/login?next=" + url.QueryEscape("/ui"+r.URL.Path)
 		http.Redirect(w, r, target, http.StatusFound)
 		return
 	}

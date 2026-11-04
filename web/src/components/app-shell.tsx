@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  Activity,
   BarChart3,
   GitBranch,
   LayoutDashboard,
@@ -26,6 +27,7 @@ const nav = [
   { label: "Overview", icon: LayoutDashboard, soon: true },
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
+  { label: "Health", icon: Activity, to: "/health" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
   { label: "Rules", icon: Sparkles, to: "/rules" as const },
   { label: "Scoreboard", icon: BarChart3, to: "/scoreboard" as const },
@@ -45,23 +47,27 @@ export function AppShell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const title = pathname.startsWith("/runs")
     ? "Runs"
-    : pathname.startsWith("/impact")
-      ? "Impact"
-      : pathname.startsWith("/rules")
-        ? "Rules"
-        : pathname.startsWith("/scoreboard")
-          ? "Scoreboard"
-          : "Failures";
+    : pathname.startsWith("/health")
+      ? "Health"
+      : pathname.startsWith("/impact")
+        ? "Impact"
+        : pathname.startsWith("/rules")
+          ? "Rules"
+          : pathname.startsWith("/scoreboard")
+            ? "Scoreboard"
+            : "Failures";
   const subtitle =
     title === "Failures"
       ? "open failures"
       : title === "Runs"
         ? "recent runs"
-        : title === "Impact"
-          ? "graph"
-          : title === "Rules"
-            ? "learned from proven cases"
-            : "accuracy";
+        : title === "Health"
+          ? "test health and stability"
+          : title === "Impact"
+            ? "graph"
+            : title === "Rules"
+              ? "learned from proven cases"
+              : "accuracy";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -93,7 +99,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 4).map((item) => (
+          {items.slice(0, 5).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -103,7 +109,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {items.slice(4).map((item) => (
+          {items.slice(5).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -170,7 +176,7 @@ function NavItem({
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/" | "/runs" | "/impact" | "/rules" | "/scoreboard";
+  to?: "/" | "/runs" | "/health" | "/impact" | "/rules" | "/scoreboard";
   count?: number;
   soon?: boolean;
   active?: boolean;

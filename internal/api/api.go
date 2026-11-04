@@ -34,6 +34,8 @@ type Store interface {
 	GetRun(ctx context.Context, id int64) (store.Run, error)
 	PreviousRun(ctx context.Context, id int64, branch string) (store.Run, bool, error)
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
+	TestHealth(ctx context.Context, project string, days int) (store.TestHealthSummary, []store.TestHealthRow, error)
+	TestHistory(ctx context.Context, test string, days, limit int) (store.TestHealthRow, []store.TestRunPoint, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
@@ -120,6 +122,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
+	mux.HandleFunc("GET /api/tests/history", s.handleTestHistory)
+	mux.HandleFunc("GET /api/tests", s.handleTestHealth)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)
@@ -291,6 +295,61 @@ func projectsOf(rep *report.Report) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (s *Server) handleTestHealth(w http.ResponseWriter, r *http.Request) {
+	days, err := queryInt(r, "days", 30, 1, 365)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	summary, tests, err := s.Store.TestHealth(r.Context(), project, days)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"summary": summary, "tests": tests})
+}
+
+func (s *Server) handleTestHistory(w http.ResponseWriter, r *http.Request) {
+	test := strings.TrimSpace(r.URL.Query().Get("test"))
+	if test == "" {
+		writeError(w, http.StatusBadRequest, "test wajib diisi")
+		return
+	}
+	days, err := queryInt(r, "days", 30, 1, 365)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit, err := queryInt(r, "limit", 50, 1, 200)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	summary, runs, err := s.Store.TestHistory(r.Context(), test, days, limit)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "test tidak ditemukan pada rentang waktu ini")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"summary": summary, "runs": runs})
+}
+
+func queryInt(r *http.Request, name string, fallback, minValue, maxValue int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minValue || value > maxValue {
+		return 0, fmt.Errorf("%s harus angka antara %d dan %d", name, minValue, maxValue)
+	}
+	return value, nil
 }
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
