@@ -2,6 +2,7 @@ import type {
   AnalyzeResult,
   ApiGroup,
   ApiQuarantine,
+  ApiCoverage,
   ApiRule,
   ApiRun,
   ApiRuleCandidate,
@@ -131,4 +132,6 @@ export const api = {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrfToken() },
     }),
+  coverage: (project: string) =>
+    request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
 };

@@ -6,6 +6,7 @@ import {
   BarChart3,
   GitBranch,
   LayoutDashboard,
+  Layers,
   Sparkles,
   Waypoints,
   type LucideIcon,
@@ -29,6 +30,7 @@ const nav = [
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
   { label: "Health", icon: Activity, to: "/health" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
+  { label: "Coverage", icon: Layers, to: "/coverage" as const },
   { label: "Rules", icon: Sparkles, to: "/rules" as const },
   { label: "Scoreboard", icon: BarChart3, to: "/scoreboard" as const },
 ];
@@ -51,11 +53,13 @@ export function AppShell() {
       ? "Health"
       : pathname.startsWith("/impact")
         ? "Impact"
-        : pathname.startsWith("/rules")
-          ? "Rules"
-          : pathname.startsWith("/scoreboard")
-            ? "Scoreboard"
-            : "Failures";
+        : pathname.startsWith("/coverage")
+          ? "Coverage"
+          : pathname.startsWith("/rules")
+            ? "Rules"
+            : pathname.startsWith("/scoreboard")
+              ? "Scoreboard"
+              : "Failures";
   const subtitle =
     title === "Failures"
       ? "open failures"
@@ -65,9 +69,11 @@ export function AppShell() {
           ? "test health and stability"
           : title === "Impact"
             ? "graph"
-            : title === "Rules"
-              ? "learned from proven cases"
-              : "accuracy";
+            : title === "Coverage"
+              ? "contract vs tests"
+              : title === "Rules"
+                ? "learned from proven cases"
+                : "accuracy";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -99,7 +105,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 5).map((item) => (
+          {items.slice(0, 6).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -109,7 +115,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {items.slice(5).map((item) => (
+          {items.slice(6).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -176,7 +182,7 @@ function NavItem({
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/" | "/runs" | "/health" | "/impact" | "/rules" | "/scoreboard";
+  to?: "/" | "/runs" | "/health" | "/impact" | "/coverage" | "/rules" | "/scoreboard";
   count?: number;
   soon?: boolean;
   active?: boolean;
