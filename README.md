@@ -17,6 +17,8 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), impact, rules and the scoreboard.
+
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
 ## Quick start
@@ -346,6 +348,8 @@ Voyage AI.
 | `GET /api/runs/{id}`, `GET /api/runs/{id}/compare`                 | Run detail, and comparison with the previous run               |
 | `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
 | `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
+| `GET /api/tests`                                                   | Test health: pass/flake rates, top failures, per-test rows     |
+| `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |

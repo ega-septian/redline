@@ -242,3 +242,62 @@ export type Scoreboard = {
   sources: Score[];
   entries: ScoreEntry[];
 };
+
+export type TestHealthSummary = {
+  days: number;
+  project?: string;
+  runs: number;
+  results: number;
+  passed: number;
+  failed: number;
+  flaky: number;
+  skipped: number;
+  pass_rate: number;
+  flake_rate: number;
+  open_failures: number;
+  new_failures: number;
+  resolved_failures: number;
+  mttr_hours: number;
+};
+
+export type TestHealthRow = {
+  key: string;
+  test: string;
+  test_case_id?: string;
+  project?: string;
+  total: number;
+  passed: number;
+  failed: number;
+  flaky: number;
+  skipped: number;
+  pass_rate: number;
+  flake_rate: number;
+  avg_duration_ms: number;
+  last_status: string;
+  last_run_at?: string | null;
+  last_failure_at?: string | null;
+  triage_owner?: string;
+  triage_status?: string;
+};
+
+export type TestRunPoint = {
+  run_id: number;
+  at: string;
+  branch?: string;
+  commit?: string;
+  status: string;
+  duration_ms: number;
+  retries: number;
+  error?: string;
+  fingerprint?: string;
+};
+
+export type TestHealth = {
+  summary: TestHealthSummary;
+  tests: TestHealthRow[];
+};
+
+export type TestHistory = {
+  summary: TestHealthRow;
+  runs: TestRunPoint[];
+};

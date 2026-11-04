@@ -2,6 +2,7 @@ import { createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell";
 import { FailuresPage } from "@/pages/failures";
+import { HealthPage } from "@/pages/health";
 import { ImpactPage } from "@/pages/impact";
 import { RulesPage } from "@/pages/rules";
 import { RunDetailPage } from "@/pages/run-detail";
@@ -28,6 +29,12 @@ const runDetailRoute = createRoute({
   component: RunDetailPage,
 });
 
+const healthRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/health",
+  component: HealthPage,
+});
+
 const impactRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/impact",
@@ -50,6 +57,7 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   runsRoute,
   runDetailRoute,
+  healthRoute,
   impactRoute,
   rulesRoute,
   scoreboardRoute,

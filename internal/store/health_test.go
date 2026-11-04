@@ -1,0 +1,99 @@
+package store_test
+
+import (
+	"context"
+	"errors"
+	"math"
+	"testing"
+
+	"redline/internal/report"
+	"redline/internal/store"
+)
+
+func healthSpec(title, tag, status string) report.Spec {
+	var spec report.Spec
+	switch status {
+	case "failed":
+		spec = failedTest(title, "boom", "")
+	case "flaky":
+		spec = report.Spec{Title: title, File: "shop.spec.ts", Tests: []report.Test{{
+			ProjectName: "api", Status: "flaky", Results: []report.Result{
+				{Status: "failed", Error: &report.ErrorEntry{Message: "boom"}},
+				{Status: "passed"},
+			},
+		}}}
+	default:
+		spec = passedTest(title)
+	}
+	spec.Tags = []string{tag}
+	return spec
+}
+
+func TestTestHealth(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "passed"),
+		healthSpec("B", "TC-B", "failed"),
+		healthSpec("C", "TC-C", "flaky"),
+	), store.RunMeta{Branch: "main", CommitSHA: "one"})
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "passed"),
+		healthSpec("B", "TC-B", "passed"),
+		healthSpec("C", "TC-C", "passed"),
+	), store.RunMeta{Branch: "main", CommitSHA: "two"})
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "failed"),
+		healthSpec("B", "TC-B", "failed"),
+		healthSpec("C", "TC-C", "flaky"),
+	), store.RunMeta{Branch: "main", CommitSHA: "three"})
+
+	summary, tests, err := s.TestHealth(ctx, "api", 365)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Runs != 3 || summary.Results != 9 || summary.Passed != 4 ||
+		summary.Failed != 3 || summary.Flaky != 2 || summary.Skipped != 0 {
+		t.Errorf("summary counts salah: %+v", summary)
+	}
+	if math.Abs(summary.PassRate-4.0/9.0) > 1e-9 || math.Abs(summary.FlakeRate-2.0/9.0) > 1e-9 {
+		t.Errorf("summary rates salah: %+v", summary)
+	}
+	if summary.OpenFailures == 0 || summary.NewFailures == 0 {
+		t.Errorf("failure counts harus terisi: %+v", summary)
+	}
+
+	byKey := map[string]store.TestHealthRow{}
+	for _, row := range tests {
+		byKey[row.Key] = row
+	}
+	if a := byKey["TC-A"]; a.Total != 3 || a.Passed != 2 || a.Failed != 1 || a.LastStatus != "failed" {
+		t.Errorf("TC-A salah: %+v", a)
+	}
+	if b := byKey["TC-B"]; b.Total != 3 || b.Passed != 1 || b.Failed != 2 || b.LastStatus != "failed" {
+		t.Errorf("TC-B salah: %+v", b)
+	}
+	if c := byKey["TC-C"]; c.Total != 3 || c.Flaky != 2 || c.LastStatus != "flaky" ||
+		math.Abs(c.FlakeRate-2.0/3.0) > 1e-9 {
+		t.Errorf("TC-C salah: %+v", c)
+	}
+
+	if _, other, err := s.TestHealth(ctx, "other", 365); err != nil || len(other) != 0 {
+		t.Errorf("project lain harus kosong: %+v %v", other, err)
+	}
+
+	row, points, err := s.TestHistory(ctx, "TC-A", 365, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Key != "TC-A" || row.LastStatus != "failed" || len(points) != 3 {
+		t.Errorf("history TC-A salah: %+v %+v", row, points)
+	}
+	if points[0].Status != "failed" || points[0].Branch != "main" || points[0].Commit != "three" {
+		t.Errorf("titik history terbaru salah: %+v", points[0])
+	}
+	if _, _, err := s.TestHistory(ctx, "TC-NONE", 365, 10); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("test tidak ada: mau ErrNotFound, dapat %v", err)
+	}
+}
