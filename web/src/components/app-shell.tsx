@@ -26,7 +26,7 @@ async function fetchHealth(): Promise<Health> {
 }
 
 const nav = [
-  { label: "Overview", icon: LayoutDashboard, soon: true },
+  { label: "Overview", icon: LayoutDashboard, to: "/overview" as const },
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
   { label: "Health", icon: Activity, to: "/health" as const },
@@ -49,37 +49,41 @@ export function AppShell() {
     item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
   );
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const title = pathname.startsWith("/runs")
-    ? "Runs"
-    : pathname.startsWith("/health")
-      ? "Health"
-      : pathname.startsWith("/impact")
-        ? "Impact"
-        : pathname.startsWith("/coverage")
-          ? "Coverage"
-          : pathname.startsWith("/rules")
-            ? "Rules"
-            : pathname.startsWith("/scoreboard")
-              ? "Scoreboard"
-              : pathname.startsWith("/config")
-                ? "Config"
-                : "Failures";
+  const title = pathname.startsWith("/overview")
+    ? "Overview"
+    : pathname.startsWith("/runs")
+      ? "Runs"
+      : pathname.startsWith("/health")
+        ? "Health"
+        : pathname.startsWith("/impact")
+          ? "Impact"
+          : pathname.startsWith("/coverage")
+            ? "Coverage"
+            : pathname.startsWith("/rules")
+              ? "Rules"
+              : pathname.startsWith("/scoreboard")
+                ? "Scoreboard"
+                : pathname.startsWith("/config")
+                  ? "Config"
+                  : "Failures";
   const subtitle =
-    title === "Failures"
-      ? "open failures"
-      : title === "Runs"
-        ? "recent runs"
-        : title === "Health"
-          ? "test health and stability"
-          : title === "Impact"
-            ? "graph"
-            : title === "Coverage"
-              ? "contract vs tests"
-              : title === "Rules"
-                ? "learned from proven cases"
-                : title === "Config"
-                  ? "contract sources and notifications"
-                  : "accuracy";
+    title === "Overview"
+      ? "quality at a glance"
+      : title === "Failures"
+        ? "open failures"
+        : title === "Runs"
+          ? "recent runs"
+          : title === "Health"
+            ? "test health and stability"
+            : title === "Impact"
+              ? "graph"
+              : title === "Coverage"
+                ? "contract vs tests"
+                : title === "Rules"
+                  ? "learned from proven cases"
+                  : title === "Config"
+                    ? "contract sources and notifications"
+                    : "accuracy";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -198,7 +202,16 @@ function NavItem({
 }: {
   label: string;
   icon: LucideIcon;
-  to?: "/" | "/runs" | "/health" | "/impact" | "/coverage" | "/rules" | "/scoreboard" | "/config";
+  to?:
+    | "/"
+    | "/overview"
+    | "/runs"
+    | "/health"
+    | "/impact"
+    | "/coverage"
+    | "/rules"
+    | "/scoreboard"
+    | "/config";
   count?: number;
   soon?: boolean;
   active?: boolean;

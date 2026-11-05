@@ -18,6 +18,12 @@ const indexRoute = createRoute({
   component: FailuresPage,
 });
 
+const overviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/overview",
+  component: lazyRouteComponent(() => import("@/pages/overview"), "OverviewPage"),
+});
+
 const runsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/runs",
@@ -68,6 +74,7 @@ const scoreboardRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
+  overviewRoute,
   runsRoute,
   runDetailRoute,
   healthRoute,

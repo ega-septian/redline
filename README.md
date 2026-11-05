@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers an **overview dashboard**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
