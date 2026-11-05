@@ -25,6 +25,7 @@ import (
 	"redline/internal/contract"
 	"redline/internal/embed"
 	"redline/internal/llm"
+	"redline/internal/notify"
 	"redline/internal/reportportal"
 	"redline/internal/store"
 	"redline/internal/ui"
@@ -178,7 +179,7 @@ func run(log *slog.Logger) error {
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion(),
-		Contracts: registry}
+		Contracts: registry, Notifier: notify.NewDiscord()}
 	sessions := auth.New(cfg.APIKey, cfg.Users)
 	srv.AuthEnabled = sessions.Enabled()
 	srv.ValidateKey = sessions.ValidKey

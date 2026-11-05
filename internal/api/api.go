@@ -23,6 +23,7 @@ import (
 
 	"redline/internal/analysis"
 	"redline/internal/contract"
+	"redline/internal/notify"
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
@@ -117,6 +118,8 @@ type Server struct {
 	Contracts *contract.Registry
 	// SourceCheck validates one spec URL; nil uses contract.ValidateSource (tests stub the network).
 	SourceCheck func(context.Context, string) contract.SourceCheck
+	// Notifier delivers failure summaries to the configured webhook; nil disables delivery.
+	Notifier notify.Sender
 }
 
 // APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
@@ -294,6 +297,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
+	// Notifikasi berjalan di background: webhook lambat atau mati tidak boleh menahan reporter.
+	if s.Notifier != nil && (len(res.New) > 0 || len(res.Regressed) > 0) {
+		go s.notifyRun(meta, res)
+	}
 	// Kontrak dipotret di setiap run, termasuk yang lulus semua: run lulus adalah pembanding untuk tahu
 	// apakah kontrak berubah. Tidak di background: analisis yang menyusul harus memakai kontrak run ini.
 	if s.Analyzer != nil {

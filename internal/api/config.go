@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"redline/internal/contract"
+	"redline/internal/notify"
 	"redline/internal/store"
 )
 
@@ -39,6 +41,7 @@ type contractSourceView struct {
 // notificationView masks the webhook URL: the secret token must not travel to the browser again.
 type notificationView struct {
 	Enabled         bool       `json:"enabled"`
+	Provider        string     `json:"provider"`
 	WebhookURL      string     `json:"webhook_url"`
 	WebhookSet      bool       `json:"webhook_set"`
 	Events          []string   `json:"events"`
@@ -223,6 +226,10 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, "webhook_url harus http(s)://host/path")
 			return
 		}
+		if blockedNotificationHost(parsed.Hostname()) {
+			writeError(w, http.StatusBadRequest, "host webhook ini tidak diizinkan (alamat metadata cloud)")
+			return
+		}
 	}
 	events, err := normalizeEvents(body.Events)
 	if err != nil {
@@ -247,11 +254,39 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, notificationOut(saved))
 }
 
-// handleTestNotification: POST /api/config/notifications/test — explicit mock, nothing leaves the server.
+// handleTestNotification: POST /api/config/notifications/test — sends a real Discord test message.
 func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.Store.NotificationSettings(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if settings.WebhookURL == "" {
+		writeError(w, http.StatusBadRequest, "webhook_url belum diisi; simpan Discord webhook dulu")
+		return
+	}
+	if s.Notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "notifier belum dikonfigurasi di server")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	message := notify.Message{
+		Title: "Redline test notification",
+		Description: "If you can read this, the Discord webhook is connected. " +
+			"New failures and regressions will be posted here.",
+		Color:  0x58A6FF,
+		Fields: []notify.Field{{Name: "Status", Value: "test", Inline: true}},
+		Footer: "Redline",
+	}
+	if err := s.Notifier.Send(ctx, settings.WebhookURL, message); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"sent": false, "mock": false, "error": "Discord menolak webhook: " + err.Error(),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"sent": false, "mock": true,
-		"message": "Notifications are mock-only in this version; nothing was sent.",
+		"sent": true, "mock": false, "message": "Test notification sent to Discord.",
 	})
 }
 
@@ -300,9 +335,9 @@ func sourceView(src store.ContractSource) contractSourceView {
 
 func notificationOut(settings store.NotificationSettings) notificationView {
 	view := notificationView{
-		Enabled: settings.Enabled, WebhookSet: settings.WebhookURL != "",
+		Enabled: settings.Enabled, Provider: "discord", WebhookSet: settings.WebhookURL != "",
 		WebhookURL: maskWebhook(settings.WebhookURL), Events: settings.Events,
-		AvailableEvents: store.KnownNotificationEvents(), By: settings.By, Delivery: false,
+		AvailableEvents: store.KnownNotificationEvents(), By: settings.By, Delivery: true,
 	}
 	if view.Events == nil {
 		view.Events = []string{}
@@ -342,6 +377,15 @@ func maskWebhook(raw string) string {
 		masked += "?••••"
 	}
 	return masked
+}
+
+func blockedNotificationHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "169.254.169.254", "metadata.google.internal", "metadata", "fd00:ec2::254":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeEvents(events []string) ([]string, error) {

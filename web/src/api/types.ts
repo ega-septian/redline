@@ -424,6 +424,7 @@ export type ApiSourceCheck = {
 
 export type ApiNotifications = {
   enabled: boolean;
+  provider?: string;
   webhook_url: string;
   webhook_set: boolean;
   events: string[];
