@@ -36,6 +36,9 @@ type fakeStore struct {
 	quarantineReleased bool
 	sources            []store.ContractSource
 	notifications      store.NotificationSettings
+	healthRows         []store.TestHealthRow
+	dismissals         map[string]time.Time
+	dismissed          string
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
@@ -94,6 +97,9 @@ func (f *fakeStore) GetArtifact(_ context.Context, id int64) (store.Artifact, er
 	return store.Artifact{}, store.ErrNotFound
 }
 func (f *fakeStore) TestHealth(context.Context, string, int) (store.TestHealthSummary, []store.TestHealthRow, error) {
+	if f.healthRows != nil {
+		return store.TestHealthSummary{}, f.healthRows, nil
+	}
 	row := store.TestHealthRow{
 		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all", TestCaseID: "TC-BRD-001",
 		Total: 2, Passed: 1, Failed: 1, PassRate: 0.5, LastStatus: "failed",
@@ -101,6 +107,20 @@ func (f *fakeStore) TestHealth(context.Context, string, int) (store.TestHealthSu
 	return store.TestHealthSummary{
 		Days: 30, Runs: 1, Results: 2, Passed: 1, Failed: 1, PassRate: 0.5, OpenFailures: 1,
 	}, []store.TestHealthRow{row}, nil
+}
+func (f *fakeStore) DismissQuarantineSuggestion(_ context.Context, key string, until time.Time, _ string) error {
+	if f.dismissals == nil {
+		f.dismissals = map[string]time.Time{}
+	}
+	f.dismissals[key] = until
+	f.dismissed = key
+	return nil
+}
+func (f *fakeStore) SuggestionDismissals(context.Context) (map[string]time.Time, error) {
+	if f.dismissals == nil {
+		return map[string]time.Time{}, nil
+	}
+	return f.dismissals, nil
 }
 func (f *fakeStore) TestHistory(_ context.Context, test string, _ int, _ int) (store.TestHealthRow, []store.TestRunPoint, error) {
 	if test != "TC-BRD-001" {
@@ -1153,5 +1173,64 @@ func TestCoverageEmptyMessages(t *testing.T) {
 	rec = do(h, http.MethodGet, "/api/coverage?project=other", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Contract source is configured") {
 		t.Errorf("dengan source = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestQuarantineSuggestions(t *testing.T) {
+	now := time.Now()
+	recent := now.Add(-2 * 24 * time.Hour)
+	fs := &fakeStore{healthRows: []store.TestHealthRow{
+		{Key: "TC-A", TestKey: "toolshop › a", TestCaseID: "TC-A", Project: "toolshop",
+			Passed: 6, Failed: 2, Flaky: 2, PassRate: 0.7, FlakeRate: 0.2, Flips: 3,
+			LastFailureAt: &recent, TriageOwner: "ega"},
+		{Key: "TC-B", TestKey: "toolshop › b", TestCaseID: "TC-B", Project: "toolshop",
+			Passed: 6, Failed: 2, PassRate: 0.75, Flips: 1, LastFailureAt: &recent},
+		{Key: "TC-C", TestKey: "toolshop › c", TestCaseID: "TC-C", Project: "toolshop",
+			Passed: 6, Failed: 2, Flaky: 2, PassRate: 0.7, FlakeRate: 0.2, Flips: 4,
+			Quarantined: true, LastFailureAt: &recent},
+		{Key: "TC-D", TestKey: "toolshop › d", TestCaseID: "TC-D", Project: "toolshop",
+			Passed: 2, Failed: 1, PassRate: 0.66, Flips: 3, LastFailureAt: &recent},
+		{Key: "TC-E", TestKey: "toolshop › e", TestCaseID: "TC-E", Project: "toolshop",
+			Passed: 6, Failed: 2, PassRate: 0.75, Flips: 3, LastFailureAt: ptrTime(now.Add(-30 * 24 * time.Hour))},
+		{Key: "TC-F", TestKey: "toolshop › f", TestCaseID: "TC-F", Project: "toolshop",
+			Passed: 6, Failed: 2, PassRate: 0.75, Flips: 2, LastFailureAt: &recent},
+	}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/tests/quarantine/suggestions?days=30", nil)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"key": "TC-A"`) ||
+		!strings.Contains(body, `"score": "high"`) || !strings.Contains(body, `"owner": "ega"`) ||
+		!strings.Contains(body, `"suggested_until"`) {
+		t.Fatalf("suggestions = %d: %s", rec.Code, body)
+	}
+	for _, excluded := range []string{`"TC-B"`, `"TC-C"`, `"TC-D"`, `"TC-E"`} {
+		if strings.Contains(body, excluded) {
+			t.Errorf("suggestion tidak boleh memuat %s: %s", excluded, body)
+		}
+	}
+	if !strings.Contains(body, `"key": "TC-F"`) || !strings.Contains(body, `"score": "medium"`) {
+		t.Errorf("TC-F harus muncul dengan skor medium: %s", body)
+	}
+
+	rec = do(h, http.MethodPost, "/api/tests/quarantine/suggestions/dismiss",
+		strings.NewReader(`{"test":"TC-A","days":7}`))
+	if rec.Code != http.StatusOK || fs.dismissed != "TC-A" {
+		t.Fatalf("dismiss = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/tests/quarantine/suggestions", nil)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"TC-A"`) {
+		t.Errorf("suggestion yang di-dismiss masih muncul: %s", rec.Body)
+	}
+
+	if rec := do(h, http.MethodPost, "/api/tests/quarantine/suggestions/dismiss",
+		strings.NewReader(`{"days":7}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("dismiss tanpa test = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPost, "/api/tests/quarantine/suggestions/dismiss",
+		strings.NewReader(`{"test":"TC-A","days":91}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("dismiss days invalid = %d, want 400", rec.Code)
 	}
 }

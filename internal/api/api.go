@@ -41,6 +41,8 @@ type Store interface {
 	SetQuarantine(ctx context.Context, q store.Quarantine) (store.Quarantine, error)
 	ReleaseQuarantine(ctx context.Context, key, by string) (store.Quarantine, error)
 	ActiveQuarantines(ctx context.Context) ([]store.Quarantine, error)
+	DismissQuarantineSuggestion(ctx context.Context, key string, until time.Time, by string) error
+	SuggestionDismissals(ctx context.Context) (map[string]time.Time, error)
 	ContractSnapshots(ctx context.Context, project string, limit int) ([]store.ContractSnapshot, error)
 	EndpointCalls(ctx context.Context, project string) ([]store.EndpointCall, error)
 	ContractSources(ctx context.Context) ([]store.ContractSource, error)
@@ -145,6 +147,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tests/quarantine", s.handleListQuarantine)
 	mux.HandleFunc("PUT /api/tests/quarantine", s.handleSetQuarantine)
 	mux.HandleFunc("DELETE /api/tests/quarantine", s.handleReleaseQuarantine)
+	mux.HandleFunc("GET /api/tests/quarantine/suggestions", s.handleQuarantineSuggestions)
+	mux.HandleFunc("POST /api/tests/quarantine/suggestions/dismiss", s.handleDismissQuarantineSuggestion)
 	mux.HandleFunc("GET /api/coverage", s.handleCoverage)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config/contracts", s.handleSaveContract)

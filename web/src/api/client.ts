@@ -2,6 +2,7 @@ import type {
   AnalyzeResult,
   ApiGroup,
   ApiQuarantine,
+  ApiQuarantineSuggestion,
   ApiCoverage,
   ApiConfig,
   ApiContractSource,
@@ -135,6 +136,16 @@ export const api = {
     request<ApiQuarantine>(`/api/tests/quarantine?test=${encodeURIComponent(test)}`, {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrfToken() },
+    }),
+  quarantineSuggestions: (days: number, project: string) =>
+    request<ApiQuarantineSuggestion[]>(
+      `/api/tests/quarantine/suggestions?days=${days}${project ? `&project=${encodeURIComponent(project)}` : ""}`,
+    ),
+  dismissQuarantineSuggestion: (test: string, days = 7) =>
+    request<{ dismissed: string; until: string }>("/api/tests/quarantine/suggestions/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ test, days }),
     }),
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),

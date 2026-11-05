@@ -272,6 +272,7 @@ export type TestHealthRow = {
   skipped: number;
   pass_rate: number;
   flake_rate: number;
+  flips: number;
   avg_duration_ms: number;
   last_status: string;
   last_run_at?: string | null;
@@ -282,6 +283,23 @@ export type TestHealthRow = {
   quarantine_owner?: string;
   quarantine_reason?: string;
   quarantine_until?: string | null;
+};
+
+export type ApiQuarantineSuggestion = {
+  key: string;
+  test: string;
+  test_case_id?: string;
+  project?: string;
+  score: "high" | "medium";
+  reason: string;
+  owner?: string;
+  suggested_until: string;
+  days: number;
+  executed: number;
+  flaky: number;
+  flake_rate: number;
+  flips: number;
+  last_failure_at?: string | null;
 };
 
 export type ApiQuarantine = {

@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Activity, AlertTriangle, Clock, Search, X } from "lucide-react";
+import { Activity, AlertTriangle, Check, Clock, Copy, Search, Sparkles, X } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { TestHealthRow, TestRunPoint } from "@/api/types";
+import type { ApiQuarantineSuggestion, TestHealthRow, TestRunPoint } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +25,11 @@ export function HealthPage() {
     queryKey: ["test-health", days, appliedProject],
     queryFn: () => api.testHealth(days, appliedProject),
   });
+  const suggestionsQuery = useQuery({
+    queryKey: ["quarantine-suggestions", days, appliedProject],
+    queryFn: () => api.quarantineSuggestions(days, appliedProject),
+  });
+  const suggestions = suggestionsQuery.data ?? [];
   const summary = healthQuery.data?.summary;
   const tests = healthQuery.data?.tests ?? [];
   const quarantined = tests.filter((test) => test.quarantined).length;
@@ -148,6 +153,10 @@ export function HealthPage() {
           hint="mean time to resolve"
         />
       </section>
+
+      {suggestions.length > 0 && (
+        <SuggestionsPanel suggestions={suggestions} onSelect={setSelected} />
+      )}
 
       <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <TopList
@@ -341,6 +350,7 @@ function QuarantinePanel({ row }: { row: TestHealthRow }) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["test-health"] }),
       queryClient.invalidateQueries({ queryKey: ["test-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["quarantine-suggestions"] }),
     ]);
   }
 
@@ -608,4 +618,158 @@ function when(iso: string): string {
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function SuggestionsPanel({
+  suggestions,
+  onSelect,
+}: {
+  suggestions: ApiQuarantineSuggestion[];
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <Sparkles className="h-3.5 w-3.5 text-violet" />
+        <span className="text-[12.5px] font-semibold">Suggested quarantines</span>
+        <Badge tone="test">{suggestions.length}</Badge>
+        <span className="ml-auto text-[10.5px] text-faint">
+          Evidence only — nothing is quarantined automatically
+        </span>
+      </div>
+      {suggestions.slice(0, 5).map((suggestion) => (
+        <SuggestionRow key={suggestion.key} suggestion={suggestion} onSelect={onSelect} />
+      ))}
+      {suggestions.length > 5 && (
+        <div className="border-t border-line px-3.5 py-2 text-[10.5px] text-faint">
+          {suggestions.length - 5} more in the table below.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SuggestionRow({
+  suggestion,
+  onSelect,
+}: {
+  suggestion: ApiQuarantineSuggestion;
+  onSelect: (key: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [owner, setOwner] = useState(suggestion.owner ?? "");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  const test = suggestion.test_case_id || suggestion.key;
+  const canAct = owner.trim() !== "";
+  const json = JSON.stringify(
+    {
+      test,
+      owner: owner.trim(),
+      reason: suggestion.reason,
+      until: suggestion.suggested_until,
+    },
+    null,
+    2,
+  );
+
+  async function copy() {
+    if (!canAct) return;
+    setError("");
+    try {
+      await navigator.clipboard.writeText(json);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt("Copy quarantine JSON", json);
+    }
+  }
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["test-health"] }),
+      queryClient.invalidateQueries({ queryKey: ["test-history"] }),
+      queryClient.invalidateQueries({ queryKey: ["quarantine-suggestions"] }),
+    ]);
+  }
+
+  async function quarantine() {
+    if (!canAct) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.quarantine({
+        test: suggestion.key,
+        owner: owner.trim(),
+        reason: suggestion.reason,
+        days: suggestion.days,
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Quarantine failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dismiss() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.dismissQuarantineSuggestion(suggestion.key, 7);
+      await queryClient.invalidateQueries({ queryKey: ["quarantine-suggestions"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dismiss failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5 last:border-b-0">
+      <Badge tone={suggestion.score === "high" ? "backend" : "env"}>{suggestion.score}</Badge>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[12px] text-ink">{shortTitle(suggestion.test)}</span>
+          {suggestion.test_case_id && (
+            <span className="shrink-0 font-mono text-[10px] text-faint">{suggestion.test_case_id}</span>
+          )}
+        </div>
+        <div className="mt-0.5 truncate text-[10.5px] text-faint" title={suggestion.reason}>
+          {suggestion.reason}
+        </div>
+      </div>
+      {!suggestion.owner && (
+        <Input
+          value={owner}
+          onChange={(event) => setOwner(event.target.value)}
+          placeholder="owner"
+          aria-label="Quarantine owner"
+          className="h-7 w-24 text-[11px]"
+        />
+      )}
+      <Button size="sm" variant="default" onClick={copy} disabled={!canAct || busy}>
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        {copied ? "Copied" : "Copy JSON"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={quarantine}
+        disabled={!canAct || busy}
+        title="Write a 7-day quarantine to this server. For PR CI, copy the JSON into redline-quarantine.json."
+      >
+        Quarantine on server
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => onSelect(suggestion.key)}>
+        Review
+      </Button>
+      <Button size="sm" variant="ghost" onClick={dismiss} disabled={busy}>
+        Dismiss
+      </Button>
+      {error && <div className="w-full text-[10.5px] text-danger">{error}</div>}
+    </div>
+  );
 }

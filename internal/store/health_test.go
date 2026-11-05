@@ -70,13 +70,19 @@ func TestTestHealth(t *testing.T) {
 	}
 	if a := byKey["TC-A"]; a.Total != 3 || a.Passed != 2 || a.Failed != 1 || a.LastStatus != "failed" {
 		t.Errorf("TC-A salah: %+v", a)
+	} else if a.Flips != 1 {
+		t.Errorf("TC-A flips = %d, mau 1: %+v", a.Flips, a)
 	}
 	if b := byKey["TC-B"]; b.Total != 3 || b.Passed != 1 || b.Failed != 2 || b.LastStatus != "failed" {
 		t.Errorf("TC-B salah: %+v", b)
+	} else if b.Flips != 2 {
+		t.Errorf("TC-B flips = %d, mau 2: %+v", b.Flips, b)
 	}
 	if c := byKey["TC-C"]; c.Total != 3 || c.Flaky != 2 || c.LastStatus != "flaky" ||
 		math.Abs(c.FlakeRate-2.0/3.0) > 1e-9 {
 		t.Errorf("TC-C salah: %+v", c)
+	} else if c.Flips != 2 {
+		t.Errorf("TC-C flips = %d, mau 2: %+v", c.Flips, c)
 	}
 
 	if _, other, err := s.TestHealth(ctx, "other", 365); err != nil || len(other) != 0 {
