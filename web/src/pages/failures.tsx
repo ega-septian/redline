@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import { FailureDetail } from "@/components/failures/failure-detail";
 import { FailureTable } from "@/components/failures/failure-table";
 import { Kpis } from "@/components/failures/kpis";
+import { SetupChecklist } from "@/components/setup-checklist";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -381,6 +382,7 @@ export function FailuresPage() {
 
   return (
     <>
+      <SetupChecklist />
       <Kpis {...stats} />
 
       <section className="rounded-[10px] border border-line bg-surface p-2">
