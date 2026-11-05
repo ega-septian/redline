@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry), **coverage** (contract endpoints vs tests), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -355,6 +355,8 @@ Voyage AI.
 | `GET /api/tests/quarantine`                                        | Active quarantined tests                                       |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
+| `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
+| `POST /api/tests/quarantine/suggestions/dismiss`                   | Snooze a suggestion: `{"test": "TC-...", "days": 7}`           |
 | `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes and changes |
 | `GET /api/config`                                                  | Contract sources (database + env fallback) and notification settings |
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
@@ -380,6 +382,24 @@ Voyage AI.
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
 Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
+
+### Suggested quarantines
+
+The Health page proposes a quarantine when a test has at least 5 runs, a failure in the last 14 days,
+and at least 2 pass↔fail flips in its last 10 results (or at least 2 flaky retries). The row shows the
+evidence and whether the risk is `high` or `medium`.
+
+Nothing is quarantined automatically. The actions are:
+
+- **Copy JSON** — the primary path: paste the entry into `redline-quarantine.json`, the file the CI gate
+  reads.
+- **Quarantine on server** — writes the database record for this local/main instance.
+- **Review** — opens the test timeline and the normal quarantine form.
+- **Dismiss** — snoozes the suggestion for 7 days.
+
+The server does not read the repository file, so after adding an entry to `redline-quarantine.json`
+also dismiss the suggestion (or create the same quarantine in the UI). That keeps the panel quiet until
+the file and the database agree.
 
 Coverage compares the newest contract snapshot with the calls recorded by the Redline fixture. Contract
 sources are configured in **Config**; the URL must be reachable from the **server**, not only from the

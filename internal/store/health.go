@@ -28,17 +28,20 @@ type TestHealthSummary struct {
 
 // TestHealthRow is one test across runs, keyed by @TC- ID when it has one.
 type TestHealthRow struct {
-	Key              string     `json:"key"`
-	TestKey          string     `json:"test"`
-	TestCaseID       string     `json:"test_case_id,omitempty"`
-	Project          string     `json:"project,omitempty"`
-	Total            int        `json:"total"`
-	Passed           int        `json:"passed"`
-	Failed           int        `json:"failed"`
-	Flaky            int        `json:"flaky"`
-	Skipped          int        `json:"skipped"`
-	PassRate         float64    `json:"pass_rate"`
-	FlakeRate        float64    `json:"flake_rate"`
+	Key        string  `json:"key"`
+	TestKey    string  `json:"test"`
+	TestCaseID string  `json:"test_case_id,omitempty"`
+	Project    string  `json:"project,omitempty"`
+	Total      int     `json:"total"`
+	Passed     int     `json:"passed"`
+	Failed     int     `json:"failed"`
+	Flaky      int     `json:"flaky"`
+	Skipped    int     `json:"skipped"`
+	PassRate   float64 `json:"pass_rate"`
+	FlakeRate  float64 `json:"flake_rate"`
+	// Flips counts pass↔fail transitions in the last 10 executed results (newest first). A test that
+	// alternates without Playwright retries still has a high flip count.
+	Flips            int        `json:"flips"`
 	AvgDurationMs    int        `json:"avg_duration_ms"`
 	LastStatus       string     `json:"last_status"`
 	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
@@ -83,9 +86,12 @@ type healthRow struct {
 }
 
 type testAgg struct {
-	row         TestHealthRow
-	executed    int
-	durationSum int
+	row            TestHealthRow
+	executed       int
+	durationSum    int
+	lastExecuted   string
+	recentExecuted int
+	flips          int
 }
 
 // TestHealth returns the suite summary and one row per test for the last days.
@@ -298,6 +304,14 @@ func aggregateTests(rows []healthRow) []TestHealthRow {
 		if item.Status != "skipped" {
 			agg.executed++
 			agg.durationSum += item.DurationMs
+			// healthRows is newest first; compare each result with the previous executed one.
+			if agg.recentExecuted < 10 {
+				if agg.lastExecuted != "" && isPassed(agg.lastExecuted) != isPassed(item.Status) {
+					agg.flips++
+				}
+				agg.lastExecuted = item.Status
+				agg.recentExecuted++
+			}
 		}
 		if agg.row.LastFailureAt == nil && (item.Status == "failed" || item.Status == "flaky") {
 			at := item.At
@@ -310,6 +324,7 @@ func aggregateTests(rows []healthRow) []TestHealthRow {
 		agg := byKey[key]
 		agg.row.PassRate = rate(agg.row.Passed, agg.executed)
 		agg.row.FlakeRate = rate(agg.row.Flaky, agg.executed)
+		agg.row.Flips = agg.flips
 		if agg.executed > 0 {
 			agg.row.AvgDurationMs = agg.durationSum / agg.executed
 		}
@@ -326,6 +341,10 @@ func aggregateTests(rows []healthRow) []TestHealthRow {
 		return left.Key < right.Key
 	})
 	return tests
+}
+
+func isPassed(status string) bool {
+	return status == "passed"
 }
 
 func clampDays(days int) int {
