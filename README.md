@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -41,6 +41,9 @@ Check that both the process and the database are ready:
 curl -s localhost:8787/healthz   # {"status":"ok","version":"…","api":1}
 curl -s localhost:8787/readyz    # {"status":"ready"}
 ```
+
+On a fresh install the Failures page shows a **Get started** card: add a contract source, send the
+first run, and optionally configure notifications. It disappears when the two required steps are done.
 
 Redline works without any API key. AI analysis is optional; without it, the deterministic rules still
 run. To turn it on, put these in `.env` and restart the server:
