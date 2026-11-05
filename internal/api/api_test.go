@@ -42,6 +42,8 @@ type fakeStore struct {
 	dismissed          string
 	ingest             *store.IngestResult
 	deliveries         []store.NotificationDelivery
+	expiring           []store.Quarantine
+	expiryMarked       []string
 }
 
 type fakeNotifier struct {
@@ -187,6 +189,13 @@ func (f *fakeStore) ActiveQuarantines(context.Context) ([]store.Quarantine, erro
 		Key: "TC-BRD-001", TestKey: "toolshop › brand.spec.ts › get all",
 		TestCaseID: "TC-BRD-001", Project: "toolshop", Owner: "ega", Reason: "flaky",
 	}}, nil
+}
+func (f *fakeStore) ExpiringQuarantines(context.Context, time.Duration) ([]store.Quarantine, error) {
+	return f.expiring, nil
+}
+func (f *fakeStore) MarkQuarantineExpiryNotified(_ context.Context, keys []string) error {
+	f.expiryMarked = append(f.expiryMarked, keys...)
+	return nil
 }
 func (f *fakeStore) ContractSnapshots(_ context.Context, project string, _ int) ([]store.ContractSnapshot, error) {
 	if project != "toolshop" {
@@ -1391,5 +1400,92 @@ func TestSaveNotificationsRejectsMetadataHost(t *testing.T) {
 		`{"enabled":true,"webhook_url":"http://169.254.169.254/latest/meta-data","events":["new_failure"]}`))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("metadata host = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestIngestSendsQuarantineExpiryNotification(t *testing.T) {
+	until := time.Now().Add(12 * time.Hour)
+	fs := &fakeStore{
+		ingest: &store.IngestResult{RunID: 7, Total: 1, Passed: 1},
+		expiring: []store.Quarantine{{
+			Key: "TC-A", TestKey: "toolshop › brand.spec.ts › get all", TestCaseID: "TC-A",
+			Owner: "ega", Reason: "flaky login", Until: until,
+		}},
+		notifications: store.NotificationSettings{
+			Enabled: true, WebhookURL: "https://discord.test/webhook",
+			Events: []string{"quarantine_expiring"},
+		},
+	}
+	notifier := &fakeNotifier{ch: make(chan struct{}, 1)}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	f, _ := os.Open("../report/testdata/run2-fixed.json")
+	defer f.Close()
+	rec := do(srv.Routes(), http.MethodPost, "/api/runs?source=ci&branch=main", f)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ingest = %d: %s", rec.Code, rec.Body)
+	}
+	select {
+	case <-notifier.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry notifier tidak dipanggil")
+	}
+	if !strings.Contains(notifier.message.Title, "1 quarantine expires") ||
+		!strings.Contains(notifier.message.Description, "TC-A") ||
+		!strings.Contains(notifier.message.Description, "owner ega") {
+		t.Errorf("expiry message salah: %+v", notifier.message)
+	}
+	if len(fs.expiryMarked) != 1 || fs.expiryMarked[0] != "TC-A" {
+		t.Errorf("expiry tidak ditandai: %+v", fs.expiryMarked)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(fs.deliveries) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(fs.deliveries) != 1 || fs.deliveries[0].Event != "quarantine_expiring" ||
+		!fs.deliveries[0].OK {
+		t.Errorf("delivery expiry tidak tercatat: %+v", fs.deliveries)
+	}
+}
+
+func TestQuarantineExpiryFailureIsNotMarked(t *testing.T) {
+	fs := &fakeStore{
+		ingest: &store.IngestResult{RunID: 7, Total: 1, Passed: 1},
+		expiring: []store.Quarantine{{
+			Key: "TC-A", TestCaseID: "TC-A", Owner: "ega", Reason: "flaky",
+			Until: time.Now().Add(12 * time.Hour),
+		}},
+		notifications: store.NotificationSettings{
+			Enabled: true, WebhookURL: "https://discord.test/webhook",
+			Events: []string{"quarantine_expiring"},
+		},
+	}
+	notifier := &fakeNotifier{
+		err: &notify.DeliveryError{StatusCode: http.StatusForbidden, Message: "forbidden"},
+		ch:  make(chan struct{}, 1),
+	}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	f, _ := os.Open("../report/testdata/run2-fixed.json")
+	defer f.Close()
+	do(srv.Routes(), http.MethodPost, "/api/runs?source=ci", f)
+	select {
+	case <-notifier.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry notifier tidak dipanggil")
+	}
+	if len(fs.expiryMarked) != 0 {
+		t.Errorf("gagal kirim tidak boleh ditandai: %+v", fs.expiryMarked)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(fs.deliveries) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(fs.deliveries) != 1 || fs.deliveries[0].OK || fs.deliveries[0].StatusCode != 403 {
+		t.Errorf("delivery gagal salah: %+v", fs.deliveries)
 	}
 }

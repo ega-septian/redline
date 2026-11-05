@@ -446,7 +446,8 @@ Notifications post to a **Discord webhook**. `new_failure` and `regressed` send 
 the branch, commit, source, failed/flaky counts and up to eight failures with the first error line.
 Delivery is best-effort: a slow or failing webhook is logged and never fails the run. Network errors,
 `429` and `5xx` are retried once, honouring Discord's `retry_after` (capped at five seconds). The last
-delivery is recorded and shown in Config. `Quarantine expiring` is stored but not delivered yet.
+delivery is recorded and shown in Config. `Quarantine expiring` is checked on each run for active
+quarantines ending within 24 hours; the summary is sent once per quarantine expiry window.
 
 Create the webhook in Discord under **Server Settings → Integrations → Webhooks**, then paste the URL in
 Config. The stored token is masked when read, and the UI sends the masked value back when only the events

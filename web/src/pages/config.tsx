@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 const eventLabels: Record<string, string> = {
   new_failure: "New failure",
   regressed: "Regressed",
-  quarantine_expiring: "Quarantine expiring (soon)",
+  quarantine_expiring: "Quarantine expiring",
 };
 
 type Notice = { tone: "ok" | "error"; text: string } | null;
@@ -496,7 +496,7 @@ function NotificationsCard({
         <span className="text-[12.5px] font-semibold">Notifications</span>
         <Badge tone="brand">discord</Badge>
         <span className="ml-auto text-[10.5px] text-faint">
-          sends new failures and regressions to a Discord webhook
+          sends failures, regressions and expiring quarantines to Discord
         </span>
       </div>
       <div className="px-3.5 py-3">
@@ -550,32 +550,30 @@ function NotificationsCard({
         <div className="mt-3">
           <div className="mb-1.5 text-[10.5px] text-faint">Events</div>
           <div className="flex flex-wrap gap-2">
-            {settings.available_events.map((event) => {
-              const soon = event === "quarantine_expiring";
-              return (
-                <label
-                  key={event}
-                  title={soon ? "Not delivered yet; coming later." : undefined}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px]",
-                    soon ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-                    events.includes(event)
-                      ? "border-brand/50 bg-brand/10 text-ink"
-                      : "border-line bg-[#0f141a] text-muted",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 accent-[#58a6ff]"
-                    checked={events.includes(event)}
-                    onChange={() => toggleEvent(event)}
-                    disabled={soon}
-                  />
-                  {eventLabels[event] ?? event}
-                </label>
-              );
-            })}
+            {settings.available_events.map((event) => (
+              <label
+                key={event}
+                className={cn(
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[10.5px]",
+                  events.includes(event)
+                    ? "border-brand/50 bg-brand/10 text-ink"
+                    : "border-line bg-[#0f141a] text-muted",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3 w-3 accent-[#58a6ff]"
+                  checked={events.includes(event)}
+                  onChange={() => toggleEvent(event)}
+                />
+                {eventLabels[event] ?? event}
+              </label>
+            ))}
           </div>
+        </div>
+
+        <div className="mt-1 text-[10px] text-faint">
+          Quarantine expiring is checked on each run for quarantines ending within 24 hours.
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">

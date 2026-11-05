@@ -75,3 +75,62 @@ func TestQuarantine(t *testing.T) {
 		t.Errorf("health tidak boleh menandai expired: %+v %v", tests, err)
 	}
 }
+
+func TestQuarantineExpiryNotification(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "passed"),
+		healthSpec("B", "TC-B", "passed"),
+	), store.RunMeta{Branch: "main"})
+
+	a, err := s.FindTest(ctx, "TC-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.FindTest(ctx, "TC-B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(id store.TestIdentity, reason string, until time.Time) {
+		t.Helper()
+		if _, err := s.SetQuarantine(ctx, store.Quarantine{
+			Key: id.Key, TestKey: id.TestKey, TestCaseID: id.TestCaseID, Project: id.Project,
+			Owner: "ega", Reason: reason, By: "ega", Until: until,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(a, "expiring soon", time.Now().Add(12*time.Hour))
+	set(b, "later", time.Now().Add(48*time.Hour))
+
+	expiring, err := s.ExpiringQuarantines(ctx, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expiring) != 1 || expiring[0].Key != "TC-A" {
+		t.Fatalf("expiring salah: %+v", expiring)
+	}
+	if err := s.MarkQuarantineExpiryNotified(ctx, []string{"TC-A"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.ExpiringQuarantines(ctx, 24*time.Hour)
+	if err != nil || len(again) != 0 {
+		t.Fatalf("setelah ditandai harus kosong: %+v %v", again, err)
+	}
+
+	// Refreshing the quarantine resets the marker, so a new expiry window can be announced.
+	set(a, "expiring again", time.Now().Add(12*time.Hour))
+	refreshed, err := s.ExpiringQuarantines(ctx, 24*time.Hour)
+	if err != nil || len(refreshed) != 1 || refreshed[0].Key != "TC-A" {
+		t.Fatalf("refresh harus mengaktifkan lagi: %+v %v", refreshed, err)
+	}
+
+	if _, err := s.ReleaseQuarantine(ctx, "TC-A", "ega"); err != nil {
+		t.Fatal(err)
+	}
+	released, err := s.ExpiringQuarantines(ctx, 24*time.Hour)
+	if err != nil || len(released) != 0 {
+		t.Fatalf("released tidak boleh muncul: %+v %v", released, err)
+	}
+}
