@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -357,7 +357,7 @@ Voyage AI.
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
 | `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
 | `POST /api/tests/quarantine/suggestions/dismiss`                   | Snooze a suggestion: `{"test": "TC-...", "days": 7}`           |
-| `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes and changes |
+| `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes, changes and the last 20 run points |
 | `GET /api/config`                                                  | Contract sources (database + env fallback) and notification settings |
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
 | `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |
@@ -405,6 +405,11 @@ Coverage compares the newest contract snapshot with the calls recorded by the Re
 sources are configured in **Config**; the URL must be reachable from the **server**, not only from the
 browser. Inside a container `localhost` is the container, so use `host.docker.internal` for a service
 on the host or a public docs URL.
+
+The Coverage page also shows a **trend** over the last 20 stored snapshots: bar height is scaled to the
+best run in the window, color shows the change versus the previous run, and every bar links to its run.
+The tooltip has the absolute numbers. A PR run has one point (ephemeral database), so the trend is
+meaningful on `main` and on a local persistent server.
 
 ### Config page
 

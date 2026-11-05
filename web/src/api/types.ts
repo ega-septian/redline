@@ -363,6 +363,16 @@ export type ApiCoverageSnapshot = {
   source_url?: string;
 };
 
+export type ApiCoveragePoint = {
+  run_id: number;
+  at: string;
+  documented: number;
+  covered: number;
+  status_codes_documented: number;
+  status_codes_seen: number;
+  changes: number;
+};
+
 export type ApiCoverage = {
   available: boolean;
   project: string;
@@ -379,6 +389,7 @@ export type ApiCoverage = {
   };
   endpoints: ApiCoverageEndpoint[];
   changes: ApiCoverageChange[];
+  history?: ApiCoveragePoint[];
 };
 
 export type ApiContractSource = {

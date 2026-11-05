@@ -181,8 +181,10 @@ func (f *fakeStore) EndpointCalls(_ context.Context, project string) ([]store.En
 	}
 	now := time.Now()
 	return []store.EndpointCall{
-		{Method: "GET", Path: "/brands", Status: 200, TestKey: "toolshop › api.spec.ts › get", At: now},
-		{Method: "GET", Path: "/brands", Status: 401, TestKey: "toolshop › api.spec.ts › auth", At: now},
+		{RunID: 2, Method: "GET", Path: "/brands", Status: 200, TestKey: "toolshop › api.spec.ts › get", At: now},
+		{RunID: 2, Method: "GET", Path: "/brands", Status: 401, TestKey: "toolshop › api.spec.ts › auth", At: now},
+		{RunID: 2, Method: "GET", Path: "/products", Status: 200, TestKey: "toolshop › api.spec.ts › products", At: now},
+		{RunID: 1, Method: "GET", Path: "/brands", Status: 200, TestKey: "toolshop › api.spec.ts › old", At: now.Add(-time.Hour)},
 	}, nil
 }
 func (f *fakeStore) ListGroups(_ context.Context, st []string, _ int) ([]store.Group, error) {
@@ -916,12 +918,28 @@ func TestCoverage(t *testing.T) {
 	rec := do(h, http.MethodGet, "/api/coverage?project=toolshop", nil)
 	if rec.Code != http.StatusOK ||
 		!strings.Contains(rec.Body.String(), `"documented": 2`) ||
-		!strings.Contains(rec.Body.String(), `"covered": 1`) ||
-		!strings.Contains(rec.Body.String(), `"uncovered": 1`) ||
-		!strings.Contains(rec.Body.String(), `"status_codes_seen": 2`) ||
+		!strings.Contains(rec.Body.String(), `"covered": 2`) ||
+		!strings.Contains(rec.Body.String(), `"uncovered": 0`) ||
+		!strings.Contains(rec.Body.String(), `"status_codes_seen": 3`) ||
 		!strings.Contains(rec.Body.String(), `"path": "/products"`) {
 		t.Errorf("coverage = %d: %s", rec.Code, rec.Body)
 	}
+	var history struct {
+		History []struct {
+			RunID   int64 `json:"run_id"`
+			Covered int   `json:"covered"`
+			Changes int   `json:"changes"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+		t.Fatalf("history bukan JSON: %v", err)
+	}
+	if len(history.History) != 2 ||
+		history.History[0].RunID != 1 || history.History[0].Covered != 1 || history.History[0].Changes != 0 ||
+		history.History[1].RunID != 2 || history.History[1].Covered != 2 || history.History[1].Changes != 4 {
+		t.Errorf("history salah: %+v", history.History)
+	}
+
 	if rec := do(h, http.MethodGet, "/api/coverage", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("coverage tanpa project = %d, want 400", rec.Code)
 	}

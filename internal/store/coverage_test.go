@@ -39,7 +39,7 @@ func TestContractCoverageData(t *testing.T) {
 	}
 	found := false
 	for _, call := range calls {
-		if call.Method == "" || call.Path == "" || call.TestKey == "" || call.At.IsZero() {
+		if call.RunID == 0 || call.Method == "" || call.Path == "" || call.TestKey == "" || call.At.IsZero() {
 			t.Errorf("call tidak lengkap: %+v", call)
 		}
 		if call.Status != 0 {

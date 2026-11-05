@@ -31,6 +31,16 @@ type coverageSummary struct {
 	Changes               int `json:"changes"`
 }
 
+type coveragePoint struct {
+	RunID                 int64     `json:"run_id"`
+	At                    time.Time `json:"at"`
+	Documented            int       `json:"documented"`
+	Covered               int       `json:"covered"`
+	StatusCodesDocumented int       `json:"status_codes_documented"`
+	StatusCodesSeen       int       `json:"status_codes_seen"`
+	Changes               int       `json:"changes"`
+}
+
 type coverageResponse struct {
 	Available bool                      `json:"available"`
 	Project   string                    `json:"project"`
@@ -40,6 +50,7 @@ type coverageResponse struct {
 	Summary   coverageSummary           `json:"summary"`
 	Endpoints []coverageEndpoint        `json:"endpoints"`
 	Changes   []contract.ContractChange `json:"changes"`
+	History   []coveragePoint           `json:"history"`
 }
 
 // handleCoverage: GET /api/coverage?project=toolshop
@@ -49,7 +60,7 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project wajib diisi")
 		return
 	}
-	snapshots, err := s.Store.ContractSnapshots(r.Context(), project, 2)
+	snapshots, err := s.Store.ContractSnapshots(r.Context(), project, 20)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -63,19 +74,23 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 			Available: false, Project: project,
 			Message:   message,
 			Endpoints: []coverageEndpoint{}, Changes: []contract.ContractChange{},
+			History: []coveragePoint{},
 		})
 		return
 	}
-	latest, err := contract.Parse([]byte(snapshots[0].Document))
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	var previous *contract.Document
-	if len(snapshots) > 1 {
-		if parsed, err := contract.Parse([]byte(snapshots[1].Document)); err == nil {
-			previous = parsed
+	docs := make([]*contract.Document, len(snapshots))
+	for i, snapshot := range snapshots {
+		doc, err := contract.ParseCached(snapshot.ContractID, []byte(snapshot.Document))
+		if err != nil {
+			s.serverError(w, err)
+			return
 		}
+		docs[i] = doc
+	}
+	latest := docs[0]
+	var previous *contract.Document
+	if len(docs) > 1 {
+		previous = docs[1]
 	}
 	calls, err := s.Store.EndpointCalls(r.Context(), project)
 	if err != nil {
@@ -108,6 +123,7 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		Available: true, Project: project, Snapshot: &snapshots[0],
 		Endpoints: make([]coverageEndpoint, 0, len(endpoints)),
 		Changes:   []contract.ContractChange{},
+		History:   coverageHistory(snapshots, docs, calls),
 	}
 	if previous != nil {
 		response.Previous = &snapshots[1]
@@ -139,6 +155,55 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Summary.Uncovered = response.Summary.Documented - response.Summary.Covered
 	writeJSON(w, http.StatusOK, response)
+}
+
+// coverageHistory builds one point per stored snapshot, oldest first, using only the calls recorded
+// for that run. It compares each contract with the next older snapshot to count contract changes.
+func coverageHistory(snapshots []store.ContractSnapshot, docs []*contract.Document, calls []store.EndpointCall) []coveragePoint {
+	callsByRun := map[int64][]store.EndpointCall{}
+	for _, call := range calls {
+		callsByRun[call.RunID] = append(callsByRun[call.RunID], call)
+	}
+	points := make([]coveragePoint, 0, len(snapshots))
+	for i, snapshot := range snapshots {
+		doc := docs[i]
+		point := coveragePoint{RunID: snapshot.RunID, At: snapshot.At}
+		covered := map[string]bool{}
+		observed := map[string]map[string]bool{}
+		for _, call := range callsByRun[snapshot.RunID] {
+			template, ok := doc.Match(call.Method, call.Path)
+			if !ok {
+				continue
+			}
+			key := call.Method + " " + template
+			covered[key] = true
+			if observed[key] == nil {
+				observed[key] = map[string]bool{}
+			}
+			observed[key][strconv.Itoa(call.Status)] = true
+		}
+		for _, endpoint := range doc.Endpoints() {
+			key := endpoint.Method + " " + endpoint.Path
+			point.Documented++
+			point.StatusCodesDocumented += len(endpoint.StatusCodes)
+			for _, code := range endpoint.StatusCodes {
+				if observed[key][code] {
+					point.StatusCodesSeen++
+				}
+			}
+			if covered[key] {
+				point.Covered++
+			}
+		}
+		if i+1 < len(docs) {
+			point.Changes = len(doc.Diff(docs[i+1]))
+		}
+		points = append(points, point)
+	}
+	for i, j := 0, len(points)-1; i < j; i, j = i+1, j-1 {
+		points[i], points[j] = points[j], points[i]
+	}
+	return points
 }
 
 func (s *Server) hasContractSource(ctx context.Context, project string) bool {
