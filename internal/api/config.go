@@ -265,6 +265,21 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, notificationOut(saved, lastDelivery))
 }
 
+// handleNotificationDeliveries: GET /api/config/notifications/deliveries?limit=20
+func (s *Server) handleNotificationDeliveries(w http.ResponseWriter, r *http.Request) {
+	limit, err := queryInt(r, "limit", 20, 1, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	deliveries, err := s.Store.NotificationDeliveries(r.Context(), limit)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, deliveries)
+}
+
 // handleTestNotification: POST /api/config/notifications/test — sends a real Discord test message.
 func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.Store.NotificationSettings(r.Context())

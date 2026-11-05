@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -369,6 +369,7 @@ Voyage AI.
 | `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
 | `PUT /api/config/notifications`                                    | Save webhook/events (mock, nothing is delivered yet)           |
 | `POST /api/config/notifications/test`                              | Sends a real Discord test message                              |
+| `GET /api/config/notifications/deliveries?limit=20`                | Newest notification deliveries with status, attempts and error |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure, `?project=...` scopes them) |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -454,8 +455,9 @@ Notifications post to a **Discord webhook**. `new_failure` and `regressed` send 
 the branch, commit, source, failed/flaky counts and up to eight failures with the first error line.
 Delivery is best-effort: a slow or failing webhook is logged and never fails the run. Network errors,
 `429` and `5xx` are retried once, honouring Discord's `retry_after` (capped at five seconds). The last
-delivery is recorded and shown in Config. `Quarantine expiring` is checked on each run for active
-quarantines ending within 24 hours; the summary is sent once per quarantine expiry window.
+delivery is recorded and shown in Config, and the delivery history lists the newest 20 records with
+status, attempts and error. `Quarantine expiring` is checked on each run for active quarantines ending
+within 24 hours; the summary is sent once per quarantine expiry window.
 
 Create the webhook in Discord under **Server Settings → Integrations → Webhooks**, then paste the URL in
 Config. The stored token is masked when read, and the UI sends the masked value back when only the events

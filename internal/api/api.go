@@ -59,6 +59,7 @@ type Store interface {
 	SetNotificationSettings(ctx context.Context, settings store.NotificationSettings) (store.NotificationSettings, error)
 	RecordNotificationDelivery(ctx context.Context, delivery store.NotificationDelivery) error
 	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
+	NotificationDeliveries(ctx context.Context, limit int) ([]store.NotificationDelivery, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
@@ -168,6 +169,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/contracts/check", s.handleCheckContract)
 	mux.HandleFunc("PUT /api/config/notifications", s.handleSaveNotifications)
 	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
+	mux.HandleFunc("GET /api/config/notifications/deliveries", s.handleNotificationDeliveries)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)

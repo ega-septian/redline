@@ -4,6 +4,7 @@ import type {
   ApiProject,
   ApiQuarantine,
   ApiQuarantineSuggestion,
+  ApiNotificationDelivery,
   ApiCoverage,
   ApiConfig,
   ApiContractSource,
@@ -196,4 +197,6 @@ export const api = {
       "/api/config/notifications/test",
       { method: "POST", headers: { "X-CSRF-Token": csrfToken() } },
     ),
+  notificationDeliveries: (limit = 20) =>
+    request<ApiNotificationDelivery[]>(`/api/config/notifications/deliveries?limit=${limit}`),
 };

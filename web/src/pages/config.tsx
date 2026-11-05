@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Bell,
   CheckCircle2,
+  History,
   Pencil,
   Plus,
   RefreshCw,
@@ -12,7 +13,12 @@ import {
 import { useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { ApiContractSource, ApiNotifications, ApiSourceCheck } from "@/api/types";
+import type {
+  ApiContractSource,
+  ApiNotificationDelivery,
+  ApiNotifications,
+  ApiSourceCheck,
+} from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -41,6 +47,7 @@ export function ConfigPage() {
       queryClient.invalidateQueries({ queryKey: ["config"] }),
       queryClient.invalidateQueries({ queryKey: ["coverage"] }),
       queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      queryClient.invalidateQueries({ queryKey: ["notification-deliveries"] }),
     ]);
   }
 
@@ -179,6 +186,8 @@ export function ConfigPage() {
         settings={configQuery.data.notifications}
         onSaved={invalidate}
       />
+
+      <DeliveryHistory />
 
       <p className="text-[11px] leading-relaxed text-faint">
         Sources are validated by fetching and parsing the document from the Redline server, not from
@@ -641,6 +650,80 @@ function NotificationsCard({
         )}
       </div>
     </Card>
+  );
+}
+
+function DeliveryHistory() {
+  const query = useQuery({
+    queryKey: ["notification-deliveries"],
+    queryFn: () => api.notificationDeliveries(20),
+  });
+  const deliveries = (query.data ?? []).slice(0, 10);
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <History className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12.5px] font-semibold">Delivery history</span>
+        <Badge tone="neutral">{query.data?.length ?? 0} stored</Badge>
+        <span className="ml-auto text-[10.5px] text-faint">last 10 · newest first</span>
+      </div>
+      {query.isPending ? (
+        <div className="px-3.5 py-4 text-[11px] text-muted">Loading deliveries…</div>
+      ) : query.isError ? (
+        <div className="px-3.5 py-4 text-[11px] text-danger">
+          Cannot load delivery history: {query.error instanceof Error ? query.error.message : "request failed"}
+        </div>
+      ) : deliveries.length === 0 ? (
+        <div className="px-3.5 py-4 text-[11px] text-muted">
+          No deliveries yet. Save a webhook and use Send test.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[720px]">
+            <div className="grid grid-cols-[110px_minmax(150px,1fr)_70px_140px_70px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
+              <span>Time</span>
+              <span>Event</span>
+              <span>Run</span>
+              <span>Status</span>
+              <span className="text-right">Attempts</span>
+            </div>
+            {deliveries.map((delivery, index) => (
+              <DeliveryRow key={`${delivery.at}-${delivery.event}-${index}`} delivery={delivery} />
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function DeliveryRow({ delivery }: { delivery: ApiNotificationDelivery }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(150px,1fr)_70px_140px_70px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0">
+      <span className="text-[10.5px] text-faint" title={delivery.at}>
+        {ago(delivery.at)}
+      </span>
+      <span className="truncate text-[11px] text-ink">{deliveryEventLabel(delivery.event)}</span>
+      <span className="font-mono text-[10.5px] text-muted">
+        {delivery.run_id ? `#${delivery.run_id}` : "—"}
+      </span>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5",
+          delivery.ok ? "text-ok" : "text-danger",
+        )}
+        title={delivery.error}
+      >
+        {delivery.ok ? (
+          <CheckCircle2 className="h-3 w-3" />
+        ) : (
+          <AlertTriangle className="h-3 w-3" />
+        )}
+        {delivery.ok ? "sent" : "failed"}
+        {!delivery.ok && delivery.status_code ? ` · HTTP ${delivery.status_code}` : ""}
+      </span>
+      <span className="text-right font-mono text-[10.5px] text-muted">{delivery.attempts}</span>
+    </div>
   );
 }
 
