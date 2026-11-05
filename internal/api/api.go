@@ -42,6 +42,8 @@ type Store interface {
 	SetQuarantine(ctx context.Context, q store.Quarantine) (store.Quarantine, error)
 	ReleaseQuarantine(ctx context.Context, key, by string) (store.Quarantine, error)
 	ActiveQuarantines(ctx context.Context) ([]store.Quarantine, error)
+	ExpiringQuarantines(ctx context.Context, within time.Duration) ([]store.Quarantine, error)
+	MarkQuarantineExpiryNotified(ctx context.Context, keys []string) error
 	DismissQuarantineSuggestion(ctx context.Context, key string, until time.Time, by string) error
 	SuggestionDismissals(ctx context.Context) (map[string]time.Time, error)
 	ContractSnapshots(ctx context.Context, project string, limit int) ([]store.ContractSnapshot, error)
@@ -300,8 +302,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
 	// Notifikasi berjalan di background: webhook lambat atau mati tidak boleh menahan reporter.
-	if s.Notifier != nil && (len(res.New) > 0 || len(res.Regressed) > 0) {
-		go s.notifyRun(meta, res)
+	// Quarantine expiry ikut dicek di setiap ingest, jadi tidak perlu scheduler terpisah.
+	if s.Notifier != nil {
+		go func() {
+			s.notifyRun(meta, res)
+			s.notifyExpiring(meta, res.RunID)
+		}()
 	}
 	// Kontrak dipotret di setiap run, termasuk yang lulus semua: run lulus adalah pembanding untuk tahu
 	// apakah kontrak berubah. Tidak di background: analisis yang menyusul harus memakai kontrak run ini.

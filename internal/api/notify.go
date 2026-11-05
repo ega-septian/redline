@@ -65,6 +65,115 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 	}
 }
 
+// notifyExpiring posts one summary for active quarantines that end within 24 hours and have not been
+// announced for their current until value. It is called after every ingest, so it needs no scheduler.
+func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
+	settings, err := s.Store.NotificationSettings(context.Background())
+	if err != nil {
+		s.logWarn("expiry notification tidak bisa membaca settings", "run", runID, "err", err)
+		return
+	}
+	if !settings.Enabled || settings.WebhookURL == "" || !contains(settings.Events, "quarantine_expiring") {
+		return
+	}
+	expiring, err := s.Store.ExpiringQuarantines(context.Background(), 24*time.Hour)
+	if err != nil {
+		s.logWarn("expiry notification gagal membaca quarantine", "run", runID, "err", err)
+		return
+	}
+	if len(expiring) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
+		quarantineExpiryMessage(meta, runID, expiring))
+	delivery := store.NotificationDelivery{
+		At: time.Now(), Event: "quarantine_expiring", RunID: runID,
+		OK: sendErr == nil, StatusCode: status, Attempts: attempts,
+	}
+	if sendErr != nil {
+		delivery.Error = sendErr.Error()
+		s.logWarn("expiry notification gagal", "run", runID, "err", sendErr)
+	}
+	recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer recordCancel()
+	if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
+		s.logWarn("delivery log gagal disimpan", "run", runID, "err", err)
+	}
+	if sendErr != nil {
+		return
+	}
+	keys := make([]string, 0, len(expiring))
+	for _, quarantine := range expiring {
+		keys = append(keys, quarantine.Key)
+	}
+	if err := s.Store.MarkQuarantineExpiryNotified(recordCtx, keys); err != nil {
+		s.logWarn("expiry notification tidak bisa ditandai", "run", runID, "err", err)
+	}
+}
+
+func quarantineExpiryMessage(meta store.RunMeta, runID int64, expiring []store.Quarantine) notify.Message {
+	noun, verb := "quarantines", "expire"
+	if len(expiring) == 1 {
+		noun, verb = "quarantine", "expires"
+	}
+	title := fmt.Sprintf("Redline: %d %s %s within 24h", len(expiring), noun, verb)
+	var body strings.Builder
+	const limit = 8
+	for i, quarantine := range expiring {
+		if i == limit {
+			fmt.Fprintf(&body, "…and %d more\n", len(expiring)-limit)
+			break
+		}
+		name := quarantine.TestCaseID
+		if name == "" {
+			name = quarantine.Key
+		}
+		body.WriteString("• " + name)
+		if quarantine.Owner != "" {
+			body.WriteString(" · owner " + quarantine.Owner)
+		}
+		body.WriteString(" · until " + quarantine.Until.Format("2006-01-02"))
+		body.WriteString("\n")
+		if quarantine.Reason != "" {
+			body.WriteString("  " + clipText(quarantine.Reason, 180) + "\n")
+		}
+	}
+	commit := meta.CommitSHA
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	if commit == "" {
+		commit = "—"
+	}
+	branch := meta.Branch
+	if branch == "" {
+		branch = "—"
+	}
+	return notify.Message{
+		Title:       title,
+		Description: body.String(),
+		Color:       0xD29922,
+		Fields: []notify.Field{
+			{Name: "Branch", Value: branch, Inline: true},
+			{Name: "Commit", Value: commit, Inline: true},
+			{Name: "Expiring", Value: fmt.Sprintf("%d", len(expiring)), Inline: true},
+		},
+		Footer: fmt.Sprintf("Redline · run #%d", runID),
+	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 // sendNotification applies the retry policy: one retry for network errors, 429 and 5xx. Other 4xx
 // responses are final. Discord's retry_after is honoured but capped at five seconds so the reporter
 // and the test button stay responsive.

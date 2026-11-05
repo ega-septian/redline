@@ -20,6 +20,9 @@ type Quarantine struct {
 	Until      time.Time  `json:"until"`
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
 	ReleasedBy string     `json:"released_by,omitempty"`
+	// ExpiryNotifiedFor is the until value that was already announced. A refresh resets it so a
+	// new expiry window can be announced again.
+	ExpiryNotifiedFor *time.Time `json:"expiry_notified_for,omitempty"`
 }
 
 // TestIdentity is the stable identity Redline uses for history and quarantine.
@@ -60,7 +63,8 @@ func (s *Store) SetQuarantine(ctx context.Context, q Quarantine) (Quarantine, er
 		ON CREATE SET q.createdAt = datetime()
 		SET q.testKey = $testKey, q.caseId = $caseId, q.project = $project,
 		    q.owner = $owner, q.reason = $reason, q.by = $by,
-		    q.until = datetime($until), q.releasedAt = null, q.releasedBy = ''
+		    q.until = datetime($until), q.releasedAt = null, q.releasedBy = '',
+		    q.expiryNotifiedFor = null
 		RETURN q`,
 		map[string]any{
 			"key": q.Key, "testKey": q.TestKey, "caseId": q.TestCaseID, "project": q.Project,
@@ -105,6 +109,39 @@ func (s *Store) ActiveQuarantines(ctx context.Context) ([]Quarantine, error) {
 	return out, nil
 }
 
+// ExpiringQuarantines returns active quarantines that end within the given window and have not been
+// announced for their current until value. The ingest path calls this after a run.
+func (s *Store) ExpiringQuarantines(ctx context.Context, within time.Duration) ([]Quarantine, error) {
+	limit := time.Now().Add(within)
+	res, err := s.query(ctx, `
+		MATCH (q:Quarantine)
+		WHERE q.releasedAt IS NULL AND q.until > datetime() AND q.until <= datetime($limit)
+		  AND (q.expiryNotifiedFor IS NULL OR q.expiryNotifiedFor <> q.until)
+		RETURN q ORDER BY q.until`, map[string]any{"limit": limit.UTC()})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Quarantine, 0, len(res.Records))
+	for _, record := range res.Records {
+		node, _ := record.Get("q")
+		out = append(out, toQuarantine(node.(neo4j.Node).Props))
+	}
+	return out, nil
+}
+
+// MarkQuarantineExpiryNotified records that the current until value has been announced. Only call it
+// after a successful delivery, so a failed webhook retries on the next run.
+func (s *Store) MarkQuarantineExpiryNotified(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	_, err := s.query(ctx, `
+		UNWIND $keys AS key
+		MATCH (q:Quarantine {key: key})
+		SET q.expiryNotifiedFor = q.until`, map[string]any{"keys": keys})
+	return err
+}
+
 func toQuarantine(p map[string]any) Quarantine {
 	q := Quarantine{
 		Key: str(p, "key"), TestKey: str(p, "testKey"), TestCaseID: str(p, "caseId"),
@@ -115,6 +152,10 @@ func toQuarantine(p map[string]any) Quarantine {
 	if released, ok := p["releasedAt"]; ok {
 		at := local(released)
 		q.ReleasedAt = &at
+	}
+	if notified, ok := p["expiryNotifiedFor"]; ok {
+		at := local(notified)
+		q.ExpiryNotifiedFor = &at
 	}
 	return q
 }
