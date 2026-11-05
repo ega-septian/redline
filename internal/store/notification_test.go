@@ -42,4 +42,14 @@ func TestNotificationDeliveries(t *testing.T) {
 		got.Attempts != 2 || got.Error != "rate limited" {
 		t.Fatalf("delivery terbaru salah: %+v %v", got, err)
 	}
+
+	history, err := s.NotificationDeliveries(ctx, 1)
+	if err != nil || len(history) != 1 || history[0].Event != "test" {
+		t.Fatalf("history limit salah: %+v %v", history, err)
+	}
+	history, err = s.NotificationDeliveries(ctx, 10)
+	if err != nil || len(history) != 2 || history[0].Event != "test" ||
+		history[1].Event != "new_failure" {
+		t.Fatalf("history urutan salah: %+v %v", history, err)
+	}
 }

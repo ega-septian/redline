@@ -302,6 +302,16 @@ func (f *fakeStore) LastNotificationDelivery(context.Context) (*store.Notificati
 	last := f.deliveries[len(f.deliveries)-1]
 	return &last, nil
 }
+func (f *fakeStore) NotificationDeliveries(_ context.Context, limit int) ([]store.NotificationDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	out := make([]store.NotificationDelivery, 0, len(f.deliveries))
+	for i := len(f.deliveries) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, f.deliveries[i])
+	}
+	return out, nil
+}
 func (f *fakeStore) SetNotificationSettings(_ context.Context, settings store.NotificationSettings) (store.NotificationSettings, error) {
 	settings.UpdatedAt = time.Now()
 	f.notifications = settings
@@ -1525,5 +1535,29 @@ func TestProjectsAndFilters(t *testing.T) {
 	}
 	if fs.lastGroupProject != "api" {
 		t.Errorf("groups project tidak diteruskan: %q", fs.lastGroupProject)
+	}
+}
+
+func TestNotificationDeliveriesEndpoint(t *testing.T) {
+	now := time.Now()
+	fs := &fakeStore{deliveries: []store.NotificationDelivery{
+		{At: now, Event: "test", OK: true, Attempts: 1},
+		{At: now.Add(time.Minute), Event: "new_failure", RunID: 7, OK: false,
+			StatusCode: 500, Attempts: 2, Error: "boom"},
+	}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/config/notifications/deliveries?limit=1", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"new_failure"`) ||
+		strings.Contains(rec.Body.String(), `"event": "test"`) {
+		t.Errorf("deliveries limit = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/config/notifications/deliveries", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"test"`) ||
+		!strings.Contains(rec.Body.String(), `"new_failure"`) {
+		t.Errorf("deliveries = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/config/notifications/deliveries?limit=nope", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("limit invalid = %d, want 400", rec.Code)
 	}
 }

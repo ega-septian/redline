@@ -42,6 +42,26 @@ func (s *Store) RecordNotificationDelivery(ctx context.Context, delivery Notific
 	return err
 }
 
+// NotificationDeliveries returns the newest records, newest first. The cap matches the retention in
+// RecordNotificationDelivery.
+func (s *Store) NotificationDeliveries(ctx context.Context, limit int) ([]NotificationDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	res, err := s.query(ctx, `
+		MATCH (d:NotificationDelivery) RETURN d ORDER BY d.at DESC LIMIT $limit`,
+		map[string]any{"limit": limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NotificationDelivery, 0, len(res.Records))
+	for _, record := range res.Records {
+		node, _ := record.Get("d")
+		out = append(out, toNotificationDelivery(node.(neo4j.Node).Props))
+	}
+	return out, nil
+}
+
 // LastNotificationDelivery returns the newest record, or nil when nothing has been delivered yet.
 func (s *Store) LastNotificationDelivery(ctx context.Context) (*NotificationDelivery, error) {
 	res, err := s.query(ctx, `MATCH (d:NotificationDelivery) RETURN d ORDER BY d.at DESC LIMIT 1`, nil)
