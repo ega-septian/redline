@@ -40,6 +40,7 @@ export function ConfigPage() {
     return Promise.all([
       queryClient.invalidateQueries({ queryKey: ["config"] }),
       queryClient.invalidateQueries({ queryKey: ["coverage"] }),
+      queryClient.invalidateQueries({ queryKey: ["projects"] }),
     ]);
   }
 

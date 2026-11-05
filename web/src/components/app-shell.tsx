@@ -15,6 +15,7 @@ import {
 
 import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
+import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 type Health = { status: string; version?: string; api?: number; auth?: boolean };
@@ -38,13 +39,17 @@ const nav = [
 ];
 
 export function AppShell() {
+  const { project, setProject, projects } = useProject();
   const health = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
     refetchInterval: 30_000,
     retry: 1,
   });
-  const groups = useQuery({ queryKey: ["groups"], queryFn: api.groups });
+  const groups = useQuery({
+    queryKey: ["groups", project],
+    queryFn: () => api.groups(project),
+  });
   const items = nav.map((item) =>
     item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
   );
@@ -105,11 +110,25 @@ export function AppShell() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-line bg-surface px-2.5 py-2 text-[12.5px]">
-          <span>Project</span>
-          <span className="font-semibold">toolshop</span>
-          <span className="text-faint">⌄</span>
-        </div>
+        <label className="flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-2 text-[12.5px]">
+          <span className="shrink-0">Project</span>
+          <select
+            value={project}
+            onChange={(event) => setProject(event.target.value)}
+            aria-label="Project"
+            className="min-w-0 flex-1 appearance-none bg-transparent text-right font-semibold text-ink outline-none"
+          >
+            {!projects.some((item) => item.project === project) && (
+              <option value={project}>{project || "no project"}</option>
+            )}
+            {projects.map((item) => (
+              <option key={item.project} value={item.project}>
+                {item.project}
+              </option>
+            ))}
+          </select>
+          <span className="shrink-0 text-faint">⌄</span>
+        </label>
 
         <nav className="flex flex-col gap-0.5">
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">

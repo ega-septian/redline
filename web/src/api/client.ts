@@ -1,6 +1,7 @@
 import type {
   AnalyzeResult,
   ApiGroup,
+  ApiProject,
   ApiQuarantine,
   ApiQuarantineSuggestion,
   ApiCoverage,
@@ -65,12 +66,19 @@ function csrfToken(): string {
 }
 
 export const api = {
-  groups: () => request<ApiGroup[]>("/api/groups"),
+  projects: () => request<ApiProject[]>("/api/projects"),
+  groups: (project?: string) =>
+    request<ApiGroup[]>(
+      `/api/groups${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    ),
   group: (fingerprint: string) =>
     request<GroupDetail>(`/api/groups/${encodeURIComponent(fingerprint)}`),
   knowledge: (fingerprint: string) =>
     request<Knowledge>(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge`),
-  runs: () => request<ApiRun[]>("/api/runs?limit=50"),
+  runs: (project?: string) =>
+    request<ApiRun[]>(
+      `/api/runs?limit=50${project ? `&project=${encodeURIComponent(project)}` : ""}`,
+    ),
   run: (id: number) => request<RunDetail>(`/api/runs/${id}`),
   compareRun: (id: number) => request<RunComparison>(`/api/runs/${id}/compare`),
   impact: (kind: "file" | "endpoint", query: string) =>

@@ -18,6 +18,7 @@ import type { ApiQuarantineSuggestion, ApiRun } from "@/api/types";
 import { CoverageTrend } from "@/components/coverage-trend";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { useProject } from "@/lib/project";
 import {
   categoryLabel,
   statusLabel,
@@ -27,7 +28,6 @@ import {
 } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
-const PROJECT = "toolshop";
 const WINDOW_DAYS = 30;
 
 type SectionLink = "/" | "/health" | "/runs" | "/config" | "/coverage";
@@ -47,22 +47,33 @@ const statusTone: Record<FailureStatus, "brand" | "env" | "backend"> = {
 };
 
 export function OverviewPage() {
-  const groupsQuery = useQuery({ queryKey: ["groups"], queryFn: api.groups });
-  const healthQuery = useQuery({
-    queryKey: ["test-health", WINDOW_DAYS, ""],
-    queryFn: () => api.testHealth(WINDOW_DAYS, ""),
+  const { project } = useProject();
+  const groupsQuery = useQuery({
+    queryKey: ["groups", project],
+    queryFn: () => api.groups(project),
   });
-  const runsQuery = useQuery({ queryKey: ["runs"], queryFn: api.runs });
+  const healthQuery = useQuery({
+    queryKey: ["test-health", WINDOW_DAYS, project],
+    queryFn: () => api.testHealth(WINDOW_DAYS, project),
+  });
+  const runsQuery = useQuery({
+    queryKey: ["runs", project],
+    queryFn: () => api.runs(project),
+  });
   const coverageQuery = useQuery({
-    queryKey: ["coverage", PROJECT],
-    queryFn: () => api.coverage(PROJECT),
+    queryKey: ["coverage", project],
+    queryFn: () => api.coverage(project),
+    enabled: project !== "",
   });
   const suggestionsQuery = useQuery({
-    queryKey: ["quarantine-suggestions", WINDOW_DAYS, ""],
-    queryFn: () => api.quarantineSuggestions(WINDOW_DAYS, ""),
+    queryKey: ["quarantine-suggestions", WINDOW_DAYS, project],
+    queryFn: () => api.quarantineSuggestions(WINDOW_DAYS, project),
   });
   const configQuery = useQuery({ queryKey: ["config"], queryFn: api.config });
 
+  if (project === "") {
+    return <State>Select a project in the sidebar to see its overview.</State>;
+  }
   const loading = groupsQuery.isPending || healthQuery.isPending || runsQuery.isPending;
   const error = groupsQuery.error ?? healthQuery.error ?? runsQuery.error;
 
@@ -98,6 +109,7 @@ export function OverviewPage() {
   const coverage = coverageQuery.data;
   const suggestions = suggestionsQuery.data ?? [];
   const config = configQuery.data;
+  const projectSources = config?.contracts.filter((source) => source.project === project) ?? [];
   const failures = [...groups]
     .sort(
       (left, right) =>
@@ -266,9 +278,9 @@ export function OverviewPage() {
               <Status
                 icon={Layers}
                 label="Contract sources"
-                value={`${config?.contracts.length ?? 0} source${(config?.contracts.length ?? 0) === 1 ? "" : "s"}`}
+                value={`${projectSources.length} source${projectSources.length === 1 ? "" : "s"}`}
                 hint={
-                  config?.contracts.some((source) => source.last_status === "valid")
+                  projectSources.some((source) => source.last_status === "valid")
                     ? "at least one valid"
                     : "none checked"
                 }

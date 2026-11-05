@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, lazyRouteComponent } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell";
+import { ProjectProvider } from "@/lib/project";
 import { CoveragePage } from "@/pages/coverage";
 import { FailuresPage } from "@/pages/failures";
 import { HealthPage } from "@/pages/health";
@@ -10,7 +11,15 @@ import { RunDetailPage } from "@/pages/run-detail";
 import { RunsPage } from "@/pages/runs";
 import { ScoreboardPage } from "@/pages/scoreboard";
 
-const rootRoute = createRootRoute({ component: AppShell });
+function RootLayout() {
+  return (
+    <ProjectProvider>
+      <AppShell />
+    </ProjectProvider>
+  );
+}
+
+const rootRoute = createRootRoute({ component: RootLayout });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,

@@ -9,25 +9,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 const windows = [7, 30, 90] as const;
 type WindowDays = (typeof windows)[number];
 
 export function HealthPage() {
+  const { project } = useProject();
   const [days, setDays] = useState<WindowDays>(30);
-  const [project, setProject] = useState("");
-  const [appliedProject, setAppliedProject] = useState("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
 
   const healthQuery = useQuery({
-    queryKey: ["test-health", days, appliedProject],
-    queryFn: () => api.testHealth(days, appliedProject),
+    queryKey: ["test-health", days, project],
+    queryFn: () => api.testHealth(days, project),
   });
   const suggestionsQuery = useQuery({
-    queryKey: ["quarantine-suggestions", days, appliedProject],
-    queryFn: () => api.quarantineSuggestions(days, appliedProject),
+    queryKey: ["quarantine-suggestions", days, project],
+    queryFn: () => api.quarantineSuggestions(days, project),
   });
   const suggestions = suggestionsQuery.data ?? [];
   const summary = healthQuery.data?.summary;
@@ -94,24 +94,6 @@ export function HealthPage() {
             {window}d
           </button>
         ))}
-        <form
-          className="ml-2 flex items-center gap-1.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setAppliedProject(project.trim());
-          }}
-        >
-          <Input
-            value={project}
-            onChange={(event) => setProject(event.target.value)}
-            placeholder="project (all)"
-            aria-label="Project filter"
-            className="h-7 w-32 text-[11px]"
-          />
-          <Button type="submit" size="sm" variant="outline">
-            Apply
-          </Button>
-        </form>
         <div className="ml-auto flex min-w-[180px] flex-1 items-center gap-1.5 rounded-md border border-line bg-canvas px-2.5 text-faint sm:max-w-xs">
           <Search className="h-3.5 w-3.5" />
           <Input
@@ -189,7 +171,7 @@ export function HealthPage() {
               {filtered.length} test{filtered.length === 1 ? "" : "s"}
             </span>
             <span className="text-[11px] text-faint">
-              {appliedProject ? `project ${appliedProject}` : "all projects"} · {days}d
+              {project ? `project ${project}` : "no project"} · {days}d
             </span>
           </div>
           <div className="overflow-x-auto">

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 const sources = ["all", "ci", "local"] as const;
@@ -32,9 +33,13 @@ function when(iso: string): string {
 }
 
 export function RunsPage() {
+  const { project } = useProject();
   const [source, setSource] = useState<SourceFilter>("all");
   const [query, setQuery] = useState("");
-  const runsQuery = useQuery({ queryKey: ["runs"], queryFn: api.runs });
+  const runsQuery = useQuery({
+    queryKey: ["runs", project],
+    queryFn: () => api.runs(project),
+  });
   const runs = runsQuery.data ?? [];
 
   const filtered = useMemo(() => {

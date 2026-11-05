@@ -1,3 +1,11 @@
+export type ApiProject = {
+  project: string;
+  tests: number;
+  runs: number;
+  open_failures: number;
+  last_run_at?: string | null;
+};
+
 export type ApiGroup = {
   fingerprint: string;
   test: string;

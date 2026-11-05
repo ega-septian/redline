@@ -33,6 +33,8 @@ import (
 type Store interface {
 	IngestReport(ctx context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error)
 	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
+	ListRunsForProject(ctx context.Context, project string, limit int) ([]store.Run, error)
+	ProjectSummaries(ctx context.Context) ([]store.ProjectSummary, error)
 	GetRun(ctx context.Context, id int64) (store.Run, error)
 	PreviousRun(ctx context.Context, id int64, branch string) (store.Run, bool, error)
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
@@ -61,6 +63,7 @@ type Store interface {
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
 	ListGroups(ctx context.Context, statuses []string, limit int) ([]store.Group, error)
+	ListGroupsForProject(ctx context.Context, statuses []string, limit int, project string) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
@@ -148,6 +151,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /api/runs", s.handleIngest)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
 	mux.HandleFunc("GET /api/tests/history", s.handleTestHistory)
 	mux.HandleFunc("GET /api/tests", s.handleTestHealth)
@@ -503,12 +507,23 @@ func (s *Server) handleReleaseQuarantine(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	runs, err := s.Store.ListRuns(r.Context(), limit)
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	runs, err := s.Store.ListRunsForProject(r.Context(), project, limit)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, runs)
+}
+
+// handleListProjects: GET /api/projects — used by the project selector.
+func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	projects, err := s.Store.ProjectSummaries(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, projects)
 }
 
 // handleCompareRun: GET /api/runs/{id}/compare. Bandingkan run dengan run sebelumnya di branch yang sama.
@@ -862,7 +877,8 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	groups, err := s.Store.ListGroups(r.Context(), statuses, limit)
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	groups, err := s.Store.ListGroupsForProject(r.Context(), statuses, limit, project)
 	if err != nil {
 		s.serverError(w, err)
 		return
