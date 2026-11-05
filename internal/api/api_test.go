@@ -19,6 +19,7 @@ import (
 
 	"redline/internal/analysis"
 	"redline/internal/contract"
+	"redline/internal/notify"
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
@@ -39,11 +40,31 @@ type fakeStore struct {
 	healthRows         []store.TestHealthRow
 	dismissals         map[string]time.Time
 	dismissed          string
+	ingest             *store.IngestResult
+}
+
+type fakeNotifier struct {
+	webhook string
+	message notify.Message
+	err     error
+	ch      chan struct{}
+}
+
+func (f *fakeNotifier) Send(_ context.Context, webhook string, message notify.Message) error {
+	f.webhook = webhook
+	f.message = message
+	if f.ch != nil {
+		f.ch <- struct{}{}
+	}
+	return f.err
 }
 
 func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error) {
 	f.gotMeta = meta
 	f.gotTests = len(rep.Outcomes())
+	if f.ingest != nil {
+		return f.ingest, nil
+	}
 	return &store.IngestResult{RunID: 7, Total: f.gotTests}, nil
 }
 func (f *fakeStore) ListRuns(context.Context, int) ([]store.Run, error) { return []store.Run{}, nil }
@@ -1043,7 +1064,7 @@ func TestConfigListsSources(t *testing.T) {
 		t.Fatalf("config = %d: %s", rec.Code, rec.Body)
 	}
 	for _, want := range []string{
-		`"project": "toolshop"`, `"last_endpoints": 19`, `"delivery": false`, `"available_events"`,
+		`"project": "toolshop"`, `"last_endpoints": 19`, `"delivery": true`, `"provider": "discord"`, `"available_events"`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("config tidak memuat %s: %s", want, rec.Body)
@@ -1061,7 +1082,7 @@ func TestConfigEmptyOnFreshInstall(t *testing.T) {
 		t.Fatalf("fresh install = %d: %s", rec.Code, rec.Body)
 	}
 	if !strings.Contains(rec.Body.String(), `"enabled": false`) ||
-		!strings.Contains(rec.Body.String(), `"delivery": false`) {
+		!strings.Contains(rec.Body.String(), `"delivery": true`) {
 		t.Errorf("notifikasi default salah: %s", rec.Body)
 	}
 }
@@ -1134,7 +1155,9 @@ func TestContractCheckPersistsResult(t *testing.T) {
 
 func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
 	fs := &fakeStore{}
-	_, h := configServer(fs)
+	srv, h := configServer(fs)
+	notifier := &fakeNotifier{}
+	srv.Notifier = notifier
 
 	rec := do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
 		`{"enabled":true,"webhook_url":"https://hooks.slack.com/services/T000/B000/SECRET","events":["new_failure"]}`))
@@ -1172,9 +1195,64 @@ func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
 	}
 
 	rec = do(h, http.MethodPost, "/api/config/notifications/test", nil)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mock": true`) ||
-		!strings.Contains(rec.Body.String(), `"sent": false`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"sent": true`) ||
+		!strings.Contains(rec.Body.String(), `"mock": false`) ||
+		notifier.message.Title != "Redline test notification" {
 		t.Errorf("test notification = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTestNotificationFailure(t *testing.T) {
+	fs := &fakeStore{notifications: store.NotificationSettings{
+		WebhookURL: "https://discord.test/webhook", Events: []string{"new_failure"},
+	}}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: &fakeNotifier{err: errors.New("discord down")},
+	}
+	rec := do(srv.Routes(), http.MethodPost, "/api/config/notifications/test", nil)
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), `"sent": false`) {
+		t.Errorf("test notification gagal = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestIngestSendsDiscordNotification(t *testing.T) {
+	fs := &fakeStore{
+		ingest: &store.IngestResult{
+			RunID: 7, Total: 6, Failed: 1,
+			New: []store.GroupChange{{
+				Fingerprint: "fp", TestKey: "toolshop › brand.spec.ts › create",
+				TestCaseID: "TC-BRD-002", Error: "boom",
+			}},
+		},
+		notifications: store.NotificationSettings{
+			Enabled: true, WebhookURL: "https://discord.test/webhook",
+			Events: []string{"new_failure", "regressed"},
+		},
+	}
+	notifier := &fakeNotifier{ch: make(chan struct{}, 1)}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	f, _ := os.Open("../report/testdata/run1-bug.json")
+	defer f.Close()
+	rec := do(srv.Routes(), http.MethodPost, "/api/runs?source=ci&branch=main&commit=abcdef123", f)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ingest = %d: %s", rec.Code, rec.Body)
+	}
+	select {
+	case <-notifier.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("notifier tidak dipanggil")
+	}
+	if notifier.webhook != "https://discord.test/webhook" {
+		t.Errorf("webhook = %q", notifier.webhook)
+	}
+	if !strings.Contains(notifier.message.Title, "1 new") ||
+		!strings.Contains(notifier.message.Title, "run #7") ||
+		!strings.Contains(notifier.message.Description, "TC-BRD-002") {
+		t.Errorf("message salah: %+v", notifier.message)
 	}
 }
 
@@ -1250,5 +1328,14 @@ func TestQuarantineSuggestions(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/api/tests/quarantine/suggestions/dismiss",
 		strings.NewReader(`{"test":"TC-A","days":91}`)); rec.Code != http.StatusBadRequest {
 		t.Errorf("dismiss days invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestSaveNotificationsRejectsMetadataHost(t *testing.T) {
+	_, h := configServer(&fakeStore{})
+	rec := do(h, http.MethodPut, "/api/config/notifications", strings.NewReader(
+		`{"enabled":true,"webhook_url":"http://169.254.169.254/latest/meta-data","events":["new_failure"]}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("metadata host = %d, want 400: %s", rec.Code, rec.Body)
 	}
 }

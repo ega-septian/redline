@@ -1,0 +1,141 @@
+// Package notify delivers Redline summaries to chat webhooks. Discord is the first provider; the
+// message shape is small enough to add Slack or Teams later without touching the ingest path.
+package notify
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// Sender sends one already-built message to a webhook URL.
+type Sender interface {
+	Send(ctx context.Context, webhookURL string, message Message) error
+}
+
+// Message is a provider-neutral summary. Discord renders it as one embed.
+type Message struct {
+	Title       string
+	Description string
+	Color       int
+	Fields      []Field
+	Footer      string
+}
+
+// Field is one inline embed field.
+type Field struct {
+	Name   string
+	Value  string
+	Inline bool
+}
+
+// Discord posts a webhook message with one embed. It is safe to reuse: the HTTP client owns the
+// connection pool and every Send is independent.
+type Discord struct {
+	HTTP *http.Client
+}
+
+func NewDiscord() *Discord {
+	return &Discord{HTTP: &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("terlalu banyak redirect")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect ke scheme %q tidak diizinkan", req.URL.Scheme)
+			}
+			return nil
+		},
+	}}
+}
+
+type discordEmbed struct {
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Color       int            `json:"color,omitempty"`
+	Fields      []discordField `json:"fields,omitempty"`
+	Footer      *discordFooter `json:"footer,omitempty"`
+	Timestamp   string         `json:"timestamp,omitempty"`
+}
+
+type discordField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type discordFooter struct {
+	Text string `json:"text"`
+}
+
+func (d *Discord) Send(ctx context.Context, webhookURL string, message Message) error {
+	if !strings.HasPrefix(webhookURL, "http://") && !strings.HasPrefix(webhookURL, "https://") {
+		return fmt.Errorf("webhook harus http(s)://")
+	}
+	embed := discordEmbed{
+		Title:       clip(message.Title, 256),
+		Description: clip(message.Description, 4096),
+		Color:       message.Color,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	for _, field := range message.Fields {
+		if len(embed.Fields) == 25 {
+			break
+		}
+		embed.Fields = append(embed.Fields, discordField{
+			Name: clip(field.Name, 256), Value: clip(field.Value, 1024), Inline: field.Inline,
+		})
+	}
+	if message.Footer != "" {
+		embed.Footer = &discordFooter{Text: clip(message.Footer, 2048)}
+	}
+	payload := map[string]any{
+		"username": "Redline",
+		"embeds":   []discordEmbed{embed},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := d.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		// url.Error includes the full URL, and a Discord webhook URL carries the secret token.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return fmt.Errorf("discord request gagal: %v", urlErr.Err)
+		}
+		return fmt.Errorf("discord request gagal: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("discord HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
+	}
+	return nil
+}
+
+func clip(s string, max int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
+}

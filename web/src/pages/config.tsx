@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 const eventLabels: Record<string, string> = {
   new_failure: "New failure",
   regressed: "Regressed",
-  quarantine_expiring: "Quarantine expiring",
+  quarantine_expiring: "Quarantine expiring (soon)",
 };
 
 type Notice = { tone: "ok" | "error"; text: string } | null;
@@ -488,8 +488,10 @@ function NotificationsCard({
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
         <Bell className="h-3.5 w-3.5 text-brand" />
         <span className="text-[12.5px] font-semibold">Notifications</span>
-        <Badge tone="test">mock only</Badge>
-        <span className="ml-auto text-[10.5px] text-faint">saved now, delivery comes later</span>
+        <Badge tone="brand">discord</Badge>
+        <span className="ml-auto text-[10.5px] text-faint">
+          sends new failures and regressions to a Discord webhook
+        </span>
       </div>
       <div className="px-3.5 py-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -513,20 +515,20 @@ function NotificationsCard({
           </button>
           <span className="text-[11.5px] text-muted">Enabled</span>
           <Badge tone="neutral" className="ml-auto normal-case tracking-normal">
-            not wired yet
+            best-effort delivery
           </Badge>
         </div>
 
         <div className="mt-3 grid items-center gap-x-3 gap-y-2 sm:grid-cols-[110px_minmax(0,1fr)]">
           <label className="text-[10.5px] text-faint" htmlFor="config-webhook">
-            Webhook URL
+            Discord webhook
           </label>
           <div className="flex items-center gap-2">
             <Input
               id="config-webhook"
               value={webhook}
               onChange={(event) => setWebhook(event.target.value)}
-              placeholder="https://hooks.slack.com/services/…"
+              placeholder="https://discord.com/api/webhooks/…"
               className="h-8 font-mono text-[11px]"
               autoComplete="off"
               spellCheck={false}
@@ -535,31 +537,38 @@ function NotificationsCard({
           </div>
         </div>
         <div className="mt-1 text-[10px] text-faint sm:ml-[122px]">
-          The stored value is masked; leave it unchanged to keep the current secret.
+          Discord → Server Settings → Integrations → Webhooks → Copy Webhook URL. The stored token is
+          masked; leave it unchanged to keep the current webhook.
         </div>
 
         <div className="mt-3">
           <div className="mb-1.5 text-[10.5px] text-faint">Events</div>
           <div className="flex flex-wrap gap-2">
-            {settings.available_events.map((event) => (
-              <label
-                key={event}
-                className={cn(
-                  "inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[10.5px]",
-                  events.includes(event)
-                    ? "border-brand/50 bg-brand/10 text-ink"
-                    : "border-line bg-[#0f141a] text-muted",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  className="h-3 w-3 accent-[#58a6ff]"
-                  checked={events.includes(event)}
-                  onChange={() => toggleEvent(event)}
-                />
-                {eventLabels[event] ?? event}
-              </label>
-            ))}
+            {settings.available_events.map((event) => {
+              const soon = event === "quarantine_expiring";
+              return (
+                <label
+                  key={event}
+                  title={soon ? "Not delivered yet; coming later." : undefined}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[10.5px]",
+                    soon ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+                    events.includes(event)
+                      ? "border-brand/50 bg-brand/10 text-ink"
+                      : "border-line bg-[#0f141a] text-muted",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-[#58a6ff]"
+                    checked={events.includes(event)}
+                    onChange={() => toggleEvent(event)}
+                    disabled={soon}
+                  />
+                  {eventLabels[event] ?? event}
+                </label>
+              );
+            })}
           </div>
         </div>
 
@@ -571,12 +580,14 @@ function NotificationsCard({
             variant="outline"
             onClick={() => test.mutate()}
             disabled={test.isPending}
-            title="Mock: nothing is sent"
+            title="Send a real Discord test message"
           >
             <Send className="h-3 w-3" />
             Send test
           </Button>
-          <span className="text-[10.5px] text-faint">Mock form only — nothing is sent.</span>
+          <span className="text-[10.5px] text-faint">
+            Delivery is best-effort; a failed webhook is logged and does not fail the run.
+          </span>
         </div>
 
         {notice && (

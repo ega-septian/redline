@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and mock notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -367,7 +367,7 @@ Voyage AI.
 | `POST /api/config/contracts/check`                                 | Re-check a saved source: `{"project": "toolshop"}`             |
 | `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
 | `PUT /api/config/notifications`                                    | Save webhook/events (mock, nothing is delivered yet)           |
-| `POST /api/config/notifications/test`                              | Returns a mock result; nothing leaves the server               |
+| `POST /api/config/notifications/test`                              | Sends a real Discord test message                              |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -442,8 +442,14 @@ JSON URL it loads (for example `url: ".../docs?api-docs.json"`), the form offers
 fix. Cloud metadata hosts are blocked; private hosts stay allowed because local Toolshop is a valid
 source.
 
-Notifications are saved but **not delivered** in this version. The webhook is masked when read, and the
-UI sends the masked value back when only the events change, so the secret is preserved.
+Notifications post to a **Discord webhook**. `new_failure` and `regressed` send one summary per run with
+the branch, commit, source, failed/flaky counts and up to eight failures with the first error line.
+Delivery is best-effort: a slow or failing webhook is logged and never fails the run. `Quarantine
+expiring` is stored but not delivered yet.
+
+Create the webhook in Discord under **Server Settings → Integrations → Webhooks**, then paste the URL in
+Config. The stored token is masked when read, and the UI sends the masked value back when only the events
+change, so the token is preserved.
 
 No reporter? Post the JSON report yourself:
 `curl -X POST "http://localhost:8787/api/runs?source=local" --data-binary @test-results/results.json`
