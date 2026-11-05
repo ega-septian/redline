@@ -10,6 +10,7 @@ import { SetupChecklist } from "@/components/setup-checklist";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useProject } from "@/lib/project";
 import {
   categoryLabel,
   toFailure,
@@ -148,6 +149,7 @@ function StatusFilterPill({
 }
 
 export function FailuresPage() {
+  const { project } = useProject();
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const [status, setStatus] = useState<StatusFilter>(() => {
     const value = params.get("status");
@@ -177,7 +179,10 @@ export function FailuresPage() {
   const [bulkCopied, setBulkCopied] = useState(false);
   const queryClient = useQueryClient();
 
-  const groupsQuery = useQuery({ queryKey: ["groups"], queryFn: api.groups });
+  const groupsQuery = useQuery({
+    queryKey: ["groups", project],
+    queryFn: () => api.groups(project),
+  });
   const groups = groupsQuery.data ?? [];
 
   const base = useMemo(() => groups.map((group) => toFailure(group)), [groups]);
@@ -354,9 +359,9 @@ export function FailuresPage() {
       occurrences: groups.reduce((total, group) => total + group.occurrences, 0),
       newToday: groups.filter((group) => isToday(group.first_seen_at)).length,
       needsAI: active.filter((failure) => failure.needsAI).length,
-      projects: new Set(groups.map((group) => group.project)).size,
+      project,
     };
-  }, [groups, base]);
+  }, [groups, base, project]);
 
   if (groupsQuery.isPending) {
     return (

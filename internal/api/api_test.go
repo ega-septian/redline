@@ -44,6 +44,9 @@ type fakeStore struct {
 	deliveries         []store.NotificationDelivery
 	expiring           []store.Quarantine
 	expiryMarked       []string
+	projects           []store.ProjectSummary
+	lastRunProject     string
+	lastGroupProject   string
 }
 
 type fakeNotifier struct {
@@ -80,6 +83,13 @@ func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta sto
 	return &store.IngestResult{RunID: 7, Total: f.gotTests}, nil
 }
 func (f *fakeStore) ListRuns(context.Context, int) ([]store.Run, error) { return []store.Run{}, nil }
+func (f *fakeStore) ListRunsForProject(_ context.Context, project string, limit int) ([]store.Run, error) {
+	f.lastRunProject = project
+	return f.ListRuns(context.Background(), limit)
+}
+func (f *fakeStore) ProjectSummaries(context.Context) ([]store.ProjectSummary, error) {
+	return f.projects, nil
+}
 func (f *fakeStore) GetRun(_ context.Context, id int64) (store.Run, error) {
 	if id != 1 {
 		return store.Run{}, store.ErrNotFound
@@ -296,6 +306,10 @@ func (f *fakeStore) SetNotificationSettings(_ context.Context, settings store.No
 	settings.UpdatedAt = time.Now()
 	f.notifications = settings
 	return settings, nil
+}
+func (f *fakeStore) ListGroupsForProject(_ context.Context, statuses []string, limit int, project string) ([]store.Group, error) {
+	f.lastGroupProject = project
+	return f.ListGroups(context.Background(), statuses, limit)
 }
 func (f *fakeStore) GetGroup(_ context.Context, fp string) (store.Group, []store.Occurrence, error) {
 	return store.Group{}, nil, store.ErrNotFound
@@ -1487,5 +1501,29 @@ func TestQuarantineExpiryFailureIsNotMarked(t *testing.T) {
 	}
 	if len(fs.deliveries) != 1 || fs.deliveries[0].OK || fs.deliveries[0].StatusCode != 403 {
 		t.Errorf("delivery gagal salah: %+v", fs.deliveries)
+	}
+}
+
+func TestProjectsAndFilters(t *testing.T) {
+	fs := &fakeStore{projects: []store.ProjectSummary{{
+		Project: "toolshop", Tests: 3, Runs: 2, OpenFailures: 1,
+	}}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/projects", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"project": "toolshop"`) {
+		t.Fatalf("projects = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/runs?project=web", nil); rec.Code != http.StatusOK {
+		t.Errorf("runs project = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.lastRunProject != "web" {
+		t.Errorf("runs project tidak diteruskan: %q", fs.lastRunProject)
+	}
+	if rec := do(h, http.MethodGet, "/api/groups?project=api", nil); rec.Code != http.StatusOK {
+		t.Errorf("groups project = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.lastGroupProject != "api" {
+		t.Errorf("groups project tidak diteruskan: %q", fs.lastGroupProject)
 	}
 }

@@ -258,3 +258,60 @@ func (s *Store) RunFailures(ctx context.Context, runID int64) ([]RunFailure, err
 	}
 	return out, nil
 }
+
+// ListRunsForProject returns runs that contain at least one test from the project. An empty project
+// keeps the old behaviour (all runs).
+func (s *Store) ListRunsForProject(ctx context.Context, project string, limit int) ([]Run, error) {
+	if project == "" {
+		return s.ListRuns(ctx, limit)
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	res, err := s.query(ctx, `
+		MATCH (r:Run)
+		WHERE EXISTS {
+			MATCH (r)-[:HAS]->(:Result)-[:OF]->(t:Test)
+			WHERE coalesce(t.project, '') = $project
+		}
+		RETURN r ORDER BY r.id DESC LIMIT $limit`,
+		map[string]any{"project": project, "limit": limit})
+	if err != nil {
+		return nil, err
+	}
+	runs := []Run{}
+	for _, rec := range res.Records {
+		node, _ := rec.Get("r")
+		runs = append(runs, toRun(node.(neo4j.Node).Props))
+	}
+	return runs, nil
+}
+
+// ListGroupsForProject filters open failures to one project. An empty project keeps all groups.
+func (s *Store) ListGroupsForProject(ctx context.Context, statuses []string, limit int, project string) ([]Group, error) {
+	if project == "" {
+		return s.ListGroups(ctx, statuses, limit)
+	}
+	if len(statuses) == 0 {
+		statuses = []string{"open", "regressed"}
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	res, err := s.query(ctx, `
+		MATCH (f:Failure)
+		WHERE f.status IN $statuses AND NOT f.localOnly AND coalesce(f.project, '') = $project
+		WITH f ORDER BY f.lastSeenRun DESC LIMIT $limit`+failureReturn+`
+		ORDER BY f.lastSeenRun DESC`,
+		map[string]any{"statuses": statuses, "limit": limit, "project": project})
+	if err != nil {
+		return nil, err
+	}
+	groups := []Group{}
+	for _, rec := range res.Records {
+		g := toGroup(rec)
+		g.SampleError = ""
+		groups = append(groups, g)
+	}
+	return groups, nil
+}

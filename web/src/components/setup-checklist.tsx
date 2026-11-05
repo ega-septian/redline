@@ -17,7 +17,7 @@ const RUN_COMMAND = "REDLINE=1 npx playwright test";
  */
 export function SetupChecklist() {
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: () => api.runs() });
 
   if (config.isPending || runs.isPending || config.isError || runs.isError) return null;
 

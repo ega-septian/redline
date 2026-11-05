@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Layers, Search } from "lucide-react";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import type { ApiCoverage, ApiCoverageChange, ApiCoverageEndpoint } from "@/api/types";
@@ -9,20 +9,20 @@ import { CoverageTrend } from "@/components/coverage-trend";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 type CoverageFilter = "all" | "covered" | "uncovered";
 
 export function CoveragePage() {
-  const [project, setProject] = useState("toolshop");
-  const [appliedProject, setAppliedProject] = useState("toolshop");
+  const { project } = useProject();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<CoverageFilter>("all");
 
   const coverageQuery = useQuery({
-    queryKey: ["coverage", appliedProject],
-    queryFn: () => api.coverage(appliedProject),
-    enabled: appliedProject !== "",
+    queryKey: ["coverage", project],
+    queryFn: () => api.coverage(project),
+    enabled: project !== "",
   });
   const coverage = coverageQuery.data;
 
@@ -36,12 +36,9 @@ export function CoveragePage() {
     });
   }, [coverage, filter, search]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const next = project.trim();
-    if (next !== "") setAppliedProject(next);
+  if (project === "") {
+    return <State>Select a project in the sidebar to see its contract coverage.</State>;
   }
-
   if (coverageQuery.isPending) return <State>Loading contract coverage…</State>;
   if (coverageQuery.isError) {
     return (
@@ -59,9 +56,8 @@ export function CoveragePage() {
   if (!coverage?.available) {
     return (
       <>
-        <ProjectForm project={project} setProject={setProject} submit={submit} />
         <State>
-          <div className="font-semibold text-ink">No contract snapshot for {coverage?.project || appliedProject}</div>
+          <div className="font-semibold text-ink">No contract snapshot for {coverage?.project || project}</div>
           <p className="mt-1 text-xs leading-relaxed">
             {coverage?.message ||
               "Add a contract source in Config, then send a run so Redline can store the contract."}
@@ -97,18 +93,6 @@ export function CoveragePage() {
             </>
           )}
         </span>
-        <form className="ml-2 flex items-center gap-1.5" onSubmit={submit}>
-          <Input
-            value={project}
-            onChange={(event) => setProject(event.target.value)}
-            placeholder="project"
-            aria-label="Project"
-            className="h-7 w-28 text-[11px]"
-          />
-          <Button type="submit" size="sm" variant="outline">
-            Apply
-          </Button>
-        </form>
         <select
           value={filter}
           onChange={(event) => setFilter(event.target.value as CoverageFilter)}
@@ -311,34 +295,6 @@ const changeTone = {
   changed: "border-warn/40 bg-warn/10 text-warn",
   removed: "border-danger/40 bg-danger/10 text-danger",
 } as const;
-
-function ProjectForm({
-  project,
-  setProject,
-  submit,
-}: {
-  project: string;
-  setProject: (value: string) => void;
-  submit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <Card className="p-3.5">
-      <form className="flex flex-wrap items-center gap-2" onSubmit={submit}>
-        <span className="text-[11px] text-faint">Project</span>
-        <Input
-          value={project}
-          onChange={(event) => setProject(event.target.value)}
-          placeholder="toolshop"
-          aria-label="Project"
-          className="h-7 w-36 text-[11px]"
-        />
-        <Button type="submit" size="sm" variant="outline">
-          Load coverage
-        </Button>
-      </form>
-    </Card>
-  );
-}
 
 function Kpi({
   label,

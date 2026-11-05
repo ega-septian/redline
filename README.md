@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources and Discord notifications), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -349,7 +349,8 @@ Voyage AI.
 | Endpoint                                                           | Purpose                                                        |
 | ------------------------------------------------------------------ | -------------------------------------------------------------- |
 | `POST /api/runs`                                                   | Send a Playwright JSON report                                  |
-| `GET /api/runs`                                                    | Recent runs                                                    |
+| `GET /api/runs`                                                    | Recent runs (`?project=...` scopes them)                       |
+| `GET /api/projects`                                                | Projects with tests, runs and open-failure counts              |
 | `GET /api/runs/{id}`, `GET /api/runs/{id}/compare`                 | Run detail, and comparison with the previous run               |
 | `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
 | `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
@@ -368,7 +369,7 @@ Voyage AI.
 | `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
 | `PUT /api/config/notifications`                                    | Save webhook/events (mock, nothing is delivered yet)           |
 | `POST /api/config/notifications/test`                              | Sends a real Discord test message                              |
-| `GET /api/groups`                                                  | Open failures (`?status=all` for every failure)                |
+| `GET /api/groups`                                                  | Open failures (`?status=all` for every failure, `?project=...` scopes them) |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
 | `PUT /api/groups/{id}/label`                                       | Label it: `{"label": "test_bug", "note": "...", "by": "name"}` |
@@ -413,6 +414,13 @@ The Coverage page also shows a **trend** over the last 20 stored snapshots: bar 
 best run in the window, color shows the change versus the previous run, and every bar links to its run.
 The tooltip has the absolute numbers. A PR run has one point (ephemeral database), so the trend is
 meaningful on `main` and on a local persistent server.
+
+### Projects
+
+The sidebar project selector scopes Failures, Runs, Health, Coverage and Overview. The choice is saved
+in `localStorage`, and the same value is used by the nav badge and every page query. `GET /api/projects`
+lists projects from tests and contract sources with test, run and open-failure counts; projects that only
+have a contract source are included with zero runs. Run and group queries accept `?project=...`.
 
 ### Config page
 

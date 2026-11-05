@@ -13,20 +13,20 @@ export function Kpis({
   occurrences,
   newToday,
   needsAI,
-  projects,
+  project,
 }: {
   open: number;
   occurrences: number;
   newToday: number;
   needsAI: number;
-  projects: number;
+  project: string;
 }) {
   const items: Kpi[] = [
     { label: "Open failures", value: String(open), hint: `${newToday} new today`, tone: "danger" },
     { label: "Needs AI", value: String(needsAI), hint: "no rule or diagnosis yet", tone: "warn" },
     { label: "Occurrences", value: String(occurrences), hint: "failed test results" },
     { label: "New today", value: String(newToday), hint: "first seen today", tone: "ok" },
-    { label: "Projects", value: String(projects), hint: "reporting to this server", tone: "brand" },
+    { label: "Project", value: project || "—", hint: "selected in the sidebar", tone: "brand" },
   ];
 
   return (
