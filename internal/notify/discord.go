@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,16 @@ import (
 type Sender interface {
 	Send(ctx context.Context, webhookURL string, message Message) error
 }
+
+// DeliveryError carries the HTTP status and the delay Discord asks for on a rate limit. The caller
+// uses StatusCode to decide whether a retry is useful.
+type DeliveryError struct {
+	StatusCode int
+	RetryAfter time.Duration
+	Message    string
+}
+
+func (e *DeliveryError) Error() string { return e.Message }
 
 // Message is a provider-neutral summary. Discord renders it as one embed.
 type Message struct {
@@ -126,9 +137,32 @@ func (d *Discord) Send(ctx context.Context, webhookURL string, message Message) 
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("discord HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
+		message := strings.TrimSpace(string(detail))
+		if message == "" {
+			message = http.StatusText(resp.StatusCode)
+		}
+		return &DeliveryError{
+			StatusCode: resp.StatusCode,
+			RetryAfter: retryAfter(resp.Header.Get("Retry-After"), detail),
+			Message:    fmt.Sprintf("discord HTTP %d: %s", resp.StatusCode, message),
+		}
 	}
 	return nil
+}
+
+// retryAfter reads Discord's JSON retry_after or the standard Retry-After header. It is deliberately
+// capped by the caller, not here: the sender reports what Discord asked for.
+func retryAfter(header string, body []byte) time.Duration {
+	if seconds, err := strconv.ParseFloat(strings.TrimSpace(header), 64); err == nil && seconds > 0 {
+		return time.Duration(seconds * float64(time.Second))
+	}
+	var payload struct {
+		RetryAfter float64 `json:"retry_after"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil && payload.RetryAfter > 0 {
+		return time.Duration(payload.RetryAfter * float64(time.Second))
+	}
+	return 0
 }
 
 func clip(s string, max int) string {

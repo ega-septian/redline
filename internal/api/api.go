@@ -53,6 +53,8 @@ type Store interface {
 	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
 	NotificationSettings(ctx context.Context) (store.NotificationSettings, error)
 	SetNotificationSettings(ctx context.Context, settings store.NotificationSettings) (store.NotificationSettings, error)
+	RecordNotificationDelivery(ctx context.Context, delivery store.NotificationDelivery) error
+	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)

@@ -361,7 +361,7 @@ Voyage AI.
 | `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
 | `POST /api/tests/quarantine/suggestions/dismiss`                   | Snooze a suggestion: `{"test": "TC-...", "days": 7}`           |
 | `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes, changes and the last 20 run points |
-| `GET /api/config`                                                  | Contract sources (database + env fallback) and notification settings |
+| `GET /api/config`                                                  | Contract sources, notification settings and the last delivery  |
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
 | `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |
 | `POST /api/config/contracts/check`                                 | Re-check a saved source: `{"project": "toolshop"}`             |
@@ -444,8 +444,9 @@ source.
 
 Notifications post to a **Discord webhook**. `new_failure` and `regressed` send one summary per run with
 the branch, commit, source, failed/flaky counts and up to eight failures with the first error line.
-Delivery is best-effort: a slow or failing webhook is logged and never fails the run. `Quarantine
-expiring` is stored but not delivered yet.
+Delivery is best-effort: a slow or failing webhook is logged and never fails the run. Network errors,
+`429` and `5xx` are retried once, honouring Discord's `retry_after` (capped at five seconds). The last
+delivery is recorded and shown in Config. `Quarantine expiring` is stored but not delivered yet.
 
 Create the webhook in Discord under **Server Settings → Integrations → Webhooks**, then paste the URL in
 Config. The stored token is masked when read, and the UI sends the masked value back when only the events

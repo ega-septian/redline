@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -29,13 +31,16 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 	}
 	changes := make([]store.GroupChange, 0, len(res.New)+len(res.Regressed))
 	parts := make([]string, 0, 2)
+	selected := make([]string, 0, 2)
 	if len(res.New) > 0 && events["new_failure"] {
 		changes = append(changes, res.New...)
 		parts = append(parts, fmt.Sprintf("%d new", len(res.New)))
+		selected = append(selected, "new_failure")
 	}
 	if len(res.Regressed) > 0 && events["regressed"] {
 		changes = append(changes, res.Regressed...)
 		parts = append(parts, fmt.Sprintf("%d regressed", len(res.Regressed)))
+		selected = append(selected, "regressed")
 	}
 	if len(changes) == 0 {
 		return
@@ -43,9 +48,66 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := s.Notifier.Send(ctx, settings.WebhookURL, notificationMessage(meta, res, changes, parts)); err != nil {
-		s.logWarn("notifikasi gagal", "run", res.RunID, "err", err)
+	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
+		notificationMessage(meta, res, changes, parts))
+	delivery := store.NotificationDelivery{
+		At: time.Now(), Event: strings.Join(selected, "+"), RunID: res.RunID,
+		OK: sendErr == nil, StatusCode: status, Attempts: attempts,
 	}
+	if sendErr != nil {
+		delivery.Error = sendErr.Error()
+		s.logWarn("notifikasi gagal", "run", res.RunID, "err", sendErr)
+	}
+	recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer recordCancel()
+	if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
+		s.logWarn("delivery log gagal disimpan", "run", res.RunID, "err", err)
+	}
+}
+
+// sendNotification applies the retry policy: one retry for network errors, 429 and 5xx. Other 4xx
+// responses are final. Discord's retry_after is honoured but capped at five seconds so the reporter
+// and the test button stay responsive.
+func (s *Server) sendNotification(
+	ctx context.Context,
+	webhook string,
+	message notify.Message,
+) (attempts int, status int, err error) {
+	if s.Notifier == nil {
+		return 0, 0, fmt.Errorf("notifier belum dikonfigurasi")
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		err = s.Notifier.Send(ctx, webhook, message)
+		attempts = attempt
+		if err == nil {
+			return attempts, 0, nil
+		}
+		status = 0
+		delay := time.Duration(0)
+		var deliveryErr *notify.DeliveryError
+		if errors.As(err, &deliveryErr) {
+			status = deliveryErr.StatusCode
+			delay = deliveryErr.RetryAfter
+			if status != 0 && status != http.StatusTooManyRequests && status < 500 {
+				return attempts, status, err
+			}
+		}
+		if attempt == 2 {
+			return attempts, status, err
+		}
+		if delay <= 0 {
+			delay = time.Second
+		}
+		if delay > 5*time.Second {
+			delay = 5 * time.Second
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return attempts, status, ctx.Err()
+		}
+	}
+	return attempts, status, err
 }
 
 func notificationMessage(

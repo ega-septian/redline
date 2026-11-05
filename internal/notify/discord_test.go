@@ -3,6 +3,7 @@ package notify_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,5 +73,23 @@ func TestDiscordSendDoesNotLeakWebhook(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "webhook-secret-token") {
 		t.Errorf("error membocorkan token: %v", err)
+	}
+}
+
+func TestDiscordRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"rate limited","retry_after":0.05}`))
+	}))
+	defer server.Close()
+
+	err := notify.NewDiscord().Send(context.Background(), server.URL, notify.Message{Title: "x"})
+	var deliveryErr *notify.DeliveryError
+	if !errors.As(err, &deliveryErr) {
+		t.Fatalf("mau DeliveryError, dapat %T %v", err, err)
+	}
+	if deliveryErr.StatusCode != http.StatusTooManyRequests || deliveryErr.RetryAfter <= 0 {
+		t.Errorf("rate limit tidak terbaca: %+v", deliveryErr)
 	}
 }
