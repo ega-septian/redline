@@ -19,6 +19,7 @@ type ContractSnapshot struct {
 
 // EndpointCall is one HTTP call observed in a stored result's response shape.
 type EndpointCall struct {
+	RunID   int64
 	Method  string
 	Path    string
 	Status  int
@@ -56,7 +57,7 @@ func (s *Store) EndpointCalls(ctx context.Context, project string) ([]EndpointCa
 		MATCH (run:Run)-[:HAS]->(r:Result)-[:RETURNED]->(shape:Shape)
 		MATCH (r)-[:OF]->(t:Test)
 		WHERE ($project = '' OR coalesce(t.project, '') = $project)
-		RETURN shape.shape AS calls, run.createdAt AS at, r.testKey AS testKey`,
+		RETURN shape.shape AS calls, run.id AS runId, run.createdAt AS at, r.testKey AS testKey`,
 		map[string]any{"project": project})
 	if err != nil {
 		return nil, err
@@ -71,7 +72,8 @@ func (s *Store) EndpointCalls(ctx context.Context, project string) ([]EndpointCa
 		testKey := recString(record, "testKey")
 		for _, call := range calls {
 			out = append(out, EndpointCall{
-				Method: call.Method, Path: call.Path, Status: call.Status, TestKey: testKey, At: at,
+				RunID: recInt64(record, "runId"), Method: call.Method, Path: call.Path,
+				Status: call.Status, TestKey: testKey, At: at,
 			})
 		}
 	}
