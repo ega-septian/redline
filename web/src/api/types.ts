@@ -422,6 +422,16 @@ export type ApiSourceCheck = {
   duration_ms: number;
 };
 
+export type ApiNotificationDelivery = {
+  at: string;
+  event: string;
+  run_id?: number;
+  ok: boolean;
+  status_code?: number;
+  attempts: number;
+  error?: string;
+};
+
 export type ApiNotifications = {
   enabled: boolean;
   provider?: string;
@@ -432,6 +442,7 @@ export type ApiNotifications = {
   by?: string;
   updated_at?: string | null;
   delivery: boolean;
+  last_delivery?: ApiNotificationDelivery | null;
 };
 
 export type ApiConfig = {

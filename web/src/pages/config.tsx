@@ -473,8 +473,14 @@ function NotificationsCard({
 
   const test = useMutation({
     mutationFn: api.testNotification,
-    onSuccess: (result) => setNotice({ tone: "ok", text: result.message }),
-    onError: (err) => setNotice({ tone: "error", text: messageOf(err) }),
+    onSuccess: async (result) => {
+      await onSaved();
+      setNotice({ tone: "ok", text: result.message });
+    },
+    onError: async (err) => {
+      await onSaved();
+      setNotice({ tone: "error", text: messageOf(err) });
+    },
   });
 
   function toggleEvent(event: string) {
@@ -586,8 +592,40 @@ function NotificationsCard({
             Send test
           </Button>
           <span className="text-[10.5px] text-faint">
-            Delivery is best-effort; a failed webhook is logged and does not fail the run.
+            Best-effort: retries once on 429/5xx; a failed webhook never fails the run.
           </span>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10.5px]">
+          <span className="text-faint">Last delivery</span>
+          {settings.last_delivery ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5",
+                settings.last_delivery.ok ? "text-ok" : "text-danger",
+              )}
+              title={settings.last_delivery.error}
+            >
+              {settings.last_delivery.ok ? (
+                <CheckCircle2 className="h-3 w-3" />
+              ) : (
+                <AlertTriangle className="h-3 w-3" />
+              )}
+              {settings.last_delivery.ok ? "sent" : "failed"}{" "}
+              {ago(settings.last_delivery.at)}
+              {settings.last_delivery.run_id
+                ? ` · run #${settings.last_delivery.run_id}`
+                : ` · ${deliveryEventLabel(settings.last_delivery.event)}`}
+              {settings.last_delivery.attempts > 1
+                ? ` · ${settings.last_delivery.attempts} attempts`
+                : ""}
+              {!settings.last_delivery.ok && settings.last_delivery.status_code
+                ? ` · HTTP ${settings.last_delivery.status_code}`
+                : ""}
+            </span>
+          ) : (
+            <span className="text-faint">none yet</span>
+          )}
         </div>
 
         {notice && (
@@ -605,6 +643,23 @@ function NotificationsCard({
       </div>
     </Card>
   );
+}
+
+function deliveryEventLabel(event: string): string {
+  switch (event) {
+    case "new_failure":
+      return "new failure";
+    case "regressed":
+      return "regressed";
+    case "new_failure+regressed":
+      return "new + regressed";
+    case "test":
+      return "test";
+    case "quarantine_expiring":
+      return "quarantine expiring";
+    default:
+      return event;
+  }
 }
 
 function NoticeBar({ notice, onClose }: { notice: NonNullable<Notice>; onClose: () => void }) {

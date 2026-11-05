@@ -41,20 +41,30 @@ type fakeStore struct {
 	dismissals         map[string]time.Time
 	dismissed          string
 	ingest             *store.IngestResult
+	deliveries         []store.NotificationDelivery
 }
 
 type fakeNotifier struct {
-	webhook string
-	message notify.Message
-	err     error
-	ch      chan struct{}
+	webhook   string
+	message   notify.Message
+	err       error
+	responses []error
+	calls     int
+	ch        chan struct{}
 }
 
 func (f *fakeNotifier) Send(_ context.Context, webhook string, message notify.Message) error {
+	f.calls++
 	f.webhook = webhook
 	f.message = message
 	if f.ch != nil {
 		f.ch <- struct{}{}
+	}
+	if len(f.responses) > 0 {
+		if f.calls <= len(f.responses) {
+			return f.responses[f.calls-1]
+		}
+		return nil
 	}
 	return f.err
 }
@@ -261,6 +271,17 @@ func (f *fakeStore) RecordSourceCheck(_ context.Context, project string, record 
 }
 func (f *fakeStore) NotificationSettings(context.Context) (store.NotificationSettings, error) {
 	return f.notifications, nil
+}
+func (f *fakeStore) RecordNotificationDelivery(_ context.Context, d store.NotificationDelivery) error {
+	f.deliveries = append(f.deliveries, d)
+	return nil
+}
+func (f *fakeStore) LastNotificationDelivery(context.Context) (*store.NotificationDelivery, error) {
+	if len(f.deliveries) == 0 {
+		return nil, nil
+	}
+	last := f.deliveries[len(f.deliveries)-1]
+	return &last, nil
 }
 func (f *fakeStore) SetNotificationSettings(_ context.Context, settings store.NotificationSettings) (store.NotificationSettings, error) {
 	settings.UpdatedAt = time.Now()
@@ -1200,6 +1221,35 @@ func TestNotificationsMaskWebhookAndRejectInvalid(t *testing.T) {
 		notifier.message.Title != "Redline test notification" {
 		t.Errorf("test notification = %d: %s", rec.Code, rec.Body)
 	}
+	if len(fs.deliveries) != 1 || !fs.deliveries[0].OK || fs.deliveries[0].Event != "test" {
+		t.Errorf("delivery test tidak tercatat: %+v", fs.deliveries)
+	}
+	rec = do(h, http.MethodGet, "/api/config", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"last_delivery"`) ||
+		!strings.Contains(rec.Body.String(), `"event": "test"`) {
+		t.Errorf("config tanpa last_delivery: %s", rec.Body)
+	}
+}
+
+func TestTestNotificationRetriesRateLimit(t *testing.T) {
+	fs := &fakeStore{notifications: store.NotificationSettings{
+		Enabled: true, WebhookURL: "https://discord.test/webhook", Events: []string{"new_failure"},
+	}}
+	notifier := &fakeNotifier{responses: []error{
+		&notify.DeliveryError{StatusCode: 429, RetryAfter: 20 * time.Millisecond, Message: "rate limited"},
+		nil,
+	}}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	rec := do(srv.Routes(), http.MethodPost, "/api/config/notifications/test", nil)
+	if rec.Code != http.StatusOK || notifier.calls != 2 {
+		t.Fatalf("retry = %d calls=%d: %s", rec.Code, notifier.calls, rec.Body)
+	}
+	if len(fs.deliveries) != 1 || !fs.deliveries[0].OK || fs.deliveries[0].Attempts != 2 {
+		t.Errorf("delivery retry tidak tercatat: %+v", fs.deliveries)
+	}
 }
 
 func TestTestNotificationFailure(t *testing.T) {
@@ -1208,7 +1258,7 @@ func TestTestNotificationFailure(t *testing.T) {
 	}}
 	srv := &Server{
 		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Notifier: &fakeNotifier{err: errors.New("discord down")},
+		Notifier: &fakeNotifier{err: &notify.DeliveryError{StatusCode: http.StatusForbidden, Message: "forbidden"}},
 	}
 	rec := do(srv.Routes(), http.MethodPost, "/api/config/notifications/test", nil)
 	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), `"sent": false`) {
@@ -1253,6 +1303,10 @@ func TestIngestSendsDiscordNotification(t *testing.T) {
 		!strings.Contains(notifier.message.Title, "run #7") ||
 		!strings.Contains(notifier.message.Description, "TC-BRD-002") {
 		t.Errorf("message salah: %+v", notifier.message)
+	}
+	if len(fs.deliveries) != 1 || !fs.deliveries[0].OK || fs.deliveries[0].RunID != 7 ||
+		fs.deliveries[0].Event != "new_failure" {
+		t.Errorf("delivery ingest tidak tercatat: %+v", fs.deliveries)
 	}
 }
 

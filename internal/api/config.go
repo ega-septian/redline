@@ -40,15 +40,16 @@ type contractSourceView struct {
 
 // notificationView masks the webhook URL: the secret token must not travel to the browser again.
 type notificationView struct {
-	Enabled         bool       `json:"enabled"`
-	Provider        string     `json:"provider"`
-	WebhookURL      string     `json:"webhook_url"`
-	WebhookSet      bool       `json:"webhook_set"`
-	Events          []string   `json:"events"`
-	AvailableEvents []string   `json:"available_events"`
-	By              string     `json:"by,omitempty"`
-	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
-	Delivery        bool       `json:"delivery"`
+	Enabled         bool                        `json:"enabled"`
+	Provider        string                      `json:"provider"`
+	WebhookURL      string                      `json:"webhook_url"`
+	WebhookSet      bool                        `json:"webhook_set"`
+	Events          []string                    `json:"events"`
+	AvailableEvents []string                    `json:"available_events"`
+	By              string                      `json:"by,omitempty"`
+	UpdatedAt       *time.Time                  `json:"updated_at,omitempty"`
+	Delivery        bool                        `json:"delivery"`
+	LastDelivery    *store.NotificationDelivery `json:"last_delivery,omitempty"`
 }
 
 type configView struct {
@@ -74,7 +75,12 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, configView{Contracts: rows, Notifications: notificationOut(settings)})
+	lastDelivery, err := s.Store.LastNotificationDelivery(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, configView{Contracts: rows, Notifications: notificationOut(settings, lastDelivery)})
 }
 
 // handleValidateSource: POST /api/config/contracts/validate — check a URL without saving it.
@@ -251,7 +257,12 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, notificationOut(saved))
+	lastDelivery, err := s.Store.LastNotificationDelivery(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, notificationOut(saved, lastDelivery))
 }
 
 // handleTestNotification: POST /api/config/notifications/test — sends a real Discord test message.
@@ -279,9 +290,19 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		Fields: []notify.Field{{Name: "Status", Value: "test", Inline: true}},
 		Footer: "Redline",
 	}
-	if err := s.Notifier.Send(ctx, settings.WebhookURL, message); err != nil {
+	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL, message)
+	delivery := store.NotificationDelivery{
+		At: time.Now(), Event: "test", OK: sendErr == nil, StatusCode: status, Attempts: attempts,
+	}
+	if sendErr != nil {
+		delivery.Error = sendErr.Error()
+	}
+	if err := s.Store.RecordNotificationDelivery(r.Context(), delivery); err != nil {
+		s.logWarn("delivery log gagal disimpan", "err", err)
+	}
+	if sendErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"sent": false, "mock": false, "error": "Discord menolak webhook: " + err.Error(),
+			"sent": false, "mock": false, "error": "Discord menolak webhook: " + sendErr.Error(),
 		})
 		return
 	}
@@ -333,11 +354,12 @@ func sourceView(src store.ContractSource) contractSourceView {
 	return view
 }
 
-func notificationOut(settings store.NotificationSettings) notificationView {
+func notificationOut(settings store.NotificationSettings, last *store.NotificationDelivery) notificationView {
 	view := notificationView{
 		Enabled: settings.Enabled, Provider: "discord", WebhookSet: settings.WebhookURL != "",
 		WebhookURL: maskWebhook(settings.WebhookURL), Events: settings.Events,
 		AvailableEvents: store.KnownNotificationEvents(), By: settings.By, Delivery: true,
+		LastDelivery: last,
 	}
 	if view.Events == nil {
 		view.Events = []string{}
