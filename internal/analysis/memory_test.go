@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -215,10 +216,16 @@ func TestFacts_SourceCode(t *testing.T) {
 }
 
 // fakeContracts mengembalikan dokumen OpenAPI kecil untuk GET /orders.
-type fakeContracts struct{ fetched []string }
+type fakeContracts struct {
+	fetched []string
+	err     error
+}
 
 func (c *fakeContracts) Fetch(_ context.Context, project string) (string, []byte, error) {
 	c.fetched = append(c.fetched, project)
+	if c.err != nil {
+		return "http://kontrak/" + project, nil, c.err
+	}
 	return "http://kontrak/" + project, []byte(`{"openapi": "3.0.0", "paths": {"/orders": {"get": {"responses": {"200": {
 		"description": "ok", "content": {"application/json": {"schema": {"type": "object",
 		"properties": {"status": {"type": "string", "enum": ["PAID", "PENDING"]}}}}}}}}}}}`), nil
@@ -260,5 +267,45 @@ func TestAnalyze_ContractAndDeviates(t *testing.T) {
 		Evidence: []string{"Kode test berubah: tidak"}}
 	if res, _, _ = a.Analyze(ctx, fps["order dibayar"], true); res.Category != "backend_bug" || res.Confidence != "medium" {
 		t.Errorf("kategori yang sejalan tidak boleh diubah: %+v", res)
+	}
+}
+
+func TestSnapshotContractsRecordsSourceHealth(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	f, err := s.Facts(ctx, fps["order dibayar"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetContractSource(ctx, store.ContractSource{
+		Project: f.Group.Project, URL: "http://kontrak/" + f.Group.Project, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	contracts := &fakeContracts{}
+	a := &Analyzer{Store: s, Contracts: contracts}
+	a.SnapshotContracts(ctx, f.FailRunID, []string{f.Group.Project})
+
+	source, err := s.ContractSource(ctx, f.Group.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.LastStatus != "valid" || source.LastVersion != "OpenAPI 3.0.0" ||
+		source.LastEndpoints != 1 || source.LastCheckedAt == nil || source.LastError != "" {
+		t.Errorf("health setelah run valid salah: %+v", source)
+	}
+	if source.LastDuration < 0 {
+		t.Errorf("durasi check tidak boleh negatif: %d", source.LastDuration)
+	}
+
+	contracts.err = errors.New("HTTP 503")
+	a.SnapshotContracts(ctx, f.FailRunID, []string{f.Group.Project})
+	source, err = s.ContractSource(ctx, f.Group.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.LastStatus != "invalid" || !strings.Contains(source.LastError, "HTTP 503") {
+		t.Errorf("health setelah run gagal salah: %+v", source)
 	}
 }

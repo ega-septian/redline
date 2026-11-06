@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"errors"
+	"time"
 
 	"redline/internal/contract"
 	"redline/internal/embed"
@@ -75,14 +76,30 @@ func (a *Analyzer) SnapshotContracts(ctx context.Context, runID int64, projects 
 		return
 	}
 	for _, project := range projects {
-		url, doc, err := a.Contracts.Fetch(ctx, project)
+		started := time.Now()
+		url, doc, fetchErr := a.Contracts.Fetch(ctx, project)
 		if url == "" {
 			continue
 		}
-		if err == nil {
-			_, err = a.Store.SaveRunContract(ctx, runID, project, url, string(doc))
+		record := store.SourceCheckRecord{DurationMS: time.Since(started).Milliseconds()}
+		if fetchErr != nil {
+			record.Status = "invalid"
+			record.Error = fetchErr.Error()
+		} else {
+			record.Status = "valid"
+			if parsed, err := contract.Parse(doc); err == nil {
+				record.Version = "OpenAPI " + parsed.Version()
+				record.Endpoints = len(parsed.Endpoints())
+			}
 		}
-		if err != nil {
+		if err := a.Store.RecordSourceCheck(ctx, project, record); err != nil && !errors.Is(err, store.ErrNotFound) {
+			a.logger().Warn("hasil cek kontrak tidak tersimpan", "project", project, "err", err)
+		}
+		if fetchErr != nil {
+			a.logger().Warn("potret kontrak gagal; run ini dianalisis tanpa kontrak", "run", runID, "project", project, "err", fetchErr)
+			continue
+		}
+		if _, err := a.Store.SaveRunContract(ctx, runID, project, url, string(doc)); err != nil {
 			a.logger().Warn("potret kontrak gagal; run ini dianalisis tanpa kontrak", "run", runID, "project", project, "err", err)
 		}
 	}

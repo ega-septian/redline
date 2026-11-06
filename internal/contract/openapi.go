@@ -62,6 +62,11 @@ type Document struct {
 	bases []string // path dari servers[].url, misalnya "/api"
 }
 
+// Version returns the OpenAPI version declared by the document, for example "3.0.0".
+func (d *Document) Version() string {
+	return stringValue(d.root["openapi"])
+}
+
 func Parse(data []byte) (*Document, error) {
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {

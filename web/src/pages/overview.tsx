@@ -18,6 +18,7 @@ import type { ApiQuarantineSuggestion, ApiRun } from "@/api/types";
 import { CoverageTrend } from "@/components/coverage-trend";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { contractSourceHealth } from "@/lib/contract-source";
 import { useProject } from "@/lib/project";
 import {
   categoryLabel,
@@ -110,6 +111,7 @@ export function OverviewPage() {
   const suggestions = suggestionsQuery.data ?? [];
   const config = configQuery.data;
   const projectSources = config?.contracts.filter((source) => source.project === project) ?? [];
+  const contractsHealth = contractSourceHealth(projectSources);
   const failures = [...groups]
     .sort(
       (left, right) =>
@@ -278,11 +280,28 @@ export function OverviewPage() {
               <Status
                 icon={Layers}
                 label="Contract sources"
-                value={`${projectSources.length} source${projectSources.length === 1 ? "" : "s"}`}
+                value={
+                  projectSources.length === 0
+                    ? "none"
+                    : `${contractsHealth.valid}/${projectSources.length} valid`
+                }
                 hint={
-                  projectSources.some((source) => source.last_status === "valid")
-                    ? "at least one valid"
-                    : "none checked"
+                  projectSources.length === 0
+                    ? "add a source in Config"
+                    : contractsHealth.invalid > 0
+                      ? `${contractsHealth.invalid} invalid`
+                      : contractsHealth.stale > 0
+                        ? `${contractsHealth.stale} stale`
+                        : contractsHealth.latest
+                          ? `last checked ${ago(contractsHealth.latest)}`
+                          : "no checks yet"
+                }
+                tone={
+                  contractsHealth.invalid > 0
+                    ? "danger"
+                    : contractsHealth.stale > 0
+                      ? "warn"
+                      : undefined
                 }
               />
               <Status
@@ -437,11 +456,13 @@ function Status({
   label,
   value,
   hint,
+  tone,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   hint: string;
+  tone?: "warn" | "danger";
 }) {
   return (
     <div className="flex items-start gap-2">
@@ -449,7 +470,14 @@ function Status({
       <div className="min-w-0">
         <div className="text-[10px] uppercase tracking-[0.7px] text-faint">{label}</div>
         <div className="mt-0.5 truncate text-[12px] text-ink">{value}</div>
-        <div className="mt-0.5 truncate text-[10.5px] text-faint">{hint}</div>
+        <div
+          className={cn(
+            "mt-0.5 truncate text-[10.5px]",
+            tone === "danger" ? "text-danger" : tone === "warn" ? "text-warn" : "text-faint",
+          )}
+        >
+          {hint}
+        </div>
       </div>
     </div>
   );
