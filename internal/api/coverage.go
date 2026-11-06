@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"redline/internal/contract"
@@ -42,16 +43,22 @@ type coveragePoint struct {
 	Changes               int       `json:"changes"`
 }
 
+type coverageChange struct {
+	contract.ContractChange
+	Tests    int      `json:"tests"`
+	TestKeys []string `json:"test_keys"`
+}
+
 type coverageResponse struct {
-	Available bool                      `json:"available"`
-	Project   string                    `json:"project"`
-	Message   string                    `json:"message,omitempty"`
-	Snapshot  *store.ContractSnapshot   `json:"snapshot,omitempty"`
-	Previous  *store.ContractSnapshot   `json:"previous,omitempty"`
-	Summary   coverageSummary           `json:"summary"`
-	Endpoints []coverageEndpoint        `json:"endpoints"`
-	Changes   []contract.ContractChange `json:"changes"`
-	History   []coveragePoint           `json:"history"`
+	Available bool                    `json:"available"`
+	Project   string                  `json:"project"`
+	Message   string                  `json:"message,omitempty"`
+	Snapshot  *store.ContractSnapshot `json:"snapshot,omitempty"`
+	Previous  *store.ContractSnapshot `json:"previous,omitempty"`
+	Summary   coverageSummary         `json:"summary"`
+	Endpoints []coverageEndpoint      `json:"endpoints"`
+	Changes   []coverageChange        `json:"changes"`
+	History   []coveragePoint         `json:"history"`
 }
 
 // handleCoverage: GET /api/coverage?project=toolshop
@@ -74,7 +81,7 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, coverageResponse{
 			Available: false, Project: project,
 			Message:   message,
-			Endpoints: []coverageEndpoint{}, Changes: []contract.ContractChange{},
+			Endpoints: []coverageEndpoint{}, Changes: []coverageChange{},
 			History: []coveragePoint{},
 		})
 		return
@@ -119,16 +126,50 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Impact: which tests called each endpoint, matching against the latest contract and the previous
+	// one so a removed endpoint still reports the tests that still call it.
+	impact := map[string]map[string]bool{}
+	for _, call := range calls {
+		method := strings.ToUpper(call.Method)
+		template := ""
+		if matched, ok := latest.Match(method, call.Path); ok {
+			template = matched
+		} else if previous != nil {
+			if matched, ok := previous.Match(method, call.Path); ok {
+				template = matched
+			}
+		}
+		if template == "" || call.TestKey == "" {
+			continue
+		}
+		key := method + " " + template
+		if impact[key] == nil {
+			impact[key] = map[string]bool{}
+		}
+		impact[key][call.TestKey] = true
+	}
+
 	endpoints := latest.Endpoints()
 	response := coverageResponse{
 		Available: true, Project: project, Snapshot: &snapshots[0],
 		Endpoints: make([]coverageEndpoint, 0, len(endpoints)),
-		Changes:   []contract.ContractChange{},
+		Changes:   []coverageChange{},
 		History:   coverageHistory(snapshots, docs, calls),
 	}
 	if previous != nil {
 		response.Previous = &snapshots[1]
-		response.Changes = latest.Diff(previous)
+		diffs := latest.Diff(previous)
+		response.Changes = make([]coverageChange, 0, len(diffs))
+		for _, change := range diffs {
+			testKeys := sortedSet(impact[change.Method+" "+change.Path])
+			tests := len(testKeys)
+			if len(testKeys) > 20 {
+				testKeys = testKeys[:20]
+			}
+			response.Changes = append(response.Changes, coverageChange{
+				ContractChange: change, Tests: tests, TestKeys: testKeys,
+			})
+		}
 	}
 	response.Summary.Changes = len(response.Changes)
 	for _, endpoint := range endpoints {

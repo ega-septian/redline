@@ -47,6 +47,8 @@ type fakeStore struct {
 	projects           []store.ProjectSummary
 	lastRunProject     string
 	lastGroupProject   string
+	snapshots          []store.ContractSnapshot
+	calls              []store.EndpointCall
 }
 
 type fakeNotifier struct {
@@ -208,6 +210,9 @@ func (f *fakeStore) MarkQuarantineExpiryNotified(_ context.Context, keys []strin
 	return nil
 }
 func (f *fakeStore) ContractSnapshots(_ context.Context, project string, _ int) ([]store.ContractSnapshot, error) {
+	if f.snapshots != nil {
+		return f.snapshots, nil
+	}
 	if project != "toolshop" {
 		return nil, nil
 	}
@@ -226,6 +231,9 @@ func (f *fakeStore) ContractSnapshots(_ context.Context, project string, _ int) 
 	}, nil
 }
 func (f *fakeStore) EndpointCalls(_ context.Context, project string) ([]store.EndpointCall, error) {
+	if f.calls != nil {
+		return f.calls, nil
+	}
 	if project != "toolshop" {
 		return []store.EndpointCall{}, nil
 	}
@@ -1561,5 +1569,70 @@ func TestNotificationDeliveriesEndpoint(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/config/notifications/deliveries?limit=nope", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("limit invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestCoverageChangeImpact(t *testing.T) {
+	now := time.Now()
+	latest := `{"openapi":"3.0.0","paths":{
+		"/brands":{"get":{"responses":{"200":{"description":"ok"}}}},
+		"/products":{"get":{"responses":{"200":{"description":"ok"}}}},
+		"/many":{"get":{"responses":{"200":{"description":"ok"}}}}}}`
+	previous := `{"openapi":"3.0.0","paths":{
+		"/brands":{"get":{"responses":{"200":{"description":"ok"}}}},
+		"/old":{"get":{"responses":{"200":{"description":"ok"}}}}}}`
+	calls := []store.EndpointCall{
+		{RunID: 2, Method: "GET", Path: "/brands", Status: 200, TestKey: "suite › brands.spec.ts › list", At: now},
+		{RunID: 2, Method: "GET", Path: "/products", Status: 200, TestKey: "suite › products.spec.ts › list", At: now},
+		{RunID: 1, Method: "GET", Path: "/old", Status: 200, TestKey: "suite › legacy.spec.ts › old", At: now},
+	}
+	for i := 0; i < 25; i++ {
+		calls = append(calls, store.EndpointCall{
+			RunID: 2, Method: "GET", Path: "/many", Status: 200,
+			TestKey: "suite › many.spec.ts › test " + strconv.Itoa(i), At: now,
+		})
+	}
+	fs := &fakeStore{
+		snapshots: []store.ContractSnapshot{
+			{RunID: 2, At: now, ContractID: "impact-new", Document: latest},
+			{RunID: 1, At: now.Add(-time.Hour), ContractID: "impact-old", Document: previous},
+		},
+		calls: calls,
+	}
+	h := newServer(fs, 0)
+	rec := do(h, http.MethodGet, "/api/coverage?project=toolshop", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("coverage = %d: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Changes []struct {
+			Kind     string   `json:"kind"`
+			Method   string   `json:"method"`
+			Path     string   `json:"path"`
+			Tests    int      `json:"tests"`
+			TestKeys []string `json:"test_keys"`
+		} `json:"changes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]struct {
+		tests int
+		keys  []string
+	}{}
+	for _, change := range body.Changes {
+		byPath[change.Path] = struct {
+			tests int
+			keys  []string
+		}{change.Tests, change.TestKeys}
+	}
+	if got := byPath["/products"]; got.tests != 1 || len(got.keys) != 1 || got.keys[0] != "suite › products.spec.ts › list" {
+		t.Errorf("impact /products salah: %+v", byPath)
+	}
+	if got := byPath["/old"]; got.tests != 1 || len(got.keys) != 1 || got.keys[0] != "suite › legacy.spec.ts › old" {
+		t.Errorf("impact /old (removed) salah: %+v", byPath)
+	}
+	if got := byPath["/many"]; got.tests != 25 || len(got.keys) != 20 {
+		t.Errorf("impact /many harus 25 test dan 20 key: %+v", got)
 	}
 }

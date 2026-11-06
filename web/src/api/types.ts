@@ -363,6 +363,8 @@ export type ApiCoverageChange = {
   method: string;
   path: string;
   detail: string;
+  tests?: number;
+  test_keys?: string[];
 };
 
 export type ApiCoverageSnapshot = {
