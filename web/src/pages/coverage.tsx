@@ -393,6 +393,8 @@ function ContractChanges({ coverage }: { coverage: ApiCoverage }) {
 
 function ChangeRow({ change }: { change: ApiCoverageChange }) {
   const tone = change.kind === "added" ? "added" : change.kind === "removed" ? "removed" : "changed";
+  const tests = change.test_keys ?? [];
+  const total = change.tests ?? tests.length;
   return (
     <div className="flex gap-2 border-b border-line-soft px-3.5 py-2.5 last:border-b-0">
       <span className={cn("mt-0.5 h-[18px] shrink-0 rounded border px-1.5 text-[9px] font-bold uppercase", changeTone[tone])}>
@@ -403,6 +405,25 @@ function ChangeRow({ change }: { change: ApiCoverageChange }) {
           {change.method} {change.path}
         </div>
         <div className="mt-0.5 text-[10.5px] text-faint">{change.detail}</div>
+        {tests.length > 0 ? (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[10px] text-brand">
+              {total} test{total === 1 ? "" : "s"} call{total === 1 ? "s" : ""} this endpoint
+            </summary>
+            <div className="mt-1 flex flex-col gap-0.5">
+              {tests.map((test) => (
+                <span key={test} className="break-all font-mono text-[9.5px] leading-relaxed text-faint">
+                  {test}
+                </span>
+              ))}
+            </div>
+            {total > tests.length && (
+              <div className="mt-1 text-[9.5px] text-faint">Showing the first {tests.length} of {total}.</div>
+            )}
+          </details>
+        ) : (
+          <div className="mt-1 text-[10px] text-faint">No recorded test calls this endpoint.</div>
+        )}
       </div>
     </div>
   );
