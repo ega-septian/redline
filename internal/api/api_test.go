@@ -996,7 +996,9 @@ func TestCoverage(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"covered": 2`) ||
 		!strings.Contains(rec.Body.String(), `"uncovered": 0`) ||
 		!strings.Contains(rec.Body.String(), `"status_codes_seen": 3`) ||
-		!strings.Contains(rec.Body.String(), `"path": "/products"`) {
+		!strings.Contains(rec.Body.String(), `"path": "/products"`) ||
+		!strings.Contains(rec.Body.String(), `"test_keys"`) ||
+		!strings.Contains(rec.Body.String(), `toolshop › api.spec.ts › auth`) {
 		t.Errorf("coverage = %d: %s", rec.Code, rec.Body)
 	}
 	var history struct {

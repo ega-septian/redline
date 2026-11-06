@@ -2,7 +2,6 @@ import { createRootRoute, createRoute, lazyRouteComponent } from "@tanstack/reac
 
 import { AppShell } from "@/components/app-shell";
 import { ProjectProvider } from "@/lib/project";
-import { CoveragePage } from "@/pages/coverage";
 import { FailuresPage } from "@/pages/failures";
 import { HealthPage } from "@/pages/health";
 import { ImpactPage } from "@/pages/impact";
@@ -60,7 +59,7 @@ const impactRoute = createRoute({
 const coverageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/coverage",
-  component: CoveragePage,
+  component: lazyRouteComponent(() => import("@/pages/coverage"), "CoveragePage"),
 });
 
 const configRoute = createRoute({
