@@ -41,6 +41,7 @@ type Store interface {
 	SimilarCases(ctx context.Context, groupID, model string, minSimilarity float64, limit int) ([]store.SimilarCase, error)
 	SaveRunContract(ctx context.Context, runID int64, project, sourceURL, document string) (string, error)
 	RunContract(ctx context.Context, runID int64, project string) (id, document string, err error)
+	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
 	RecordSpend(ctx context.Context, costUSD float64) error
 	SpendSince(ctx context.Context, since time.Time) (float64, error)
 }

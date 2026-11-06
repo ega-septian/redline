@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { contractSourceHealth, isStale } from "@/lib/contract-source";
 import { cn } from "@/lib/utils";
 
 const eventLabels: Record<string, string> = {
@@ -93,7 +94,7 @@ export function ConfigPage() {
   }
 
   const sources = configQuery.data.contracts;
-  const valid = sources.filter((source) => source.last_status === "valid").length;
+  const health = contractSourceHealth(sources);
 
   return (
     <>
@@ -102,9 +103,37 @@ export function ConfigPage() {
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
           <span className="text-[12.5px] font-semibold">Contract sources</span>
-          <Badge tone={valid > 0 ? "flaky" : "neutral"} className="gap-1.5">
-            <span className={cn("h-1.5 w-1.5 rounded-full", valid > 0 ? "bg-ok" : "bg-faint")} />
-            {sources.length === 0 ? "no sources" : `${valid} valid`}
+          <Badge
+            tone={
+              sources.length === 0
+                ? "neutral"
+                : health.invalid > 0
+                  ? "backend"
+                  : health.stale > 0
+                    ? "env"
+                    : "flaky"
+            }
+            className="gap-1.5"
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                sources.length === 0
+                  ? "bg-faint"
+                  : health.invalid > 0
+                    ? "bg-danger"
+                    : health.stale > 0
+                      ? "bg-warn"
+                      : "bg-ok",
+              )}
+            />
+            {sources.length === 0
+              ? "no sources"
+              : health.invalid > 0
+                ? `${health.valid}/${sources.length} valid · ${health.invalid} invalid`
+                : health.stale > 0
+                  ? `${health.valid}/${sources.length} valid · ${health.stale} stale`
+                  : `${health.valid}/${sources.length} valid`}
           </Badge>
           <span className="hidden text-[11px] text-faint md:inline">
             OpenAPI JSON used for contract analysis and coverage
@@ -230,7 +259,12 @@ function SourceRow({
         {source.url}
       </a>
       <SourceStatus source={source} />
-      <span className="text-[10.5px] text-faint">{ago(source.last_checked_at)}</span>
+      <span
+        className={cn("text-[10.5px]", isStale(source) ? "text-warn" : "text-faint")}
+        title={isStale(source) ? "No run has checked this source in the last 7 days" : undefined}
+      >
+        {ago(source.last_checked_at)}
+      </span>
       <span className="text-right font-mono text-muted">
         {source.last_endpoints ? source.last_endpoints : "—"}
       </span>
@@ -274,6 +308,11 @@ function SourceStatus({ source }: { source: ApiContractSource }) {
         <span className="truncate text-[10px] text-faint" title={source.last_version}>
           {source.last_version}
         </span>
+        {isStale(source) && (
+          <Badge tone="env" title="No run has checked this source in the last 7 days">
+            stale
+          </Badge>
+        )}
       </span>
     );
   }

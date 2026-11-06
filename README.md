@@ -449,8 +449,11 @@ curl -X PUT http://localhost:8787/api/config/contracts \
 ```
 
 The check returns the OpenAPI version and endpoint count, so a bad URL fails immediately instead of
-silently disabling contract analysis. `OPENAPI_SPECS` is no longer read; if it is still set the server
-logs a warning and ignores it.
+silently disabling contract analysis. Every run re-checks each source it uses and stores the result on
+the source row: valid or invalid, version, endpoint count, duration and check time. Config shows the
+last check and marks a source stale when no run has checked it for 7 days; Overview summarizes valid,
+invalid and stale sources for the selected project. `OPENAPI_SPECS` is no longer read; if it is still
+set the server logs a warning and ignores it.
 
 The URL is validated by fetching and parsing it **from the server**: only `http`/`https`, 10 MB and a
 20 second timeout. A Swagger UI page is rejected with an explanation, and when the HTML contains the
