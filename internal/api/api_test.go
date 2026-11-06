@@ -1463,12 +1463,12 @@ func TestIngestSendsQuarantineExpiryNotification(t *testing.T) {
 		!strings.Contains(notifier.message.Description, "owner ega") {
 		t.Errorf("expiry message salah: %+v", notifier.message)
 	}
+	deadline := time.Now().Add(time.Second)
+	for (len(fs.deliveries) == 0 || len(fs.expiryMarked) == 0) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if len(fs.expiryMarked) != 1 || fs.expiryMarked[0] != "TC-A" {
 		t.Errorf("expiry tidak ditandai: %+v", fs.expiryMarked)
-	}
-	deadline := time.Now().Add(time.Second)
-	for len(fs.deliveries) == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
 	}
 	if len(fs.deliveries) != 1 || fs.deliveries[0].Event != "quarantine_expiring" ||
 		!fs.deliveries[0].OK {
