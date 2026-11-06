@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Layers, Search } from "lucide-react";
+import { Layers, Search, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import type { ApiCoverage, ApiCoverageChange, ApiCoverageEndpoint } from "@/api/types";
 import { CoverageTrend } from "@/components/coverage-trend";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ export function CoveragePage() {
   const { project } = useProject();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<CoverageFilter>("all");
+  const [selected, setSelected] = useState<string | null>(null);
 
   const coverageQuery = useQuery({
     queryKey: ["coverage", project],
@@ -35,6 +37,11 @@ export function CoveragePage() {
       return `${endpoint.method} ${endpoint.path} ${endpoint.summary ?? ""}`.toLowerCase().includes(needle);
     });
   }, [coverage, filter, search]);
+
+  const selectedEndpoint = useMemo(
+    () => endpoints.find((endpoint) => `${endpoint.method} ${endpoint.path}` === selected) ?? null,
+    [endpoints, selected],
+  );
 
   if (project === "") {
     return <State>Select a project in the sidebar to see its contract coverage.</State>;
@@ -159,13 +166,27 @@ export function CoveragePage() {
                   No endpoint matches this filter.
                 </div>
               ) : (
-                endpoints.map((endpoint) => <EndpointRow key={`${endpoint.method} ${endpoint.path}`} endpoint={endpoint} />)
+                endpoints.map((endpoint) => {
+                  const key = `${endpoint.method} ${endpoint.path}`;
+                  return (
+                    <EndpointRow
+                      key={key}
+                      endpoint={endpoint}
+                      active={selected === key}
+                      onSelect={() => setSelected(selected === key ? null : key)}
+                    />
+                  );
+                })
               )}
             </div>
           </div>
         </div>
 
-        <ContractChanges coverage={coverage} />
+        {selectedEndpoint ? (
+          <EndpointDetail endpoint={selectedEndpoint} onClose={() => setSelected(null)} />
+        ) : (
+          <ContractChanges coverage={coverage} />
+        )}
       </div>
 
       <p className="text-[11px] text-faint">
@@ -177,10 +198,26 @@ export function CoveragePage() {
   );
 }
 
-function EndpointRow({ endpoint }: { endpoint: ApiCoverageEndpoint }) {
+function EndpointRow({
+  endpoint,
+  active,
+  onSelect,
+}: {
+  endpoint: ApiCoverageEndpoint;
+  active: boolean;
+  onSelect: () => void;
+}) {
   const observed = new Set(endpoint.observed_status_codes);
   return (
-    <div className="grid grid-cols-[minmax(220px,1fr)_82px_92px_210px_54px] gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0 hover:bg-[#1b222b]">
+    <button
+      type="button"
+      onClick={onSelect}
+      title="Show endpoint details"
+      className={cn(
+        "grid w-full grid-cols-[minmax(220px,1fr)_82px_92px_210px_54px] gap-3 border-b border-line-soft px-3.5 py-2.5 text-left text-[11px] last:border-b-0 hover:bg-[#1b222b]",
+        active && "bg-[#1f6feb14]",
+      )}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <span className={cn("w-11 shrink-0 font-mono text-[10px] font-bold", methodClass(endpoint.method))}>
           {endpoint.method}
@@ -213,7 +250,88 @@ function EndpointRow({ endpoint }: { endpoint: ApiCoverageEndpoint }) {
         )}
       </span>
       <span className="text-right font-mono text-muted">{endpoint.tests}</span>
-    </div>
+    </button>
+  );
+}
+
+function EndpointDetail({ endpoint, onClose }: { endpoint: ApiCoverageEndpoint; onClose: () => void }) {
+  const observed = new Set(endpoint.observed_status_codes);
+  const tests = endpoint.test_keys ?? [];
+  return (
+    <Card className="overflow-hidden xl:sticky xl:top-4 xl:self-start">
+      <div className="flex items-start gap-2 border-b border-line bg-[#12171e] p-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn("shrink-0 font-mono text-[11px] font-bold", methodClass(endpoint.method))}>
+              {endpoint.method}
+            </span>
+            <span className="break-all font-mono text-[11px] text-ink">{endpoint.path}</span>
+          </div>
+          {endpoint.summary && <p className="mt-1 text-[11px] text-muted">{endpoint.summary}</p>}
+        </div>
+        <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close endpoint detail">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="p-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={endpoint.covered ? "flaky" : "backend"}>
+            {endpoint.covered ? "covered" : "uncovered"}
+          </Badge>
+          <span className="text-[10.5px] text-faint">
+            {endpoint.tests} test{endpoint.tests === 1 ? "" : "s"}
+          </span>
+          <span className="text-[10.5px] text-faint">
+            last {endpoint.last_tested_at ? when(endpoint.last_tested_at) : "never"}
+          </span>
+        </div>
+
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Status codes</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {endpoint.status_codes.length === 0 ? (
+              <span className="text-[10.5px] text-faint">None documented.</span>
+            ) : (
+              endpoint.status_codes.map((code) => (
+                <span
+                  key={code}
+                  className={cn(
+                    "rounded border px-1 py-0.5 font-mono text-[9.5px]",
+                    observed.has(code)
+                      ? "border-ok/40 bg-ok/10 text-ok"
+                      : "border-line-soft bg-canvas text-faint",
+                  )}
+                  title={observed.has(code) ? "seen in a stored run" : "documented but not seen"}
+                >
+                  {code}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Tests that called it</div>
+          {tests.length === 0 ? (
+            <p className="mt-1.5 text-[10.5px] text-faint">
+              No recorded call yet. The contract lists this endpoint but no stored run called it.
+            </p>
+          ) : (
+            <div className="mt-1.5 flex flex-col gap-1">
+              {tests.map((test) => (
+                <div key={test} className="break-all font-mono text-[10px] leading-relaxed text-muted">
+                  {test}
+                </div>
+              ))}
+            </div>
+          )}
+          {endpoint.tests > tests.length && (
+            <p className="mt-1.5 text-[10px] text-faint">Showing the first {tests.length} of {endpoint.tests}.</p>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

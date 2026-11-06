@@ -19,6 +19,7 @@ type coverageEndpoint struct {
 	ObservedStatusCodes []string   `json:"observed_status_codes"`
 	Covered             bool       `json:"covered"`
 	Tests               int        `json:"tests"`
+	TestKeys            []string   `json:"test_keys"`
 	LastTestedAt        *time.Time `json:"last_tested_at,omitempty"`
 }
 
@@ -133,10 +134,15 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	for _, endpoint := range endpoints {
 		key := endpoint.Method + " " + endpoint.Path
 		statuses := sortedSet(observed[key])
+		testKeys := sortedSet(coveredTests[key])
+		if len(testKeys) > 20 {
+			testKeys = testKeys[:20]
+		}
 		row := coverageEndpoint{
 			Method: endpoint.Method, Path: endpoint.Path, Summary: endpoint.Summary,
 			StatusCodes: endpoint.StatusCodes, ObservedStatusCodes: statuses,
-			Tests: len(coveredTests[key]), Covered: len(coveredTests[key]) > 0,
+			Tests: len(coveredTests[key]), TestKeys: testKeys,
+			Covered: len(coveredTests[key]) > 0,
 		}
 		if at := lastTested[key]; !at.IsZero() {
 			row.LastTestedAt = &at

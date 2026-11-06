@@ -354,6 +354,7 @@ export type ApiCoverageEndpoint = {
   observed_status_codes: string[];
   covered: boolean;
   tests: number;
+  test_keys?: string[];
   last_tested_at?: string | null;
 };
 

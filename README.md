@@ -416,6 +416,9 @@ best run in the window, color shows the change versus the previous run, and ever
 The tooltip has the absolute numbers. A PR run has one point (ephemeral database), so the trend is
 meaningful on `main` and on a local persistent server.
 
+Select an endpoint to see its contract summary, documented versus observed status codes, last test time
+and the tests that called it (up to 20, from the calls recorded by the Redline fixture).
+
 ### Projects
 
 The sidebar project selector scopes Failures, Runs, Health, Coverage and Overview. The choice is saved
