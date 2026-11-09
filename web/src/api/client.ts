@@ -6,6 +6,7 @@ import type {
   ApiQuarantineSuggestion,
   ApiNotificationChannel,
   ApiNotificationDelivery,
+  ApiSourceCheckEvent,
   ApiCoverage,
   ApiConfig,
   ApiContractSource,
@@ -185,6 +186,10 @@ export const api = {
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
   config: () => request<ApiConfig>("/api/config"),
+  sourceHistory: (project: string, limit = 20) =>
+    request<ApiSourceCheckEvent[]>(
+      `/api/config/contracts/history?project=${encodeURIComponent(project)}&limit=${limit}`,
+    ),
   validateSource: (url: string) =>
     request<ApiSourceCheck>("/api/config/contracts/validate", {
       method: "POST",

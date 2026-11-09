@@ -186,6 +186,30 @@ func (s *Server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": project})
 }
 
+// handleSourceHistory: GET /api/config/contracts/history?project=...&limit=20
+func (s *Server) handleSourceHistory(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project == "" {
+		writeError(w, http.StatusBadRequest, "project wajib diisi")
+		return
+	}
+	if !projectName.MatchString(project) {
+		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		return
+	}
+	limit, err := queryInt(r, "limit", 20, 1, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	checks, err := s.Store.SourceChecks(r.Context(), project, limit)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, checks)
+}
+
 // handleCheckContract: POST /api/config/contracts/check — re-check a source that is already saved
 // (or the environment fallback) and persist the result when a database row exists.
 func (s *Server) handleCheckContract(w http.ResponseWriter, r *http.Request) {

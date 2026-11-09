@@ -36,6 +36,7 @@ type fakeStore struct {
 	artifacts          []store.Artifact
 	quarantineReleased bool
 	sources            []store.ContractSource
+	sourceChecks       []store.SourceCheck
 	notifications      store.NotificationSettings
 	channels           map[string]store.NotificationChannel
 	healthRows         []store.TestHealthRow
@@ -301,6 +302,16 @@ func (f *fakeStore) RecordSourceCheck(_ context.Context, project string, record 
 		return nil
 	}
 	return store.ErrNotFound
+}
+func (f *fakeStore) SourceChecks(_ context.Context, _ string, limit int) ([]store.SourceCheck, error) {
+	out := f.sourceChecks
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 func (f *fakeStore) NotificationSettings(context.Context) (store.NotificationSettings, error) {
 	return f.notifications, nil
@@ -1924,5 +1935,34 @@ func TestGroupKnowledgeMarkdown(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("markdown harus memuat %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestSourceHistory(t *testing.T) {
+	now := time.Now()
+	fs := &fakeStore{sourceChecks: []store.SourceCheck{
+		{Project: "toolshop", At: now, RunID: 12, Status: "invalid", Error: "HTTP 503", DurationMS: 42},
+		{Project: "toolshop", At: now.Add(-time.Hour), RunID: 11, Status: "valid", Version: "OpenAPI 3.0.0", Endpoints: 19, DurationMS: 30},
+	}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/config/contracts/history?project=toolshop&limit=1", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status": "invalid"`) ||
+		strings.Contains(rec.Body.String(), `"run_id": 11`) {
+		t.Errorf("source history limit = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/config/contracts/history?project=toolshop", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status": "valid"`) ||
+		!strings.Contains(rec.Body.String(), `"run_id": 12`) {
+		t.Errorf("source history = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/config/contracts/history", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("source history tanpa project = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/config/contracts/history?project=bad%20project", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("source history project invalid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/config/contracts/history?project=toolshop&limit=0", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("source history limit invalid = %d, want 400", rec.Code)
 	}
 }

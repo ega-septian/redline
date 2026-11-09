@@ -35,7 +35,7 @@ func TestContractSources(t *testing.T) {
 	}
 
 	if err := s.RecordSourceCheck(ctx, "toolshop", store.SourceCheckRecord{
-		Status: "valid", Version: "OpenAPI 3.2.0", Endpoints: 19, DurationMS: 42,
+		Status: "valid", Version: "OpenAPI 3.2.0", Endpoints: 19, DurationMS: 42, RunID: 11,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +71,20 @@ func TestContractSources(t *testing.T) {
 	}
 	if changed.By != "budi" || changed.URL != "https://api.example.com/v2/docs" {
 		t.Errorf("update tidak tersimpan: %+v", changed)
+	}
+
+	if err := s.RecordSourceCheck(ctx, "toolshop", store.SourceCheckRecord{
+		Status: "invalid", Error: "HTTP 503", DurationMS: 5, RunID: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	checks, err := s.SourceChecks(ctx, "toolshop", 1)
+	if err != nil || len(checks) != 1 || checks[0].RunID != 12 || checks[0].Status != "invalid" {
+		t.Errorf("history limit salah: %+v %v", checks, err)
+	}
+	checks, err = s.SourceChecks(ctx, "toolshop", 10)
+	if err != nil || len(checks) != 2 || checks[1].RunID != 11 || checks[1].Status != "valid" {
+		t.Errorf("history urutan salah: %+v %v", checks, err)
 	}
 
 	if err := s.RecordSourceCheck(ctx, "missing", store.SourceCheckRecord{Status: "valid"}); !errors.Is(err, store.ErrNotFound) {

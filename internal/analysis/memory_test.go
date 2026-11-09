@@ -298,6 +298,11 @@ func TestSnapshotContractsRecordsSourceHealth(t *testing.T) {
 	if source.LastDuration < 0 {
 		t.Errorf("durasi check tidak boleh negatif: %d", source.LastDuration)
 	}
+	checks, err := s.SourceChecks(ctx, f.Group.Project, 10)
+	if err != nil || len(checks) != 1 || checks[0].RunID != f.FailRunID ||
+		checks[0].Status != "valid" || checks[0].Endpoints != 1 {
+		t.Errorf("history check valid salah: %+v %v", checks, err)
+	}
 
 	contracts.err = errors.New("HTTP 503")
 	a.SnapshotContracts(ctx, f.FailRunID, []string{f.Group.Project})
@@ -307,5 +312,10 @@ func TestSnapshotContractsRecordsSourceHealth(t *testing.T) {
 	}
 	if source.LastStatus != "invalid" || !strings.Contains(source.LastError, "HTTP 503") {
 		t.Errorf("health setelah run gagal salah: %+v", source)
+	}
+	checks, err = s.SourceChecks(ctx, f.Group.Project, 10)
+	if err != nil || len(checks) != 2 || checks[0].Status != "invalid" ||
+		!strings.Contains(checks[0].Error, "HTTP 503") || checks[0].RunID != f.FailRunID {
+		t.Errorf("history check invalid salah: %+v %v", checks, err)
 	}
 }
