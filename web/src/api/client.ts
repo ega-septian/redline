@@ -105,6 +105,7 @@ export const api = {
     request<ApiRun[]>(
       `/api/runs?limit=50${project ? `&project=${encodeURIComponent(project)}` : ""}`,
     ),
+  runErrors: (limit = 20) => request<ApiRun[]>(`/api/runs/errors?limit=${limit}`),
   run: (id: number) => request<RunDetail>(`/api/runs/${id}`),
   compareRun: (id: number) => request<RunComparison>(`/api/runs/${id}/compare`),
   impact: (kind: "file" | "endpoint", query: string) =>

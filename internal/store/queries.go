@@ -23,6 +23,27 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	return runs, nil
 }
 
+// RunsWithReportErrors returns runs whose spec or global setup failed before tests could run.
+// These runs often have no test results, so they are not tied to a project.
+func (s *Store) RunsWithReportErrors(ctx context.Context, limit int) ([]Run, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	res, err := s.query(ctx, `
+		MATCH (r:Run)
+		WHERE r.reportErrors IS NOT NULL AND size(r.reportErrors) > 0
+		RETURN r ORDER BY r.id DESC LIMIT $limit`, map[string]any{"limit": limit})
+	if err != nil {
+		return nil, err
+	}
+	runs := []Run{}
+	for _, rec := range res.Records {
+		node, _ := rec.Get("r")
+		runs = append(runs, toRun(node.(neo4j.Node).Props))
+	}
+	return runs, nil
+}
+
 // GetRun mengembalikan satu run, atau ErrNotFound.
 func (s *Store) GetRun(ctx context.Context, id int64) (Run, error) {
 	res, err := s.query(ctx, `MATCH (r:Run {id: $id}) RETURN r`, map[string]any{"id": id})

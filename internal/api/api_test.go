@@ -41,6 +41,7 @@ type fakeStore struct {
 	channels           map[string]store.NotificationChannel
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
+	runErrors          []store.Run
 	dismissals         map[string]time.Time
 	dismissed          string
 	ingest             *store.IngestResult
@@ -93,6 +94,16 @@ func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta sto
 	return &store.IngestResult{RunID: 7, Total: f.gotTests}, nil
 }
 func (f *fakeStore) ListRuns(context.Context, int) ([]store.Run, error) { return []store.Run{}, nil }
+func (f *fakeStore) RunsWithReportErrors(_ context.Context, limit int) ([]store.Run, error) {
+	out := f.runErrors
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 func (f *fakeStore) ListRunsForProject(_ context.Context, project string, limit int) ([]store.Run, error) {
 	f.lastRunProject = project
 	return f.ListRuns(context.Background(), limit)
@@ -2001,5 +2012,26 @@ func TestTestTrend(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/tests/trend?limit=51", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("test trend limit invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestRunReportErrors(t *testing.T) {
+	fs := &fakeStore{runErrors: []store.Run{
+		{ID: 12, Total: 0, ReportErrors: []string{"Cannot find module './helpers/brands'"}},
+		{ID: 11, Total: 0, ReportErrors: []string{"globalSetup failed"}},
+	}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/runs/errors?limit=1", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id": 12`) ||
+		strings.Contains(rec.Body.String(), `"id": 11`) {
+		t.Errorf("run errors limit = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/runs/errors", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"globalSetup failed"`) {
+		t.Errorf("run errors = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/runs/errors?limit=101", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("run errors limit invalid = %d, want 400", rec.Code)
 	}
 }
