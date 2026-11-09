@@ -55,6 +55,7 @@ type Store interface {
 	SetContractSource(ctx context.Context, src store.ContractSource) (store.ContractSource, error)
 	DeleteContractSource(ctx context.Context, project string) error
 	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
+	SourceChecks(ctx context.Context, project string, limit int) ([]store.SourceCheck, error)
 	NotificationSettings(ctx context.Context) (store.NotificationSettings, error)
 	SetNotificationSettings(ctx context.Context, settings store.NotificationSettings) (store.NotificationSettings, error)
 	NotificationSettingsFor(ctx context.Context, project string) (store.NotificationSettings, error)
@@ -170,6 +171,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config/contracts", s.handleSaveContract)
 	mux.HandleFunc("DELETE /api/config/contracts", s.handleDeleteContract)
+	mux.HandleFunc("GET /api/config/contracts/history", s.handleSourceHistory)
 	mux.HandleFunc("POST /api/config/contracts/validate", s.handleValidateSource)
 	mux.HandleFunc("POST /api/config/contracts/check", s.handleCheckContract)
 	mux.HandleFunc("PUT /api/config/notifications", s.handleSaveNotifications)

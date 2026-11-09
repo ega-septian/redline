@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -374,6 +374,7 @@ Voyage AI.
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
 | `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |
 | `POST /api/config/contracts/check`                                 | Re-check a saved source: `{"project": "toolshop"}`             |
+| `GET /api/config/contracts/history?project=...&limit=20`           | Stored source checks, newest first (max 100)                   |
 | `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
 | `PUT /api/config/notifications`                                    | Save the default webhook and events                            |
 | `PUT /api/config/notifications/projects/{project}`                 | Save a project override: same body as the default channel      |
@@ -469,9 +470,11 @@ curl -X PUT http://localhost:8787/api/config/contracts \
 
 The check returns the OpenAPI version and endpoint count, so a bad URL fails immediately instead of
 silently disabling contract analysis. Every run re-checks each source it uses and stores the result on
-the source row: valid or invalid, version, endpoint count, duration and check time. Config shows the
-last check and marks a source stale when no run has checked it for 7 days; Overview summarizes valid,
-invalid and stale sources for the selected project. `OPENAPI_SPECS` is no longer read; if it is still
+the source row: valid or invalid, version, endpoint count, duration and check time. It also appends a
+check to the source history (the newest 100 per project), so Config can show whether a source has been
+invalid since a particular run instead of only its latest state. Config marks a source stale when no run
+has checked it for 7 days; Overview summarizes valid, invalid and stale sources for the selected
+project. `OPENAPI_SPECS` is no longer read; if it is still
 set the server logs a warning and ignores it.
 
 The URL is validated by fetching and parsing it **from the server**: only `http`/`https`, 10 MB and a

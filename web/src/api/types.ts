@@ -417,6 +417,17 @@ export type ApiContractSource = {
   last_duration_ms?: number;
 };
 
+export type ApiSourceCheckEvent = {
+  project: string;
+  at: string;
+  run_id?: number;
+  status: string;
+  error?: string;
+  version?: string;
+  endpoints?: number;
+  duration_ms?: number;
+};
+
 export type ApiSourceCheck = {
   ok: boolean;
   url: string;

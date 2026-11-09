@@ -19,6 +19,7 @@ import type {
   ApiNotificationDelivery,
   ApiNotifications,
   ApiSourceCheck,
+  ApiSourceCheckEvent,
 } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export function ConfigPage() {
       queryClient.invalidateQueries({ queryKey: ["coverage"] }),
       queryClient.invalidateQueries({ queryKey: ["projects"] }),
       queryClient.invalidateQueries({ queryKey: ["notification-deliveries"] }),
+      queryClient.invalidateQueries({ queryKey: ["source-history"] }),
     ]);
   }
 
@@ -154,8 +156,8 @@ export function ConfigPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <div className="min-w-[860px]">
-            <div className="grid grid-cols-[150px_minmax(0,1fr)_170px_110px_80px_150px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
+          <div className="min-w-[890px]">
+            <div className="grid grid-cols-[150px_minmax(0,1fr)_170px_110px_80px_180px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
               <span>Project</span>
               <span>Spec URL</span>
               <span>Status</span>
@@ -249,58 +251,134 @@ function SourceRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   return (
-    <div className="grid grid-cols-[150px_minmax(0,1fr)_170px_110px_80px_150px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0 hover:bg-[#1b222b]">
-      <div className="flex min-w-0 flex-col">
-        <span className="truncate font-mono font-semibold text-[#cdd9e5]">{source.project}</span>
-        <span className="truncate text-[10px] text-faint">
-          {source.by ? `by ${source.by}` : "database"}
+    <div className="border-b border-line-soft last:border-b-0">
+      <div className="grid grid-cols-[150px_minmax(0,1fr)_170px_110px_80px_180px] items-center gap-3 px-3.5 py-2.5 text-[11px] hover:bg-[#1b222b]">
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate font-mono font-semibold text-[#cdd9e5]">{source.project}</span>
+          <span className="truncate text-[10px] text-faint">
+            {source.by ? `by ${source.by}` : "database"}
+          </span>
+        </div>
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noreferrer"
+          title={source.url}
+          className="truncate font-mono text-[11px] text-[#79c0ff] hover:underline"
+        >
+          {source.url}
+        </a>
+        <SourceStatus source={source} />
+        <span
+          className={cn("text-[10.5px]", isStale(source) ? "text-warn" : "text-faint")}
+          title={isStale(source) ? "No run has checked this source in the last 7 days" : undefined}
+        >
+          {ago(source.last_checked_at)}
         </span>
+        <span className="text-right font-mono text-muted">
+          {source.last_endpoints ? source.last_endpoints : "—"}
+        </span>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setHistoryOpen((value) => !value)}
+            aria-expanded={historyOpen}
+            aria-label={`Show history for ${source.project}`}
+            title="Show check history"
+            className={cn(historyOpen && "text-brand")}
+          >
+            <History className="h-3 w-3" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onTest}
+            disabled={checking}
+            title="Fetch and parse this URL now"
+          >
+            <RefreshCw className={cn("h-3 w-3", checking && "animate-spin")} />
+            Test
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onEdit} title="Use another URL for this project">
+            <Pencil className="h-3 w-3" />
+            Edit
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onDelete}
+            title="Remove this source"
+            aria-label={`Remove ${source.project}`}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
       </div>
-      <a
-        href={source.url}
-        target="_blank"
-        rel="noreferrer"
-        title={source.url}
-        className="truncate font-mono text-[11px] text-[#79c0ff] hover:underline"
-      >
-        {source.url}
-      </a>
-      <SourceStatus source={source} />
-      <span
-        className={cn("text-[10.5px]", isStale(source) ? "text-warn" : "text-faint")}
-        title={isStale(source) ? "No run has checked this source in the last 7 days" : undefined}
-      >
-        {ago(source.last_checked_at)}
-      </span>
-      <span className="text-right font-mono text-muted">
-        {source.last_endpoints ? source.last_endpoints : "—"}
-      </span>
-      <div className="flex items-center justify-end gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onTest}
-          disabled={checking}
-          title="Fetch and parse this URL now"
-        >
-          <RefreshCw className={cn("h-3 w-3", checking && "animate-spin")} />
-          Test
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit} title="Use another URL for this project">
-          <Pencil className="h-3 w-3" />
-          Edit
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={onDelete}
-          title="Remove this source"
-          aria-label={`Remove ${source.project}`}
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
+      {historyOpen && <SourceHistory project={source.project} />}
+    </div>
+  );
+}
+
+function SourceHistory({ project }: { project: string }) {
+  const query = useQuery({
+    queryKey: ["source-history", project],
+    queryFn: () => api.sourceHistory(project),
+  });
+  const checks = query.data ?? [];
+
+  return (
+    <div className="border-t border-line-soft bg-[#0f141a] px-3.5 py-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <History className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[11px] font-semibold">Check history</span>
+        <Badge tone="neutral">{checks.length} shown</Badge>
+        <span className="ml-auto text-[10px] text-faint">newest first · last 20</span>
       </div>
+      {query.isPending && <p className="text-[10.5px] text-muted">Loading history…</p>}
+      {query.isError && (
+        <p className="text-[10.5px] text-danger">
+          Cannot load history: {query.error instanceof Error ? query.error.message : "request failed"}
+        </p>
+      )}
+      {query.isSuccess && checks.length === 0 && (
+        <p className="text-[10.5px] text-muted">No stored checks yet. The next run or Test will add one.</p>
+      )}
+      {checks.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {checks.map((check, index) => (
+            <SourceCheckRow key={`${check.at}-${check.run_id ?? "manual"}-${index}`} check={check} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceCheckRow({ check }: { check: ApiSourceCheckEvent }) {
+  const tone = check.status === "valid" ? "flaky" : check.status === "invalid" ? "backend" : "neutral";
+  const detail =
+    check.status === "invalid"
+      ? check.error || "check failed"
+      : check.version || "OpenAPI document";
+  return (
+    <div className="grid grid-cols-[120px_86px_minmax(0,1fr)_100px_150px] items-center gap-3 rounded border border-line-soft bg-canvas px-2.5 py-1.5 text-[10.5px]">
+      <span className="text-faint" title={check.at}>
+        {ago(check.at)}
+      </span>
+      <Badge tone={tone}>{check.status}</Badge>
+      <span className="truncate text-muted" title={detail}>
+        {detail}
+      </span>
+      <span className="font-mono text-faint">
+        {check.run_id ? `run #${check.run_id}` : "manual"}
+      </span>
+      <span className="text-right font-mono text-faint">
+        {check.endpoints ? `${check.endpoints} ep` : "—"} ·{" "}
+        {check.duration_ms ? `${check.duration_ms} ms` : "—"}
+      </span>
     </div>
   );
 }

@@ -32,6 +32,20 @@ type SourceCheckRecord struct {
 	Version    string
 	Endpoints  int
 	DurationMS int64
+	RunID      int64
+}
+
+// SourceCheck is one stored health check, so Config can show whether a source has been failing
+// since a particular run instead of only its latest state.
+type SourceCheck struct {
+	Project    string    `json:"project"`
+	At         time.Time `json:"at"`
+	RunID      int64     `json:"run_id,omitempty"`
+	Status     string    `json:"status"`
+	Error      string    `json:"error,omitempty"`
+	Version    string    `json:"version,omitempty"`
+	Endpoints  int       `json:"endpoints,omitempty"`
+	DurationMS int64     `json:"duration_ms,omitempty"`
 }
 
 // NotificationSettings is the default notification channel, used by projects without an override.
@@ -119,16 +133,20 @@ func (s *Store) DeleteContractSource(ctx context.Context, project string) error 
 	return nil
 }
 
-// RecordSourceCheck stores the outcome of a validation. Environment-only sources have no node, so
-// ErrNotFound lets the caller keep the check result without persisting it.
+// RecordSourceCheck stores the outcome of a validation and appends it to the project's check
+// history. Environment-only sources have no node, so ErrNotFound lets the caller keep the check
+// result without persisting it.
 func (s *Store) RecordSourceCheck(ctx context.Context, project string, record SourceCheckRecord) error {
 	res, err := s.query(ctx, `
 		MATCH (s:ContractSource {project: $project})
-		SET s.lastCheckedAt = datetime(), s.lastStatus = $status, s.lastError = $error,
+		CREATE (c:SourceCheck {project: $project, at: datetime(), runId: $runId,
+			status: $status, error: $error, version: $version, endpoints: $endpoints,
+			durationMs: $duration})
+		SET s.lastCheckedAt = c.at, s.lastStatus = $status, s.lastError = $error,
 		    s.lastVersion = $version, s.lastEndpoints = $endpoints, s.lastDurationMs = $duration
 		RETURN count(s) AS found`,
 		map[string]any{
-			"project": project, "status": record.Status, "error": record.Error,
+			"project": project, "runId": record.RunID, "status": record.Status, "error": record.Error,
 			"version": record.Version, "endpoints": record.Endpoints, "duration": record.DurationMS,
 		})
 	if err != nil {
@@ -137,7 +155,33 @@ func (s *Store) RecordSourceCheck(ctx context.Context, project string, record So
 	if len(res.Records) == 0 || recInt64(res.Records[0], "found") == 0 {
 		return ErrNotFound
 	}
-	return nil
+	// Keep the newest 100 checks per project. This runs after the source update so a pruning
+	// problem cannot make a successful check look like a failed one.
+	_, err = s.query(ctx, `
+		MATCH (c:SourceCheck {project: $project})
+		WITH c ORDER BY c.at DESC, c.runId DESC SKIP 100
+		DETACH DELETE c`, map[string]any{"project": project})
+	return err
+}
+
+// SourceChecks returns the newest checks for a project, newest first.
+func (s *Store) SourceChecks(ctx context.Context, project string, limit int) ([]SourceCheck, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	res, err := s.query(ctx, `
+		MATCH (c:SourceCheck {project: $project})
+		RETURN c ORDER BY c.at DESC, c.runId DESC LIMIT $limit`,
+		map[string]any{"project": project, "limit": limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SourceCheck, 0, len(res.Records))
+	for _, record := range res.Records {
+		node, _ := record.Get("c")
+		out = append(out, toSourceCheck(node.(neo4j.Node).Props))
+	}
+	return out, nil
 }
 
 // NotificationChannels returns every project override, sorted by project.
@@ -276,6 +320,14 @@ func toContractSource(p map[string]any) ContractSource {
 		src.LastCheckedAt = &at
 	}
 	return src
+}
+
+func toSourceCheck(p map[string]any) SourceCheck {
+	return SourceCheck{
+		Project: str(p, "project"), At: local(p["at"]), RunID: i64(p, "runId"),
+		Status: str(p, "status"), Error: str(p, "error"), Version: str(p, "version"),
+		Endpoints: int(i64(p, "endpoints")), DurationMS: i64(p, "durationMs"),
+	}
 }
 
 func toNotificationChannel(p map[string]any) NotificationChannel {

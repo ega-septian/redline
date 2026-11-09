@@ -81,7 +81,7 @@ func (a *Analyzer) SnapshotContracts(ctx context.Context, runID int64, projects 
 		if url == "" {
 			continue
 		}
-		record := store.SourceCheckRecord{DurationMS: time.Since(started).Milliseconds()}
+		record := store.SourceCheckRecord{DurationMS: time.Since(started).Milliseconds(), RunID: runID}
 		if fetchErr != nil {
 			record.Status = "invalid"
 			record.Error = fetchErr.Error()
