@@ -57,6 +57,20 @@ type TestHealthRow struct {
 	QuarantineUntil    *time.Time `json:"quarantine_until,omitempty"`
 }
 
+// TestHealthPoint is one run in the suite-level health trend.
+type TestHealthPoint struct {
+	RunID     int64     `json:"run_id"`
+	At        time.Time `json:"at"`
+	Branch    string    `json:"branch,omitempty"`
+	Commit    string    `json:"commit,omitempty"`
+	Passed    int       `json:"passed"`
+	Failed    int       `json:"failed"`
+	Flaky     int       `json:"flaky"`
+	Skipped   int       `json:"skipped"`
+	PassRate  float64   `json:"pass_rate"`
+	FlakeRate float64   `json:"flake_rate"`
+}
+
 // TestRunPoint is one result in a test's timeline.
 type TestRunPoint struct {
 	RunID       int64     `json:"run_id"`
@@ -144,6 +158,56 @@ func (s *Store) TestHealth(ctx context.Context, project string, days int) (TestH
 	}
 	applyQuarantine(tests, active)
 	return summary, tests, nil
+}
+
+// TestHealthTrend returns one point per run in the window, oldest first. It is the same data the
+// Health page uses for the suite summary, grouped by run instead of by test.
+func (s *Store) TestHealthTrend(ctx context.Context, project string, days, limit int) ([]TestHealthPoint, error) {
+	days = clampDays(days)
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	since := time.Now().AddDate(0, 0, -days)
+	rows, err := s.healthRows(ctx, project, since, "")
+	if err != nil {
+		return nil, err
+	}
+	byRun := map[int64]*TestHealthPoint{}
+	for _, row := range rows {
+		point := byRun[row.RunID]
+		if point == nil {
+			point = &TestHealthPoint{
+				RunID: row.RunID, At: row.At, Branch: row.Branch, Commit: row.Commit,
+			}
+			byRun[row.RunID] = point
+		}
+		switch row.Status {
+		case "passed":
+			point.Passed++
+		case "failed":
+			point.Failed++
+		case "flaky":
+			point.Flaky++
+		case "skipped":
+			point.Skipped++
+		}
+	}
+	points := make([]TestHealthPoint, 0, len(byRun))
+	for _, point := range byRun {
+		point.PassRate = rate(point.Passed, point.Passed+point.Failed+point.Flaky)
+		point.FlakeRate = rate(point.Flaky, point.Passed+point.Failed+point.Flaky)
+		points = append(points, *point)
+	}
+	sort.Slice(points, func(i, j int) bool {
+		if !points[i].At.Equal(points[j].At) {
+			return points[i].At.Before(points[j].At)
+		}
+		return points[i].RunID < points[j].RunID
+	})
+	if len(points) > limit {
+		points = points[len(points)-limit:]
+	}
+	return points, nil
 }
 
 // TestHistory returns one test's aggregate and its timeline, newest first.

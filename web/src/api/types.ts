@@ -268,6 +268,19 @@ export type TestHealthSummary = {
   mttr_hours: number;
 };
 
+export type TestHealthPoint = {
+  run_id: number;
+  at: string;
+  branch?: string;
+  commit?: string;
+  passed: number;
+  failed: number;
+  flaky: number;
+  skipped: number;
+  pass_rate: number;
+  flake_rate: number;
+};
+
 export type TestHealthRow = {
   key: string;
   test: string;
