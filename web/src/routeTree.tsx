@@ -3,7 +3,6 @@ import { createRootRoute, createRoute, lazyRouteComponent } from "@tanstack/reac
 import { AppShell } from "@/components/app-shell";
 import { ProjectProvider } from "@/lib/project";
 import { FailuresPage } from "@/pages/failures";
-import { HealthPage } from "@/pages/health";
 import { ImpactPage } from "@/pages/impact";
 import { RulesPage } from "@/pages/rules";
 import { RunDetailPage } from "@/pages/run-detail";
@@ -47,7 +46,7 @@ const runDetailRoute = createRoute({
 const healthRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/health",
-  component: HealthPage,
+  component: lazyRouteComponent(() => import("@/pages/health"), "HealthPage"),
 });
 
 const quarantineRoute = createRoute({

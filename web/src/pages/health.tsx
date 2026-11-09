@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Activity, AlertTriangle, Check, Clock, Copy, Search, Sparkles, X } from "lucide-react";
+import { Activity, AlertTriangle, Check, Clock, Copy, Search, Sparkles, Timer, TrendingUp, X } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { api } from "@/api/client";
@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 
 const windows = [7, 30, 90] as const;
 type WindowDays = (typeof windows)[number];
+const REGRESSION_PCT = 30;
+const REGRESSION_MS = 100;
 
 export function HealthPage() {
   const { project } = useProject();
@@ -52,6 +54,28 @@ export function HealthPage() {
   );
   const failing = useMemo(
     () => [...tests].filter((test) => test.failed > 0).sort((a, b) => b.failed - a.failed).slice(0, 5),
+    [tests],
+  );
+  const slowest = useMemo(
+    () =>
+      [...tests]
+        .filter((test) => test.avg_duration_ms > 0)
+        .sort((a, b) => b.avg_duration_ms - a.avg_duration_ms)
+        .slice(0, 5),
+    [tests],
+  );
+  const regressions = useMemo(
+    () =>
+      [...tests]
+        .filter(
+          (test) =>
+            (test.previous_duration_ms ?? 0) > 0 &&
+            (test.last_duration_ms ?? 0) > 0 &&
+            (test.duration_delta_pct ?? 0) >= REGRESSION_PCT &&
+            (test.last_duration_ms ?? 0) - (test.previous_duration_ms ?? 0) >= REGRESSION_MS,
+        )
+        .sort((a, b) => (b.duration_delta_pct ?? 0) - (a.duration_delta_pct ?? 0))
+        .slice(0, 5),
     [tests],
   );
   const selectedTest = useMemo(
@@ -155,6 +179,27 @@ export function HealthPage() {
           tests={failing}
           metric={(test) => `${test.failed} failed · ${pct(test.pass_rate)} pass`}
           empty="No failed test in this window."
+          onSelect={setSelected}
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <TopList
+          title="Slowest tests"
+          icon={<Timer className="h-3.5 w-3.5 text-brand" />}
+          tests={slowest}
+          metric={(test) => `${duration(test.avg_duration_ms)} avg · ${executions(test)} runs`}
+          empty="No duration data in this window."
+          onSelect={setSelected}
+        />
+        <TopList
+          title="Duration regressions"
+          icon={<TrendingUp className="h-3.5 w-3.5 text-warn" />}
+          tests={regressions}
+          metric={(test) =>
+            `+${Math.round(test.duration_delta_pct ?? 0)}% · ${duration(test.previous_duration_ms ?? 0)} → ${duration(test.last_duration_ms ?? 0)}`
+          }
+          empty="No test is ≥30% and ≥100 ms slower than its previous run."
           onSelect={setSelected}
         />
       </section>
@@ -291,6 +336,16 @@ function TestDetail({ row, days, onClose }: { row: TestHealthRow; days: number; 
           <span>pass {pct(row.pass_rate)}</span>
           <span>flake {pct(row.flake_rate)}</span>
           <span>avg {duration(row.avg_duration_ms)}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[10.5px] text-faint">
+          <span>last {row.last_duration_ms ? duration(row.last_duration_ms) : "—"}</span>
+          <span>prev {row.previous_duration_ms ? duration(row.previous_duration_ms) : "—"}</span>
+          {(row.duration_delta_pct ?? 0) !== 0 && (
+            <span className={cn((row.duration_delta_pct ?? 0) > 0 ? "text-warn" : "text-ok")}>
+              {(row.duration_delta_pct ?? 0) > 0 ? "+" : ""}
+              {Math.round(row.duration_delta_pct ?? 0)}%
+            </span>
+          )}
         </div>
       </div>
 
@@ -580,6 +635,10 @@ function shortTitle(test: string): string {
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function executions(test: TestHealthRow): number {
+  return test.passed + test.failed + test.flaky;
 }
 
 function duration(ms: number): string {
