@@ -975,6 +975,14 @@ func TestQuarantine(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"TC-BRD-001"`) {
 		t.Errorf("list quarantine = %d: %s", rec.Code, rec.Body)
 	}
+	if rec := do(h, http.MethodGet, "/api/tests/quarantine?project=toolshop", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"TC-BRD-001"`) {
+		t.Errorf("list quarantine per project = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/quarantine?project=other", nil); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "[]") {
+		t.Errorf("list quarantine project lain = %d: %s", rec.Code, rec.Body)
+	}
 	body := `{"test":"TC-BRD-001","owner":"ega","reason":"flaky login","days":7}`
 	if rec := do(h, http.MethodPut, "/api/tests/quarantine", strings.NewReader(body)); rec.Code != http.StatusOK ||
 		!strings.Contains(rec.Body.String(), `"owner": "ega"`) {

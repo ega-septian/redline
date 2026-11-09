@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (owner, reason, expiry, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules and the scoreboard.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules and the scoreboard.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -356,7 +356,7 @@ Voyage AI.
 | `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
 | `GET /api/tests`                                                   | Test health: pass/flake rates, top failures, per-test rows     |
 | `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
-| `GET /api/tests/quarantine`                                        | Active quarantined tests                                       |
+| `GET /api/tests/quarantine`                                        | Active quarantined tests (`?project=...` scopes them)          |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
 | `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
@@ -387,6 +387,14 @@ Voyage AI.
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
 Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
+
+### Quarantine page
+
+`/ui/quarantine` lists the active exceptions for the selected project: test, owner, reason, age and
+expiry. The month calendar marks the days when quarantines end; click a day to filter the list. The
+header calls out quarantines due within 24 hours and 7 days. **Release** returns the test to the normal
+gate immediately; expiry is not a release, so a test that is still failing will fail the gate again
+after its `until` date.
 
 ### Suggested quarantines
 

@@ -412,6 +412,16 @@ func (s *Server) handleListQuarantine(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project != "" {
+		filtered := make([]store.Quarantine, 0, len(list))
+		for _, quarantine := range list {
+			if quarantine.Project == project {
+				filtered = append(filtered, quarantine)
+			}
+		}
+		list = filtered
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
