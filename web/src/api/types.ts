@@ -436,6 +436,7 @@ export type ApiSourceCheck = {
 export type ApiNotificationDelivery = {
   at: string;
   event: string;
+  project?: string;
   run_id?: number;
   ok: boolean;
   status_code?: number;
@@ -456,7 +457,19 @@ export type ApiNotifications = {
   last_delivery?: ApiNotificationDelivery | null;
 };
 
+export type ApiNotificationChannel = {
+  project: string;
+  enabled: boolean;
+  webhook_url: string;
+  webhook_set: boolean;
+  events: string[];
+  available_events: string[];
+  by?: string;
+  updated_at?: string | null;
+};
+
 export type ApiConfig = {
   contracts: ApiContractSource[];
   notifications: ApiNotifications;
+  notification_channels: ApiNotificationChannel[];
 };

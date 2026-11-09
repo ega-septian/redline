@@ -287,7 +287,7 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o report.Outcome,
 	fingerprint, cleanMsg, incidentKey, incidentLabel string, shared bool) (GroupChange, string, error) {
 	change := GroupChange{Fingerprint: fingerprint, TestKey: o.Key(), TestCaseID: o.TestCaseID,
-		Error: Summarize(cleanMsg), Incident: incidentKey}
+		Project: o.Project, Error: Summarize(cleanMsg), Incident: incidentKey}
 
 	// SET ke nilai yang sama mengunci node (pengganti SELECT ... FOR UPDATE), supaya dua run yang masuk
 	// bersamaan tidak sama-sama mengira kelompok ini belum ada atau masih resolved.
@@ -376,7 +376,7 @@ func resolvePassed(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 		MATCH (f:Failure)-[:OF]->(:Test {key: key})
 		WHERE f.status IN ['open', 'regressed'] AND f.lastSeenRun <> $runId
 		`+set+`
-		RETURN f.id AS id, key, f.lastError AS lastError, f.occurrences AS occurrences`,
+		RETURN f.id AS id, key, f.lastError AS lastError, f.occurrences AS occurrences, f.project AS project`,
 		map[string]any{"keys": keys, "runId": runID})
 	if err != nil {
 		return nil, fmt.Errorf("tutup kelompok yang sudah lulus: %w", err)
@@ -387,7 +387,11 @@ func resolvePassed(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 		key, _ := rec.Get("key")
 		lastError, _ := rec.Get("lastError")
 		occ, _ := rec.Get("occurrences")
-		out = append(out, GroupChange{Fingerprint: id.(string), TestKey: key.(string),
+		project := ""
+		if value, ok := rec.Get("project"); ok {
+			project, _ = value.(string)
+		}
+		out = append(out, GroupChange{Fingerprint: id.(string), TestKey: key.(string), Project: project,
 			Error: Summarize(lastError.(string)), Occurrences: int(occ.(int64))})
 	}
 	return out, cur.Err()

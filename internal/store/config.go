@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -33,8 +34,19 @@ type SourceCheckRecord struct {
 	DurationMS int64
 }
 
-// NotificationSettings is stored configuration for future alert delivery. Delivery itself is not wired.
+// NotificationSettings is the default notification channel, used by projects without an override.
 type NotificationSettings struct {
+	Enabled    bool      `json:"enabled"`
+	WebhookURL string    `json:"webhook_url"`
+	Events     []string  `json:"events"`
+	By         string    `json:"by,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// NotificationChannel overrides the default channel for one project. A disabled channel silences
+// that project; a missing channel falls back to the default.
+type NotificationChannel struct {
+	Project    string    `json:"project"`
 	Enabled    bool      `json:"enabled"`
 	WebhookURL string    `json:"webhook_url"`
 	Events     []string  `json:"events"`
@@ -128,7 +140,87 @@ func (s *Store) RecordSourceCheck(ctx context.Context, project string, record So
 	return nil
 }
 
-// NotificationSettings returns the saved notification config, or defaults when nothing is saved.
+// NotificationChannels returns every project override, sorted by project.
+func (s *Store) NotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
+	res, err := s.query(ctx, `MATCH (n:NotificationChannel) RETURN n ORDER BY n.project`, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NotificationChannel, 0, len(res.Records))
+	for _, record := range res.Records {
+		node, _ := record.Get("n")
+		out = append(out, toNotificationChannel(node.(neo4j.Node).Props))
+	}
+	return out, nil
+}
+
+// NotificationChannel returns one project override, or ErrNotFound when the project inherits.
+func (s *Store) NotificationChannel(ctx context.Context, project string) (NotificationChannel, error) {
+	res, err := s.query(ctx, `MATCH (n:NotificationChannel {project: $project}) RETURN n`,
+		map[string]any{"project": project})
+	if err != nil {
+		return NotificationChannel{}, err
+	}
+	if len(res.Records) == 0 {
+		return NotificationChannel{}, ErrNotFound
+	}
+	node, _ := res.Records[0].Get("n")
+	return toNotificationChannel(node.(neo4j.Node).Props), nil
+}
+
+// SetNotificationChannel creates or updates one project override.
+func (s *Store) SetNotificationChannel(ctx context.Context, channel NotificationChannel) (NotificationChannel, error) {
+	res, err := s.query(ctx, `
+		MERGE (n:NotificationChannel {project: $project})
+		ON CREATE SET n.createdAt = datetime()
+		SET n.enabled = $enabled, n.webhookUrl = $webhook, n.events = $events,
+		    n.by = $by, n.updatedAt = datetime()
+		RETURN n`,
+		map[string]any{
+			"project": channel.Project, "enabled": channel.Enabled,
+			"webhook": channel.WebhookURL, "events": channel.Events, "by": channel.By,
+		})
+	if err != nil {
+		return NotificationChannel{}, err
+	}
+	node, _ := res.Records[0].Get("n")
+	return toNotificationChannel(node.(neo4j.Node).Props), nil
+}
+
+// DeleteNotificationChannel removes an override so the project uses the default again.
+func (s *Store) DeleteNotificationChannel(ctx context.Context, project string) error {
+	res, err := s.query(ctx, `
+		MATCH (n:NotificationChannel {project: $project})
+		WITH n, count(*) AS found
+		DELETE n
+		RETURN found`, map[string]any{"project": project})
+	if err != nil {
+		return err
+	}
+	if len(res.Records) == 0 || recInt64(res.Records[0], "found") == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// NotificationSettingsFor resolves the project override, then falls back to the default channel.
+func (s *Store) NotificationSettingsFor(ctx context.Context, project string) (NotificationSettings, error) {
+	if project != "" {
+		channel, err := s.NotificationChannel(ctx, project)
+		if err == nil {
+			return NotificationSettings{
+				Enabled: channel.Enabled, WebhookURL: channel.WebhookURL, Events: channel.Events,
+				By: channel.By, UpdatedAt: channel.UpdatedAt,
+			}, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return NotificationSettings{}, err
+		}
+	}
+	return s.NotificationSettings(ctx)
+}
+
+// NotificationSettings returns the saved default channel, or defaults when nothing is saved.
 func (s *Store) NotificationSettings(ctx context.Context) (NotificationSettings, error) {
 	res, err := s.query(ctx, `MATCH (n:NotificationConfig {id: 'default'}) RETURN n`, nil)
 	if err != nil {
@@ -184,6 +276,14 @@ func toContractSource(p map[string]any) ContractSource {
 		src.LastCheckedAt = &at
 	}
 	return src
+}
+
+func toNotificationChannel(p map[string]any) NotificationChannel {
+	return NotificationChannel{
+		Project: str(p, "project"), Enabled: boolValue(p["enabled"]),
+		WebhookURL: str(p, "webhookUrl"), Events: strs(p, "events"),
+		By: str(p, "by"), UpdatedAt: local(p["updatedAt"]),
+	}
 }
 
 func toNotificationSettings(p map[string]any) NotificationSettings {

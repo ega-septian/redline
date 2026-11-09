@@ -57,6 +57,11 @@ type Store interface {
 	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
 	NotificationSettings(ctx context.Context) (store.NotificationSettings, error)
 	SetNotificationSettings(ctx context.Context, settings store.NotificationSettings) (store.NotificationSettings, error)
+	NotificationSettingsFor(ctx context.Context, project string) (store.NotificationSettings, error)
+	NotificationChannels(ctx context.Context) ([]store.NotificationChannel, error)
+	NotificationChannel(ctx context.Context, project string) (store.NotificationChannel, error)
+	SetNotificationChannel(ctx context.Context, channel store.NotificationChannel) (store.NotificationChannel, error)
+	DeleteNotificationChannel(ctx context.Context, project string) error
 	RecordNotificationDelivery(ctx context.Context, delivery store.NotificationDelivery) error
 	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
 	NotificationDeliveries(ctx context.Context, limit int) ([]store.NotificationDelivery, error)
@@ -168,6 +173,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/contracts/validate", s.handleValidateSource)
 	mux.HandleFunc("POST /api/config/contracts/check", s.handleCheckContract)
 	mux.HandleFunc("PUT /api/config/notifications", s.handleSaveNotifications)
+	mux.HandleFunc("PUT /api/config/notifications/projects/{project}", s.handleSaveNotificationChannel)
+	mux.HandleFunc("DELETE /api/config/notifications/projects/{project}", s.handleDeleteNotificationChannel)
 	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
 	mux.HandleFunc("GET /api/config/notifications/deliveries", s.handleNotificationDeliveries)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,68 +15,89 @@ import (
 
 const notificationColor = 0xE5484D
 
-// notifyRun sends one summary per run. It runs in the background; a slow or broken webhook must not
-// block the reporter. Only new and regressed failures are delivered.
+// notifyRun sends one summary per project, using that project's channel or the default. It runs in
+// the background; a slow or broken webhook must not block the reporter. Only new and regressed
+// failures are delivered.
 func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
-	settings, err := s.Store.NotificationSettings(context.Background())
-	if err != nil {
-		s.logWarn("notifikasi tidak bisa membaca settings", "run", res.RunID, "err", err)
-		return
+	newByProject := map[string][]store.GroupChange{}
+	regressedByProject := map[string][]store.GroupChange{}
+	for _, change := range res.New {
+		newByProject[change.Project] = append(newByProject[change.Project], change)
 	}
-	if !settings.Enabled || settings.WebhookURL == "" {
-		return
+	for _, change := range res.Regressed {
+		regressedByProject[change.Project] = append(regressedByProject[change.Project], change)
 	}
-	events := map[string]bool{}
-	for _, event := range settings.Events {
-		events[event] = true
+	projects := make([]string, 0, len(newByProject)+len(regressedByProject))
+	seen := map[string]bool{}
+	for project := range newByProject {
+		if !seen[project] {
+			seen[project] = true
+			projects = append(projects, project)
+		}
 	}
-	changes := make([]store.GroupChange, 0, len(res.New)+len(res.Regressed))
-	parts := make([]string, 0, 2)
-	selected := make([]string, 0, 2)
-	if len(res.New) > 0 && events["new_failure"] {
-		changes = append(changes, res.New...)
-		parts = append(parts, fmt.Sprintf("%d new", len(res.New)))
-		selected = append(selected, "new_failure")
+	for project := range regressedByProject {
+		if !seen[project] {
+			seen[project] = true
+			projects = append(projects, project)
+		}
 	}
-	if len(res.Regressed) > 0 && events["regressed"] {
-		changes = append(changes, res.Regressed...)
-		parts = append(parts, fmt.Sprintf("%d regressed", len(res.Regressed)))
-		selected = append(selected, "regressed")
-	}
-	if len(changes) == 0 {
-		return
-	}
+	sort.Strings(projects)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
-		notificationMessage(meta, res, changes, parts))
-	delivery := store.NotificationDelivery{
-		At: time.Now(), Event: strings.Join(selected, "+"), RunID: res.RunID,
-		OK: sendErr == nil, StatusCode: status, Attempts: attempts,
-	}
-	if sendErr != nil {
-		delivery.Error = sendErr.Error()
-		s.logWarn("notifikasi gagal", "run", res.RunID, "err", sendErr)
-	}
-	recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer recordCancel()
-	if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
-		s.logWarn("delivery log gagal disimpan", "run", res.RunID, "err", err)
+	for _, project := range projects {
+		settings, err := s.Store.NotificationSettingsFor(context.Background(), project)
+		if err != nil {
+			s.logWarn("notifikasi tidak bisa membaca settings", "run", res.RunID, "project", project, "err", err)
+			continue
+		}
+		if !settings.Enabled || settings.WebhookURL == "" {
+			continue
+		}
+		events := map[string]bool{}
+		for _, event := range settings.Events {
+			events[event] = true
+		}
+		changes := make([]store.GroupChange, 0, len(newByProject[project])+len(regressedByProject[project]))
+		parts := make([]string, 0, 2)
+		selected := make([]string, 0, 2)
+		if len(newByProject[project]) > 0 && events["new_failure"] {
+			changes = append(changes, newByProject[project]...)
+			parts = append(parts, fmt.Sprintf("%d new", len(newByProject[project])))
+			selected = append(selected, "new_failure")
+		}
+		if len(regressedByProject[project]) > 0 && events["regressed"] {
+			changes = append(changes, regressedByProject[project]...)
+			parts = append(parts, fmt.Sprintf("%d regressed", len(regressedByProject[project])))
+			selected = append(selected, "regressed")
+		}
+		if len(changes) == 0 {
+			continue
+		}
+
+		failed, flaky := notificationCounts(res, project)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
+			notificationMessage(meta, res, changes, parts, project, failed, flaky))
+		cancel()
+		delivery := store.NotificationDelivery{
+			At: time.Now(), Event: strings.Join(selected, "+"), Project: project, RunID: res.RunID,
+			OK: sendErr == nil, StatusCode: status, Attempts: attempts,
+		}
+		if sendErr != nil {
+			delivery.Error = sendErr.Error()
+			s.logWarn("notifikasi gagal", "run", res.RunID, "project", project, "err", sendErr)
+		}
+		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
+			s.logWarn("delivery log gagal disimpan", "run", res.RunID, "project", project, "err", err)
+		}
+		recordCancel()
 	}
 }
 
-// notifyExpiring posts one summary for active quarantines that end within 24 hours and have not been
-// announced for their current until value. It is called after every ingest, so it needs no scheduler.
+// notifyExpiring posts one summary per project for active quarantines that end within 24 hours and
+// have not been announced for their current until value. It is called after every ingest, so it
+// needs no scheduler.
 func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
-	settings, err := s.Store.NotificationSettings(context.Background())
-	if err != nil {
-		s.logWarn("expiry notification tidak bisa membaca settings", "run", runID, "err", err)
-		return
-	}
-	if !settings.Enabled || settings.WebhookURL == "" || !contains(settings.Events, "quarantine_expiring") {
-		return
-	}
 	expiring, err := s.Store.ExpiringQuarantines(context.Background(), 24*time.Hour)
 	if err != nil {
 		s.logWarn("expiry notification gagal membaca quarantine", "run", runID, "err", err)
@@ -84,37 +106,58 @@ func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
 	if len(expiring) == 0 {
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
-		quarantineExpiryMessage(meta, runID, expiring))
-	delivery := store.NotificationDelivery{
-		At: time.Now(), Event: "quarantine_expiring", RunID: runID,
-		OK: sendErr == nil, StatusCode: status, Attempts: attempts,
-	}
-	if sendErr != nil {
-		delivery.Error = sendErr.Error()
-		s.logWarn("expiry notification gagal", "run", runID, "err", sendErr)
-	}
-	recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer recordCancel()
-	if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
-		s.logWarn("delivery log gagal disimpan", "run", runID, "err", err)
-	}
-	if sendErr != nil {
-		return
-	}
-	keys := make([]string, 0, len(expiring))
+	byProject := map[string][]store.Quarantine{}
 	for _, quarantine := range expiring {
-		keys = append(keys, quarantine.Key)
+		byProject[quarantine.Project] = append(byProject[quarantine.Project], quarantine)
 	}
-	if err := s.Store.MarkQuarantineExpiryNotified(recordCtx, keys); err != nil {
-		s.logWarn("expiry notification tidak bisa ditandai", "run", runID, "err", err)
+	projects := make([]string, 0, len(byProject))
+	for project := range byProject {
+		projects = append(projects, project)
+	}
+	sort.Strings(projects)
+
+	for _, project := range projects {
+		settings, err := s.Store.NotificationSettingsFor(context.Background(), project)
+		if err != nil {
+			s.logWarn("expiry notification tidak bisa membaca settings", "run", runID, "project", project, "err", err)
+			continue
+		}
+		if !settings.Enabled || settings.WebhookURL == "" || !contains(settings.Events, "quarantine_expiring") {
+			continue
+		}
+		list := byProject[project]
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL,
+			quarantineExpiryMessage(meta, runID, list, project))
+		cancel()
+		delivery := store.NotificationDelivery{
+			At: time.Now(), Event: "quarantine_expiring", Project: project, RunID: runID,
+			OK: sendErr == nil, StatusCode: status, Attempts: attempts,
+		}
+		if sendErr != nil {
+			delivery.Error = sendErr.Error()
+			s.logWarn("expiry notification gagal", "run", runID, "project", project, "err", sendErr)
+		}
+		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
+			s.logWarn("delivery log gagal disimpan", "run", runID, "project", project, "err", err)
+		}
+		if sendErr != nil {
+			recordCancel()
+			continue
+		}
+		keys := make([]string, 0, len(list))
+		for _, quarantine := range list {
+			keys = append(keys, quarantine.Key)
+		}
+		if err := s.Store.MarkQuarantineExpiryNotified(recordCtx, keys); err != nil {
+			s.logWarn("expiry notification tidak bisa ditandai", "run", runID, "project", project, "err", err)
+		}
+		recordCancel()
 	}
 }
 
-func quarantineExpiryMessage(meta store.RunMeta, runID int64, expiring []store.Quarantine) notify.Message {
+func quarantineExpiryMessage(meta store.RunMeta, runID int64, expiring []store.Quarantine, project string) notify.Message {
 	noun, verb := "quarantines", "expire"
 	if len(expiring) == 1 {
 		noun, verb = "quarantine", "expires"
@@ -152,16 +195,20 @@ func quarantineExpiryMessage(meta store.RunMeta, runID int64, expiring []store.Q
 	if branch == "" {
 		branch = "—"
 	}
+	fields := []notify.Field{
+		{Name: "Branch", Value: branch, Inline: true},
+		{Name: "Commit", Value: commit, Inline: true},
+		{Name: "Expiring", Value: fmt.Sprintf("%d", len(expiring)), Inline: true},
+	}
+	if project != "" {
+		fields = append(fields, notify.Field{Name: "Project", Value: project, Inline: true})
+	}
 	return notify.Message{
 		Title:       title,
 		Description: body.String(),
 		Color:       0xD29922,
-		Fields: []notify.Field{
-			{Name: "Branch", Value: branch, Inline: true},
-			{Name: "Commit", Value: commit, Inline: true},
-			{Name: "Expiring", Value: fmt.Sprintf("%d", len(expiring)), Inline: true},
-		},
-		Footer: fmt.Sprintf("Redline · run #%d", runID),
+		Fields:      fields,
+		Footer:      fmt.Sprintf("Redline · run #%d", runID),
 	}
 }
 
@@ -219,11 +266,34 @@ func (s *Server) sendNotification(
 	return attempts, status, err
 }
 
+func notificationCounts(res *store.IngestResult, project string) (failed, flaky int) {
+	if project == "" {
+		return res.Failed, res.Flaky
+	}
+	for _, list := range [][]store.GroupChange{res.New, res.Regressed, res.Recurring} {
+		for _, change := range list {
+			if change.Project == project {
+				failed++
+			}
+		}
+	}
+	prefix := project + " › "
+	for _, key := range res.FlakyTests {
+		if strings.HasPrefix(key, prefix) {
+			flaky++
+		}
+	}
+	return failed, flaky
+}
+
 func notificationMessage(
 	meta store.RunMeta,
 	res *store.IngestResult,
 	changes []store.GroupChange,
 	parts []string,
+	project string,
+	failed int,
+	flaky int,
 ) notify.Message {
 	title := fmt.Sprintf("Redline: %s in run #%d", strings.Join(parts, " + "), res.RunID)
 
@@ -264,18 +334,22 @@ func notificationMessage(
 		source = "local"
 	}
 
+	fields := []notify.Field{
+		{Name: "Branch", Value: branch, Inline: true},
+		{Name: "Commit", Value: commit, Inline: true},
+		{Name: "Source", Value: source, Inline: true},
+		{Name: "Failed", Value: fmt.Sprintf("%d", failed), Inline: true},
+		{Name: "Flaky", Value: fmt.Sprintf("%d", flaky), Inline: true},
+	}
+	if project != "" {
+		fields = append(fields, notify.Field{Name: "Project", Value: project, Inline: true})
+	}
 	return notify.Message{
 		Title:       title,
 		Description: body.String(),
 		Color:       notificationColor,
-		Fields: []notify.Field{
-			{Name: "Branch", Value: branch, Inline: true},
-			{Name: "Commit", Value: commit, Inline: true},
-			{Name: "Source", Value: source, Inline: true},
-			{Name: "Failed", Value: fmt.Sprintf("%d", res.Failed), Inline: true},
-			{Name: "Flaky", Value: fmt.Sprintf("%d", res.Flaky), Inline: true},
-		},
-		Footer: fmt.Sprintf("Redline · run #%d", res.RunID),
+		Fields:      fields,
+		Footer:      fmt.Sprintf("Redline · run #%d", res.RunID),
 	}
 }
 
