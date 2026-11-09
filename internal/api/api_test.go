@@ -23,6 +23,7 @@ import (
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
+	"redline/internal/triage"
 )
 
 type fakeStore struct {
@@ -104,6 +105,28 @@ func (f *fakeStore) LoadErrors(_ context.Context, limit int) ([]store.LoadError,
 		out = out[:limit]
 	}
 	return out, nil
+}
+func (f *fakeStore) LoadError(_ context.Context, id string) (store.LoadError, error) {
+	for _, item := range f.loadErrors {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return store.LoadError{}, store.ErrNotFound
+}
+func (f *fakeStore) SetLoadErrorAnalysis(_ context.Context, id string, analysis triage.LoadErrorAnalysis) error {
+	for i := range f.loadErrors {
+		if f.loadErrors[i].ID != id {
+			continue
+		}
+		f.loadErrors[i].Category = analysis.Category
+		f.loadErrors[i].Confidence = analysis.Confidence
+		f.loadErrors[i].AnalysisSource = analysis.Source
+		f.loadErrors[i].Summary = analysis.Summary
+		f.loadErrors[i].NextStep = analysis.NextStep
+		return nil
+	}
+	return store.ErrNotFound
 }
 func (f *fakeStore) SetLoadErrorTriage(_ context.Context, id, status, owner, note, by string) error {
 	for i := range f.loadErrors {
@@ -2088,5 +2111,15 @@ func TestLoadErrorAPI(t *testing.T) {
 	if rec := do(h, http.MethodPut, "/api/load-errors/missing/triage",
 		strings.NewReader(`{"status":"open","owner":"ega"}`)); rec.Code != http.StatusNotFound {
 		t.Errorf("triage missing = %d, want 404", rec.Code)
+	}
+
+	fs.loadErrors[0].Category = ""
+	rec = do(h, http.MethodPost, "/api/load-errors/le-1/analyze", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"category": "test_bug"`) ||
+		fs.loadErrors[0].Summary == "" || fs.loadErrors[0].AnalysisSource != "rule" {
+		t.Errorf("analyze load error = %d: %s -> %+v", rec.Code, rec.Body, fs.loadErrors[0])
+	}
+	if rec := do(h, http.MethodPost, "/api/load-errors/missing/analyze", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("analyze missing = %d, want 404", rec.Code)
 	}
 }

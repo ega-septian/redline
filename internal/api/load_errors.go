@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"redline/internal/store"
+	"redline/internal/triage"
 )
 
 // handleListLoadErrors: GET /api/load-errors?limit=50
@@ -59,4 +60,29 @@ func (s *Server) handleTriageLoadError(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": body.Status, "owner": body.Owner, "note": body.Note, "by": by,
 	})
+}
+
+// handleAnalyzeLoadError: POST /api/load-errors/{id}/analyze. Re-runs the deterministic rules for
+// groups created before analysis was stored on ingest.
+func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	item, err := s.Store.LoadError(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "load error tidak ditemukan")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	analysis := triage.AnalyzeLoadError(item.Message)
+	if err := s.Store.SetLoadErrorAnalysis(r.Context(), id, analysis); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "load error tidak ditemukan")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, analysis)
 }

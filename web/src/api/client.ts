@@ -108,6 +108,11 @@ export const api = {
     ),
   runErrors: (limit = 20) => request<ApiRun[]>(`/api/runs/errors?limit=${limit}`),
   loadErrors: (limit = 50) => request<ApiLoadError[]>(`/api/load-errors?limit=${limit}`),
+  analyzeLoadError: (id: string) =>
+    request<{ category: string; confidence: string; source: string; summary: string; next_step: string }>(
+      `/api/load-errors/${encodeURIComponent(id)}/analyze`,
+      { method: "POST", headers: { "X-CSRF-Token": csrfToken() } },
+    ),
   triageLoadError: (
     id: string,
     input: { status: string; owner: string; note: string },

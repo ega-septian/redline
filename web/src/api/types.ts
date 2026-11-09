@@ -339,6 +339,12 @@ export type ApiLoadError = {
   triage_note?: string;
   triage_updated_by?: string;
   triage_updated_at?: string | null;
+  category?: string;
+  confidence?: string;
+  analysis_source?: string;
+  summary?: string;
+  next_step?: string;
+  analyzed_at?: string | null;
 };
 
 export type ApiQuarantine = {
