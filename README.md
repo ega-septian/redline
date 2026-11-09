@@ -84,7 +84,7 @@ docker compose --profile full up -d
 Install the package, pinned to a release (use the same tag as your server):
 
 ```bash
-npm i -D github:ega-septian/redline#v1.8.0
+npm i -D github:ega-septian/redline#v1.9.0
 ```
 
 Add the reporter **after** the JSON reporter in `playwright.config.ts`:
@@ -564,6 +564,7 @@ failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
+| `v1.9.0` | Per-run test health trend on the Health page, with pass/fail/flaky history |
 | `v1.8.0` | Slowest tests and duration regressions on the Health page, with lazy-loaded Health |
 | `v1.7.0` | Contract source check history and triage aging/ownership on the Failures page |
 | `v1.6.0` | Per-project notification channels, with the default channel as fallback and project-aware delivery history |
