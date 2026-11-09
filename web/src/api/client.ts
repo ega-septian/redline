@@ -134,7 +134,10 @@ export const api = {
     ),
   testHistory: (test: string, days: number) =>
     request<TestHistory>(`/api/tests/history?test=${encodeURIComponent(test)}&days=${days}`),
-  quarantines: () => request<ApiQuarantine[]>("/api/tests/quarantine"),
+  quarantines: (project = "") =>
+    request<ApiQuarantine[]>(
+      `/api/tests/quarantine${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    ),
   quarantine: (input: { test: string; owner: string; reason: string; days: number }) =>
     request<ApiQuarantine>("/api/tests/quarantine", {
       method: "PUT",

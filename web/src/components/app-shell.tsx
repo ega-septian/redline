@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Layers,
   Settings2,
+  ShieldOff,
   Sparkles,
   Waypoints,
   type LucideIcon,
@@ -26,11 +27,24 @@ async function fetchHealth(): Promise<Health> {
   return (await response.json()) as Health;
 }
 
+const pages = [
+  { path: "/overview", title: "Overview", subtitle: "quality at a glance" },
+  { path: "/runs", title: "Runs", subtitle: "recent runs" },
+  { path: "/health", title: "Health", subtitle: "test health and stability" },
+  { path: "/quarantine", title: "Quarantine", subtitle: "active exceptions and expiry" },
+  { path: "/impact", title: "Impact", subtitle: "graph" },
+  { path: "/coverage", title: "Coverage", subtitle: "contract vs tests" },
+  { path: "/rules", title: "Rules", subtitle: "learned from proven cases" },
+  { path: "/scoreboard", title: "Scoreboard", subtitle: "accuracy" },
+  { path: "/config", title: "Config", subtitle: "contract sources and notifications" },
+] as const;
+
 const nav = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" as const },
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
   { label: "Health", icon: Activity, to: "/health" as const },
+  { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
   { label: "Coverage", icon: Layers, to: "/coverage" as const },
   { label: "Rules", icon: Sparkles, to: "/rules" as const },
@@ -54,41 +68,9 @@ export function AppShell() {
     item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
   );
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const title = pathname.startsWith("/overview")
-    ? "Overview"
-    : pathname.startsWith("/runs")
-      ? "Runs"
-      : pathname.startsWith("/health")
-        ? "Health"
-        : pathname.startsWith("/impact")
-          ? "Impact"
-          : pathname.startsWith("/coverage")
-            ? "Coverage"
-            : pathname.startsWith("/rules")
-              ? "Rules"
-              : pathname.startsWith("/scoreboard")
-                ? "Scoreboard"
-                : pathname.startsWith("/config")
-                  ? "Config"
-                  : "Failures";
-  const subtitle =
-    title === "Overview"
-      ? "quality at a glance"
-      : title === "Failures"
-        ? "open failures"
-        : title === "Runs"
-          ? "recent runs"
-          : title === "Health"
-            ? "test health and stability"
-            : title === "Impact"
-              ? "graph"
-              : title === "Coverage"
-                ? "contract vs tests"
-                : title === "Rules"
-                  ? "learned from proven cases"
-                  : title === "Config"
-                    ? "contract sources and notifications"
-                    : "accuracy";
+  const currentPage = pages.find((page) => pathname.startsWith(page.path));
+  const title = currentPage?.title ?? "Failures";
+  const subtitle = currentPage?.subtitle ?? "open failures";
 
   function isActive(to?: string) {
     return to === "/" ? pathname === "/" : !!to && pathname.startsWith(to);
@@ -134,7 +116,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 6).map((item) => (
+          {items.slice(0, 7).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -144,7 +126,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {items.slice(6, 8).map((item) => (
+          {items.slice(7, 9).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -154,7 +136,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Settings
           </div>
-          {items.slice(8).map((item) => (
+          {items.slice(9).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -226,6 +208,7 @@ function NavItem({
     | "/overview"
     | "/runs"
     | "/health"
+    | "/quarantine"
     | "/impact"
     | "/coverage"
     | "/rules"

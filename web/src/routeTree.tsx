@@ -50,6 +50,12 @@ const healthRoute = createRoute({
   component: HealthPage,
 });
 
+const quarantineRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/quarantine",
+  component: lazyRouteComponent(() => import("@/pages/quarantine"), "QuarantinePage"),
+});
+
 const impactRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/impact",
@@ -86,6 +92,7 @@ export const routeTree = rootRoute.addChildren([
   runsRoute,
   runDetailRoute,
   healthRoute,
+  quarantineRoute,
   impactRoute,
   coverageRoute,
   configRoute,
