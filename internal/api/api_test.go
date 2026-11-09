@@ -37,6 +37,7 @@ type fakeStore struct {
 	quarantineReleased bool
 	sources            []store.ContractSource
 	notifications      store.NotificationSettings
+	channels           map[string]store.NotificationChannel
 	healthRows         []store.TestHealthRow
 	dismissals         map[string]time.Time
 	dismissed          string
@@ -329,6 +330,45 @@ func (f *fakeStore) SetNotificationSettings(_ context.Context, settings store.No
 	settings.UpdatedAt = time.Now()
 	f.notifications = settings
 	return settings, nil
+}
+func (f *fakeStore) NotificationSettingsFor(_ context.Context, project string) (store.NotificationSettings, error) {
+	if project != "" {
+		if channel, ok := f.channels[project]; ok {
+			return store.NotificationSettings{
+				Enabled: channel.Enabled, WebhookURL: channel.WebhookURL,
+				Events: channel.Events, By: channel.By, UpdatedAt: channel.UpdatedAt,
+			}, nil
+		}
+	}
+	return f.NotificationSettings(context.Background())
+}
+func (f *fakeStore) NotificationChannels(context.Context) ([]store.NotificationChannel, error) {
+	out := make([]store.NotificationChannel, 0, len(f.channels))
+	for _, channel := range f.channels {
+		out = append(out, channel)
+	}
+	return out, nil
+}
+func (f *fakeStore) NotificationChannel(_ context.Context, project string) (store.NotificationChannel, error) {
+	if channel, ok := f.channels[project]; ok {
+		return channel, nil
+	}
+	return store.NotificationChannel{}, store.ErrNotFound
+}
+func (f *fakeStore) SetNotificationChannel(_ context.Context, channel store.NotificationChannel) (store.NotificationChannel, error) {
+	if f.channels == nil {
+		f.channels = map[string]store.NotificationChannel{}
+	}
+	channel.UpdatedAt = time.Now()
+	f.channels[channel.Project] = channel
+	return channel, nil
+}
+func (f *fakeStore) DeleteNotificationChannel(_ context.Context, project string) error {
+	if _, ok := f.channels[project]; !ok {
+		return store.ErrNotFound
+	}
+	delete(f.channels, project)
+	return nil
 }
 func (f *fakeStore) ListGroupsForProject(_ context.Context, statuses []string, limit int, project string) ([]store.Group, error) {
 	f.lastGroupProject = project
@@ -1334,6 +1374,112 @@ func TestTestNotificationFailure(t *testing.T) {
 	}
 }
 
+func TestNotificationChannels(t *testing.T) {
+	fs := &fakeStore{}
+	srv, h := configServer(fs)
+	notifier := &fakeNotifier{}
+	srv.Notifier = notifier
+
+	rec := do(h, http.MethodGet, "/api/config", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"notification_channels": []`) {
+		t.Errorf("config tanpa channel = %d: %s", rec.Code, rec.Body)
+	}
+
+	rec = do(h, http.MethodPut, "/api/config/notifications/projects/toolshop", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://discord.test/toolshop","events":["new_failure"]}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"project": "toolshop"`) ||
+		!strings.Contains(rec.Body.String(), `"webhook_set": true`) {
+		t.Fatalf("save project channel = %d: %s", rec.Code, rec.Body)
+	}
+	if fs.channels["toolshop"].WebhookURL != "https://discord.test/toolshop" {
+		t.Errorf("channel tidak tersimpan: %+v", fs.channels)
+	}
+	rec = do(h, http.MethodPut, "/api/config/notifications/projects/toolshop", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://discord.test/••••","events":["new_failure","regressed"]}`))
+	if rec.Code != http.StatusOK || fs.channels["toolshop"].WebhookURL != "https://discord.test/toolshop" {
+		t.Errorf("masked round-trip menghapus webhook: %d %+v", rec.Code, fs.channels)
+	}
+
+	rec = do(h, http.MethodGet, "/api/config", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"project": "toolshop"`) {
+		t.Errorf("config tanpa channel project = %d: %s", rec.Code, rec.Body)
+	}
+
+	rec = do(h, http.MethodPost, "/api/config/notifications/test?project=toolshop", nil)
+	if rec.Code != http.StatusOK || notifier.webhook != "https://discord.test/toolshop" {
+		t.Errorf("test channel project = %d webhook=%q: %s", rec.Code, notifier.webhook, rec.Body)
+	}
+	if len(fs.deliveries) != 1 || fs.deliveries[0].Project != "toolshop" {
+		t.Errorf("delivery project tidak tercatat: %+v", fs.deliveries)
+	}
+
+	if rec := do(h, http.MethodPut, "/api/config/notifications/projects/bad%20project!", strings.NewReader(
+		`{"enabled":true,"webhook_url":"https://discord.test/x","events":["new_failure"]}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("project invalid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPut, "/api/config/notifications/projects/toolshop", strings.NewReader(
+		`{"enabled":true,"webhook_url":"","events":["new_failure"]}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("project channel tanpa webhook = %d, want 400", rec.Code)
+	}
+
+	if rec := do(h, http.MethodDelete, "/api/config/notifications/projects/toolshop", nil); rec.Code != http.StatusOK {
+		t.Errorf("delete project channel = %d: %s", rec.Code, rec.Body)
+	}
+	if _, ok := fs.channels["toolshop"]; ok {
+		t.Error("project channel masih ada setelah delete")
+	}
+	if rec := do(h, http.MethodDelete, "/api/config/notifications/projects/toolshop", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("delete channel kedua = %d, want 404", rec.Code)
+	}
+}
+
+func TestIngestUsesProjectNotificationChannel(t *testing.T) {
+	fs := &fakeStore{
+		ingest: &store.IngestResult{
+			RunID: 8, Total: 2, Failed: 2,
+			New: []store.GroupChange{
+				{Fingerprint: "fp-a", TestKey: "toolshop › a.spec.ts › one", Project: "toolshop", Error: "boom"},
+				{Fingerprint: "fp-b", TestKey: "web › b.spec.ts › two", Project: "web", Error: "boom"},
+			},
+		},
+		notifications: store.NotificationSettings{
+			Enabled: true, WebhookURL: "https://discord.test/default",
+			Events: []string{"new_failure"},
+		},
+		channels: map[string]store.NotificationChannel{
+			"toolshop": {Project: "toolshop", Enabled: true, WebhookURL: "https://discord.test/toolshop",
+				Events: []string{"new_failure"}},
+			"web": {Project: "web", Enabled: false, WebhookURL: "https://discord.test/web",
+				Events: []string{"new_failure"}},
+		},
+	}
+	notifier := &fakeNotifier{ch: make(chan struct{}, 2)}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	f, _ := os.Open("../report/testdata/run1-bug.json")
+	defer f.Close()
+	rec := do(srv.Routes(), http.MethodPost, "/api/runs?source=ci&branch=main", f)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ingest = %d: %s", rec.Code, rec.Body)
+	}
+	select {
+	case <-notifier.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("notifier tidak dipanggil")
+	}
+	if notifier.calls != 1 || notifier.webhook != "https://discord.test/toolshop" {
+		t.Errorf("routing channel salah: calls=%d webhook=%q", notifier.calls, notifier.webhook)
+	}
+	if !strings.Contains(notifier.message.Description, "fp-a") && !strings.Contains(notifier.message.Description, "one") {
+		t.Errorf("message project toolshop salah: %+v", notifier.message)
+	}
+	if len(fs.deliveries) != 1 || fs.deliveries[0].Project != "toolshop" {
+		t.Errorf("delivery project salah: %+v", fs.deliveries)
+	}
+}
+
 func TestIngestSendsDiscordNotification(t *testing.T) {
 	fs := &fakeStore{
 		ingest: &store.IngestResult{
@@ -1506,6 +1652,54 @@ func TestIngestSendsQuarantineExpiryNotification(t *testing.T) {
 	if len(fs.deliveries) != 1 || fs.deliveries[0].Event != "quarantine_expiring" ||
 		!fs.deliveries[0].OK {
 		t.Errorf("delivery expiry tidak tercatat: %+v", fs.deliveries)
+	}
+}
+
+func TestExpiryNotificationUsesProjectChannel(t *testing.T) {
+	fs := &fakeStore{
+		ingest: &store.IngestResult{RunID: 7, Total: 1, Passed: 1},
+		expiring: []store.Quarantine{
+			{Key: "TC-A", TestCaseID: "TC-A", Project: "toolshop", Owner: "ega", Until: time.Now().Add(12 * time.Hour)},
+			{Key: "TC-B", TestCaseID: "TC-B", Project: "web", Owner: "ega", Until: time.Now().Add(18 * time.Hour)},
+		},
+		notifications: store.NotificationSettings{
+			Enabled: true, WebhookURL: "https://discord.test/default",
+			Events: []string{"quarantine_expiring"},
+		},
+		channels: map[string]store.NotificationChannel{
+			"toolshop": {Project: "toolshop", Enabled: true, WebhookURL: "https://discord.test/toolshop",
+				Events: []string{"quarantine_expiring"}},
+			"web": {Project: "web", Enabled: false, Events: []string{"quarantine_expiring"}},
+		},
+	}
+	notifier := &fakeNotifier{ch: make(chan struct{}, 2)}
+	srv := &Server{
+		Store: fs, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Notifier: notifier,
+	}
+	f, _ := os.Open("../report/testdata/run2-fixed.json")
+	defer f.Close()
+	rec := do(srv.Routes(), http.MethodPost, "/api/runs?source=ci", f)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ingest = %d: %s", rec.Code, rec.Body)
+	}
+	select {
+	case <-notifier.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expiry notifier tidak dipanggil")
+	}
+	if notifier.calls != 1 || notifier.webhook != "https://discord.test/toolshop" {
+		t.Errorf("routing expiry salah: calls=%d webhook=%q", notifier.calls, notifier.webhook)
+	}
+	deadline := time.Now().Add(time.Second)
+	for (len(fs.deliveries) == 0 || len(fs.expiryMarked) == 0) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(fs.deliveries) != 1 || fs.deliveries[0].Project != "toolshop" {
+		t.Errorf("delivery expiry project salah: %+v", fs.deliveries)
+	}
+	if len(fs.expiryMarked) != 1 || fs.expiryMarked[0] != "TC-A" {
+		t.Errorf("hanya quarantine toolshop yang boleh ditandai: %+v", fs.expiryMarked)
 	}
 }
 

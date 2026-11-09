@@ -52,9 +52,21 @@ type notificationView struct {
 	LastDelivery    *store.NotificationDelivery `json:"last_delivery,omitempty"`
 }
 
+type notificationChannelView struct {
+	Project         string     `json:"project"`
+	Enabled         bool       `json:"enabled"`
+	WebhookURL      string     `json:"webhook_url"`
+	WebhookSet      bool       `json:"webhook_set"`
+	Events          []string   `json:"events"`
+	AvailableEvents []string   `json:"available_events"`
+	By              string     `json:"by,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
+}
+
 type configView struct {
-	Contracts     []contractSourceView `json:"contracts"`
-	Notifications notificationView     `json:"notifications"`
+	Contracts            []contractSourceView      `json:"contracts"`
+	Notifications        notificationView          `json:"notifications"`
+	NotificationChannels []notificationChannelView `json:"notification_channels"`
 }
 
 // handleGetConfig: GET /api/config — every stored contract source and the notification settings.
@@ -80,7 +92,19 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, configView{Contracts: rows, Notifications: notificationOut(settings, lastDelivery)})
+	channels, err := s.Store.NotificationChannels(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	channelRows := make([]notificationChannelView, 0, len(channels))
+	for _, channel := range channels {
+		channelRows = append(channelRows, notificationChannelOut(channel))
+	}
+	writeJSON(w, http.StatusOK, configView{
+		Contracts: rows, Notifications: notificationOut(settings, lastDelivery),
+		NotificationChannels: channelRows,
+	})
 }
 
 // handleValidateSource: POST /api/config/contracts/validate — check a URL without saving it.
@@ -201,14 +225,47 @@ func (s *Server) handleCheckContract(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, check)
 }
 
-// handleSaveNotifications: PUT /api/config/notifications — saved config only; delivery is not wired.
-func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Enabled    bool     `json:"enabled"`
-		WebhookURL string   `json:"webhook_url"`
-		Events     []string `json:"events"`
-		By         string   `json:"by"`
+type notificationInput struct {
+	Enabled    bool     `json:"enabled"`
+	WebhookURL string   `json:"webhook_url"`
+	Events     []string `json:"events"`
+	By         string   `json:"by"`
+}
+
+// prepareNotification validates a channel body and preserves a masked webhook from the current one.
+func (s *Server) prepareNotification(body notificationInput, currentWebhook string) (webhook string, events []string, err error) {
+	webhook = strings.TrimSpace(body.WebhookURL)
+	if strings.Contains(webhook, "••••") {
+		webhook = currentWebhook
 	}
+	if len(webhook) > 2048 {
+		return "", nil, errors.New("webhook_url terlalu panjang (maks 2048 karakter)")
+	}
+	if webhook != "" {
+		parsed, err := url.Parse(webhook)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return "", nil, errors.New("webhook_url harus http(s)://host/path")
+		}
+		if blockedNotificationHost(parsed.Hostname()) {
+			return "", nil, errors.New("host webhook ini tidak diizinkan (alamat metadata cloud)")
+		}
+	}
+	events, err = normalizeEvents(body.Events)
+	if err != nil {
+		return "", nil, err
+	}
+	if body.Enabled && webhook == "" {
+		return "", nil, errors.New("webhook_url wajib diisi kalau notifications diaktifkan")
+	}
+	if body.Enabled && len(events) == 0 {
+		return "", nil, errors.New("pilih minimal satu event kalau notifications diaktifkan")
+	}
+	return webhook, events, nil
+}
+
+// handleSaveNotifications: PUT /api/config/notifications — the default channel.
+func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request) {
+	var body notificationInput
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "body harus JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
 		return
@@ -218,36 +275,9 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 		s.serverError(w, err)
 		return
 	}
-	webhook := strings.TrimSpace(body.WebhookURL)
-	if strings.Contains(webhook, "••••") {
-		webhook = current.WebhookURL
-	}
-	if len(webhook) > 2048 {
-		writeError(w, http.StatusBadRequest, "webhook_url terlalu panjang (maks 2048 karakter)")
-		return
-	}
-	if webhook != "" {
-		parsed, err := url.Parse(webhook)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			writeError(w, http.StatusBadRequest, "webhook_url harus http(s)://host/path")
-			return
-		}
-		if blockedNotificationHost(parsed.Hostname()) {
-			writeError(w, http.StatusBadRequest, "host webhook ini tidak diizinkan (alamat metadata cloud)")
-			return
-		}
-	}
-	events, err := normalizeEvents(body.Events)
+	webhook, events, err := s.prepareNotification(body, current.WebhookURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if body.Enabled && webhook == "" {
-		writeError(w, http.StatusBadRequest, "webhook_url wajib diisi kalau notifications diaktifkan")
-		return
-	}
-	if body.Enabled && len(events) == 0 {
-		writeError(w, http.StatusBadRequest, "pilih minimal satu event kalau notifications diaktifkan")
 		return
 	}
 	saved, err := s.Store.SetNotificationSettings(r.Context(), store.NotificationSettings{
@@ -263,6 +293,62 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, notificationOut(saved, lastDelivery))
+}
+
+// handleSaveNotificationChannel: PUT /api/config/notifications/projects/{project} — a project override.
+func (s *Server) handleSaveNotificationChannel(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.PathValue("project"))
+	if !projectName.MatchString(project) {
+		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		return
+	}
+	var body notificationInput
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "body harus JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
+		return
+	}
+	currentWebhook := ""
+	if channel, err := s.Store.NotificationChannel(r.Context(), project); err == nil {
+		currentWebhook = channel.WebhookURL
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.serverError(w, err)
+		return
+	} else {
+		settings, err := s.Store.NotificationSettings(r.Context())
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		currentWebhook = settings.WebhookURL
+	}
+	webhook, events, err := s.prepareNotification(body, currentWebhook)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	saved, err := s.Store.SetNotificationChannel(r.Context(), store.NotificationChannel{
+		Project: project, Enabled: body.Enabled, WebhookURL: webhook, Events: events,
+		By: s.actor(r, body.By),
+	})
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, notificationChannelOut(saved))
+}
+
+// handleDeleteNotificationChannel: DELETE /api/config/notifications/projects/{project}
+func (s *Server) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.PathValue("project"))
+	if err := s.Store.DeleteNotificationChannel(r.Context(), project); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "project channel tidak ditemukan")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": project})
 }
 
 // handleNotificationDeliveries: GET /api/config/notifications/deliveries?limit=20
@@ -282,7 +368,12 @@ func (s *Server) handleNotificationDeliveries(w http.ResponseWriter, r *http.Req
 
 // handleTestNotification: POST /api/config/notifications/test — sends a real Discord test message.
 func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.Store.NotificationSettings(r.Context())
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project != "" && !projectName.MatchString(project) {
+		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		return
+	}
+	settings, err := s.Store.NotificationSettingsFor(r.Context(), project)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -307,7 +398,8 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 	attempts, status, sendErr := s.sendNotification(ctx, settings.WebhookURL, message)
 	delivery := store.NotificationDelivery{
-		At: time.Now(), Event: "test", OK: sendErr == nil, StatusCode: status, Attempts: attempts,
+		At: time.Now(), Event: "test", Project: project, OK: sendErr == nil,
+		StatusCode: status, Attempts: attempts,
 	}
 	if sendErr != nil {
 		delivery.Error = sendErr.Error()
@@ -365,6 +457,22 @@ func sourceView(src store.ContractSource) contractSourceView {
 	}
 	if view.LastStatus == "" {
 		view.LastStatus = "unknown"
+	}
+	return view
+}
+
+func notificationChannelOut(channel store.NotificationChannel) notificationChannelView {
+	view := notificationChannelView{
+		Project: channel.Project, Enabled: channel.Enabled,
+		WebhookURL: maskWebhook(channel.WebhookURL), WebhookSet: channel.WebhookURL != "",
+		Events: channel.Events, AvailableEvents: store.KnownNotificationEvents(), By: channel.By,
+	}
+	if view.Events == nil {
+		view.Events = []string{}
+	}
+	if !channel.UpdatedAt.IsZero() {
+		at := channel.UpdatedAt
+		view.UpdatedAt = &at
 	}
 	return view
 }

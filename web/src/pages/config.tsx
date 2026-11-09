@@ -10,11 +10,12 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import type {
   ApiContractSource,
+  ApiNotificationChannel,
   ApiNotificationDelivery,
   ApiNotifications,
   ApiSourceCheck,
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { contractSourceHealth, isStale } from "@/lib/contract-source";
+import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 const eventLabels: Record<string, string> = {
@@ -213,6 +215,12 @@ export function ConfigPage() {
       <NotificationsCard
         key={String(configQuery.data.notifications.updated_at ?? "default")}
         settings={configQuery.data.notifications}
+        onSaved={invalidate}
+      />
+
+      <ProjectChannelsCard
+        channels={configQuery.data.notification_channels ?? []}
+        availableEvents={configQuery.data.notifications.available_events ?? []}
         onSaved={invalidate}
       />
 
@@ -521,7 +529,7 @@ function NotificationsCard({
   });
 
   const test = useMutation({
-    mutationFn: api.testNotification,
+    mutationFn: () => api.testNotification(),
     onSuccess: async (result) => {
       await onSaved();
       setNotice({ tone: "ok", text: result.message });
@@ -542,10 +550,10 @@ function NotificationsCard({
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
         <Bell className="h-3.5 w-3.5 text-brand" />
-        <span className="text-[12.5px] font-semibold">Notifications</span>
+        <span className="text-[12.5px] font-semibold">Default notifications</span>
         <Badge tone="brand">discord</Badge>
         <span className="ml-auto text-[10.5px] text-faint">
-          sends failures, regressions and expiring quarantines to Discord
+          used by every project without an override
         </span>
       </div>
       <div className="px-3.5 py-3">
@@ -692,6 +700,331 @@ function NotificationsCard({
   );
 }
 
+function ProjectChannelsCard({
+  channels,
+  availableEvents,
+  onSaved,
+}: {
+  channels: ApiNotificationChannel[];
+  availableEvents: string[];
+  onSaved: () => Promise<unknown>;
+}) {
+  const { projects } = useProject();
+  const [form, setForm] = useState<{
+    project: string;
+    enabled: boolean;
+    webhook: string;
+    events: string[];
+    editing: boolean;
+  } | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+
+  const projectOptions = useMemo(() => {
+    const names = new Set(projects.map((item) => item.project));
+    for (const channel of channels) names.add(channel.project);
+    return [...names].sort();
+  }, [projects, channels]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveNotificationChannel(form?.project.trim() ?? "", {
+        enabled: form?.enabled ?? false,
+        webhook_url: form?.webhook.trim() ?? "",
+        events: form?.events ?? [],
+      }),
+    onSuccess: async (_result, _variables, _context) => {
+      await onSaved();
+      setNotice({ tone: "ok", text: `${form?.project}: project channel saved.` });
+      setForm(null);
+    },
+    onError: (error) => setNotice({ tone: "error", text: messageOf(error) }),
+  });
+
+  const remove = useMutation({
+    mutationFn: api.deleteNotificationChannel,
+    onSuccess: async (_result, project) => {
+      await onSaved();
+      setNotice({ tone: "ok", text: `${project}: override removed; it now uses the default channel.` });
+      setForm(null);
+    },
+    onError: (error) => setNotice({ tone: "error", text: messageOf(error) }),
+  });
+
+  const test = useMutation({
+    mutationFn: (project: string) => api.testNotification(project),
+    onMutate: (project) => setTesting(project),
+    onSuccess: async (result, project) => {
+      await onSaved();
+      setNotice({ tone: "ok", text: `${project}: ${result.message}` });
+    },
+    onError: async (error, project) => {
+      await onSaved();
+      setNotice({ tone: "error", text: `${project}: ${messageOf(error)}` });
+    },
+    onSettled: () => setTesting(null),
+  });
+
+  function toggleEvent(event: string) {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            events: current.events.includes(event)
+              ? current.events.filter((item) => item !== event)
+              : [...current.events, event],
+          }
+        : current,
+    );
+  }
+
+  function startNew() {
+    const available = projectOptions.find(
+      (project) => !channels.some((channel) => channel.project === project),
+    );
+    setNotice(null);
+    setForm({
+      project: available ?? "",
+      enabled: true,
+      webhook: "",
+      events: ["new_failure", "regressed"],
+      editing: false,
+    });
+  }
+
+  function startEdit(channel: ApiNotificationChannel) {
+    setNotice(null);
+    setForm({
+      project: channel.project,
+      enabled: channel.enabled,
+      webhook: channel.webhook_url,
+      events: channel.events,
+      editing: true,
+    });
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <Bell className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12.5px] font-semibold">Project channels</span>
+        <Badge tone={channels.length > 0 ? "brand" : "neutral"}>
+          {channels.length} override{channels.length === 1 ? "" : "s"}
+        </Badge>
+        <span className="hidden text-[10.5px] text-faint md:inline">
+          a project without an override uses the default channel
+        </span>
+        <Button className="ml-auto" variant="outline" onClick={startNew}>
+          <Plus className="h-3.5 w-3.5" />
+          Add channel
+        </Button>
+      </div>
+
+      {notice && (
+        <div
+          className={cn(
+            "mx-3.5 mt-3 rounded-md border px-2.5 py-1.5 text-[10.5px]",
+            notice.tone === "ok"
+              ? "border-ok/40 bg-ok/10 text-[#9be9a8]"
+              : "border-danger/40 bg-danger/10 text-[#ffb3ad]",
+          )}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      {form && (
+        <div className="border-b border-line bg-[#0f141a] px-3.5 py-3">
+          <div className="mb-2 text-[11.5px] font-semibold">
+            {form.editing ? `Edit ${form.project}` : "Add project channel"}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-[10.5px] text-faint">
+              Project
+              <Input
+                value={form.project}
+                onChange={(event) =>
+                  setForm((current) => (current ? { ...current, project: event.target.value } : current))
+                }
+                placeholder="toolshop"
+                className="mt-1 h-8 font-mono text-[11px]"
+                disabled={form.editing}
+                list="notification-projects"
+              />
+              <datalist id="notification-projects">
+                {projectOptions.map((project) => (
+                  <option key={project} value={project} />
+                ))}
+              </datalist>
+            </label>
+            <label className="text-[10.5px] text-faint">
+              Discord webhook
+              <Input
+                value={form.webhook}
+                onChange={(event) =>
+                  setForm((current) => (current ? { ...current, webhook: event.target.value } : current))
+                }
+                placeholder="https://discord.com/api/webhooks/…"
+                className="mt-1 h-8 font-mono text-[11px]"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.enabled}
+              aria-label="Enable project channel"
+              onClick={() =>
+                setForm((current) => (current ? { ...current, enabled: !current.enabled } : current))
+              }
+              className={cn(
+                "relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors",
+                form.enabled ? "bg-brand" : "bg-[#30363d]",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all",
+                  form.enabled ? "left-[16px]" : "left-[2px]",
+                )}
+              />
+            </button>
+            <span className="text-[11px] text-muted">Enabled</span>
+            <span className="text-[10px] text-faint">
+              Disabled silences this project only; it does not fall back to the default.
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            {availableEvents.map((event) => (
+              <label
+                key={event}
+                className={cn(
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[10.5px]",
+                  form.events.includes(event)
+                    ? "border-brand/50 bg-brand/10 text-ink"
+                    : "border-line bg-[#0f141a] text-muted",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="h-3 w-3 accent-[#58a6ff]"
+                  checked={form.events.includes(event)}
+                  onChange={() => toggleEvent(event)}
+                />
+                {eventLabels[event] ?? event}
+              </label>
+            ))}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => save.mutate()}
+              disabled={
+                save.isPending ||
+                form.project.trim() === "" ||
+                (form.enabled && (form.webhook.trim() === "" || form.events.length === 0))
+              }
+            >
+              {save.isPending ? "Saving…" : "Save channel"}
+            </Button>
+            <Button variant="outline" onClick={() => setForm(null)} disabled={save.isPending}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {channels.length === 0 ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-muted">
+          No project overrides. Every project uses the default channel above.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[850px]">
+            <div className="grid grid-cols-[150px_90px_minmax(180px,1fr)_210px_150px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
+              <span>Project</span>
+              <span>Status</span>
+              <span>Events</span>
+              <span>Webhook</span>
+              <span className="text-right">Actions</span>
+            </div>
+            {channels.map((channel) => (
+              <div
+                key={channel.project}
+                className="grid grid-cols-[150px_90px_minmax(180px,1fr)_210px_150px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0 hover:bg-[#1b222b]"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-mono font-semibold text-[#cdd9e5]">{channel.project}</div>
+                  <div className="truncate text-[10px] text-faint">
+                    {channel.by ? `by ${channel.by}` : "database"}
+                  </div>
+                </div>
+                <Badge tone={channel.enabled ? "flaky" : "neutral"}>
+                  {channel.enabled ? "enabled" : "disabled"}
+                </Badge>
+                <div className="flex flex-wrap gap-1">
+                  {channel.events.length === 0 ? (
+                    <span className="text-[10.5px] text-faint">no events</span>
+                  ) : (
+                    channel.events.map((event) => (
+                      <span
+                        key={event}
+                        className="rounded border border-line-soft bg-canvas px-1.5 py-0.5 text-[9.5px] text-muted"
+                      >
+                        {eventLabels[event] ?? event}
+                      </span>
+                    ))
+                  )}
+                </div>
+                <span className="truncate font-mono text-[10.5px] text-faint" title={channel.webhook_url}>
+                  {channel.webhook_set ? channel.webhook_url : "no webhook"}
+                </span>
+                <div className="flex items-center justify-end gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => test.mutate(channel.project)}
+                    disabled={!channel.webhook_set || testing !== null}
+                    title={
+                      channel.webhook_set
+                        ? "Send a real test message to this project channel"
+                        : "Save a webhook for this project first"
+                    }
+                  >
+                    <Send className={cn("h-3 w-3", testing === channel.project && "animate-pulse")} />
+                    Test
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(channel)} title="Edit channel">
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => {
+                      if (window.confirm(`Remove the channel override for ${channel.project}?`)) {
+                        remove.mutate(channel.project);
+                      }
+                    }}
+                    title="Remove override"
+                    aria-label={`Remove ${channel.project} channel`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function DeliveryHistory() {
   const query = useQuery({
     queryKey: ["notification-deliveries"],
@@ -719,8 +1052,9 @@ function DeliveryHistory() {
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[720px]">
-            <div className="grid grid-cols-[110px_minmax(150px,1fr)_70px_140px_70px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
+            <div className="grid grid-cols-[110px_100px_minmax(150px,1fr)_70px_140px_70px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
               <span>Time</span>
+              <span>Project</span>
               <span>Event</span>
               <span>Run</span>
               <span>Status</span>
@@ -738,9 +1072,12 @@ function DeliveryHistory() {
 
 function DeliveryRow({ delivery }: { delivery: ApiNotificationDelivery }) {
   return (
-    <div className="grid grid-cols-[110px_minmax(150px,1fr)_70px_140px_70px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0">
+    <div className="grid grid-cols-[110px_100px_minmax(150px,1fr)_70px_140px_70px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0">
       <span className="text-[10.5px] text-faint" title={delivery.at}>
         {ago(delivery.at)}
+      </span>
+      <span className="truncate text-[10.5px] text-muted" title={delivery.project}>
+        {delivery.project || "default"}
       </span>
       <span className="truncate text-[11px] text-ink">{deliveryEventLabel(delivery.event)}</span>
       <span className="font-mono text-[10.5px] text-muted">

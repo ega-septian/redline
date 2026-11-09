@@ -130,3 +130,65 @@ func TestNotificationSettingsStore(t *testing.T) {
 		t.Errorf("update settings salah: %+v", updated)
 	}
 }
+
+func TestNotificationChannelStore(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	global, err := s.SetNotificationSettings(ctx, store.NotificationSettings{
+		Enabled: true, WebhookURL: "https://discord.test/default", Events: []string{"new_failure"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channels, err := s.NotificationChannels(ctx); err != nil || len(channels) != 0 {
+		t.Fatalf("awal harus kosong: %+v %v", channels, err)
+	}
+
+	channel, err := s.SetNotificationChannel(ctx, store.NotificationChannel{
+		Project: "toolshop", Enabled: true, WebhookURL: "https://discord.test/toolshop",
+		Events: []string{"new_failure", "regressed"}, By: "ega",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel.Project != "toolshop" || !channel.Enabled || channel.UpdatedAt.IsZero() ||
+		channel.WebhookURL != "https://discord.test/toolshop" {
+		t.Errorf("channel tersimpan salah: %+v", channel)
+	}
+	if channels, err := s.NotificationChannels(ctx); err != nil || len(channels) != 1 ||
+		channels[0].Project != "toolshop" {
+		t.Errorf("daftar channel salah: %+v %v", channels, err)
+	}
+
+	resolved, err := s.NotificationSettingsFor(ctx, "toolshop")
+	if err != nil || !resolved.Enabled || resolved.WebhookURL != "https://discord.test/toolshop" ||
+		len(resolved.Events) != 2 {
+		t.Errorf("override tidak dipakai: %+v %v", resolved, err)
+	}
+	fallback, err := s.NotificationSettingsFor(ctx, "web")
+	if err != nil || fallback.WebhookURL != global.WebhookURL {
+		t.Errorf("project tanpa override harus memakai default: %+v %v", fallback, err)
+	}
+
+	if _, err := s.SetNotificationChannel(ctx, store.NotificationChannel{
+		Project: "web", Enabled: false, Events: []string{}, By: "ega",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := s.NotificationSettingsFor(ctx, "web")
+	if err != nil || disabled.Enabled {
+		t.Errorf("override disabled harus menonaktifkan project: %+v %v", disabled, err)
+	}
+
+	if err := s.DeleteNotificationChannel(ctx, "toolshop"); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = s.NotificationSettingsFor(ctx, "toolshop")
+	if err != nil || resolved.WebhookURL != global.WebhookURL {
+		t.Errorf("setelah delete harus kembali ke default: %+v %v", resolved, err)
+	}
+	if err := s.DeleteNotificationChannel(ctx, "toolshop"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("delete kedua: mau ErrNotFound, dapat %v", err)
+	}
+}

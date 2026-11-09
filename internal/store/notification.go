@@ -12,6 +12,7 @@ import (
 type NotificationDelivery struct {
 	At         time.Time `json:"at"`
 	Event      string    `json:"event"`
+	Project    string    `json:"project,omitempty"`
 	RunID      int64     `json:"run_id,omitempty"`
 	OK         bool      `json:"ok"`
 	StatusCode int       `json:"status_code,omitempty"`
@@ -26,7 +27,7 @@ func (s *Store) RecordNotificationDelivery(ctx context.Context, delivery Notific
 	}
 	_, err := s.query(ctx, `
 		CREATE (d:NotificationDelivery {
-			at: datetime($at), event: $event, runId: $runId, ok: $ok,
+			at: datetime($at), event: $event, project: $project, runId: $runId, ok: $ok,
 			statusCode: $statusCode, attempts: $attempts, error: $error
 		})
 		WITH d
@@ -35,8 +36,9 @@ func (s *Store) RecordNotificationDelivery(ctx context.Context, delivery Notific
 		WITH old ORDER BY old.at DESC SKIP 100
 		DETACH DELETE old`,
 		map[string]any{
-			"at": delivery.At.UTC(), "event": delivery.Event, "runId": delivery.RunID,
-			"ok": delivery.OK, "statusCode": delivery.StatusCode,
+			"at": delivery.At.UTC(), "event": delivery.Event, "project": delivery.Project,
+			"runId": delivery.RunID,
+			"ok":    delivery.OK, "statusCode": delivery.StatusCode,
 			"attempts": delivery.Attempts, "error": delivery.Error,
 		})
 	return err
@@ -78,7 +80,7 @@ func (s *Store) LastNotificationDelivery(ctx context.Context) (*NotificationDeli
 
 func toNotificationDelivery(p map[string]any) NotificationDelivery {
 	return NotificationDelivery{
-		At: local(p["at"]), Event: str(p, "event"), RunID: i64(p, "runId"),
+		At: local(p["at"]), Event: str(p, "event"), Project: str(p, "project"), RunID: i64(p, "runId"),
 		OK: boolValue(p["ok"]), StatusCode: int(i64(p, "statusCode")),
 		Attempts: int(i64(p, "attempts")), Error: str(p, "error"),
 	}

@@ -4,6 +4,7 @@ import type {
   ApiProject,
   ApiQuarantine,
   ApiQuarantineSuggestion,
+  ApiNotificationChannel,
   ApiNotificationDelivery,
   ApiCoverage,
   ApiConfig,
@@ -217,9 +218,26 @@ export const api = {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
       body: JSON.stringify(input),
     }),
-  testNotification: () =>
+  saveNotificationChannel: (
+    project: string,
+    input: { enabled: boolean; webhook_url: string; events: string[] },
+  ) =>
+    request<ApiNotificationChannel>(
+      `/api/config/notifications/projects/${encodeURIComponent(project)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify(input),
+      },
+    ),
+  deleteNotificationChannel: (project: string) =>
+    request<{ deleted: string }>(
+      `/api/config/notifications/projects/${encodeURIComponent(project)}`,
+      { method: "DELETE", headers: { "X-CSRF-Token": csrfToken() } },
+    ),
+  testNotification: (project = "") =>
     request<{ sent: boolean; mock: boolean; message: string }>(
-      "/api/config/notifications/test",
+      `/api/config/notifications/test${project ? `?project=${encodeURIComponent(project)}` : ""}`,
       { method: "POST", headers: { "X-CSRF-Token": csrfToken() } },
     ),
   notificationDeliveries: (limit = 20) =>

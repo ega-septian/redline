@@ -149,7 +149,8 @@ type GroupChange struct {
 	Fingerprint string `json:"fingerprint"`
 	TestKey     string `json:"test"`
 	TestCaseID  string `json:"test_case_id,omitempty"` // dari tag @TC-..., kalau ada
-	Error       string `json:"error,omitempty"`        // ringkasan error (sudah diredaksi)
+	Project     string `json:"project,omitempty"`
+	Error       string `json:"error,omitempty"` // ringkasan error (sudah diredaksi)
 	Occurrences int    `json:"occurrences"`
 	Incident    string `json:"incident,omitempty"` // key insiden; kosong untuk resolved
 }

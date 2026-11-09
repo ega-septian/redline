@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -370,14 +370,16 @@ Voyage AI.
 | `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
 | `POST /api/tests/quarantine/suggestions/dismiss`                   | Snooze a suggestion: `{"test": "TC-...", "days": 7}`           |
 | `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes, changes and the last 20 run points |
-| `GET /api/config`                                                  | Contract sources, notification settings and the last delivery  |
+| `GET /api/config`                                                  | Contract sources, default/project notification channels and the last delivery |
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
 | `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |
 | `POST /api/config/contracts/check`                                 | Re-check a saved source: `{"project": "toolshop"}`             |
 | `DELETE /api/config/contracts?project=...`                         | Remove a database source (env fallback returns)                |
-| `PUT /api/config/notifications`                                    | Save webhook/events (mock, nothing is delivered yet)           |
-| `POST /api/config/notifications/test`                              | Sends a real Discord test message                              |
-| `GET /api/config/notifications/deliveries?limit=20`                | Newest notification deliveries with status, attempts and error |
+| `PUT /api/config/notifications`                                    | Save the default webhook and events                            |
+| `PUT /api/config/notifications/projects/{project}`                 | Save a project override: same body as the default channel      |
+| `DELETE /api/config/notifications/projects/{project}`              | Remove an override and fall back to the default                |
+| `POST /api/config/notifications/test`                              | Send a real Discord test message (`?project=...` for an override) |
+| `GET /api/config/notifications/deliveries?limit=20`                | Newest deliveries with project, status, attempts and error      |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure, `?project=...` scopes them) |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |
@@ -478,13 +480,19 @@ JSON URL it loads (for example `url: ".../docs?api-docs.json"`), the form offers
 fix. Cloud metadata hosts are blocked; private hosts stay allowed because local Toolshop is a valid
 source.
 
-Notifications post to a **Discord webhook**. `new_failure` and `regressed` send one summary per run with
-the branch, commit, source, failed/flaky counts and up to eight failures with the first error line.
+Notifications post to a **Discord webhook**. `new_failure` and `regressed` send one summary per project
+per run with the branch, commit, source, failed/flaky counts and up to eight failures with the first
+error line.
 Delivery is best-effort: a slow or failing webhook is logged and never fails the run. Network errors,
 `429` and `5xx` are retried once, honouring Discord's `retry_after` (capped at five seconds). The last
 delivery is recorded and shown in Config, and the delivery history lists the newest 20 records with
-status, attempts and error. `Quarantine expiring` is checked on each run for active quarantines ending
+project, status, attempts and error. `Quarantine expiring` is checked on each run for active quarantines ending
 within 24 hours; the summary is sent once per quarantine expiry window.
+
+The **default channel** is used by every project without an override. A project override replaces the
+default for that project only; disable it to silence one project without touching the rest. If a project
+has no override, it inherits the default events and webhook. Delivery history records which project a
+message came from.
 
 Create the webhook in Discord under **Server Settings → Integrations → Webhooks**, then paste the URL in
 Config. The stored token is masked when read, and the UI sends the masked value back when only the events
