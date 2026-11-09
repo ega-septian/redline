@@ -139,6 +139,12 @@ function LoadErrorRow({ item }: { item: ApiLoadError }) {
     onError: (err) => setError(err instanceof Error ? err.message : "Analysis failed."),
   });
 
+  const analyzeAI = useMutation({
+    mutationFn: () => api.analyzeLoadError(item.id, true),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["load-errors"] }),
+    onError: (err) => setError(err instanceof Error ? err.message : "AI analysis failed."),
+  });
+
   const save = useMutation({
     mutationFn: () => api.triageLoadError(item.id, { status, owner: owner.trim(), note: note.trim() }),
     onSuccess: async () => {
@@ -209,11 +215,26 @@ function LoadErrorRow({ item }: { item: ApiLoadError }) {
               {analyze.isPending ? "Analyzing…" : "Analyze"}
             </Button>
           )}
+          {item.category === "unclear" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => analyzeAI.mutate()}
+              disabled={analyzeAI.isPending}
+              title="Ask the model to classify this unclear message"
+            >
+              {analyzeAI.isPending ? "Asking AI…" : "Analyze with AI"}
+            </Button>
+          )}
           <Button size="sm" variant={open ? "default" : "outline"} onClick={() => setOpen((value) => !value)}>
             {open ? "Cancel" : "Triage"}
           </Button>
         </div>
       </div>
+
+      {error && !open && (
+        <div className="border-t border-line-soft px-3.5 py-2 text-[10.5px] text-danger">{error}</div>
+      )}
 
       {open && (
         <form onSubmit={submit} className="border-t border-line-soft bg-[#0f141a] px-3.5 py-3">

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"redline/internal/analysis"
 	"redline/internal/store"
 	"redline/internal/triage"
 )
@@ -62,8 +63,8 @@ func (s *Server) handleTriageLoadError(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAnalyzeLoadError: POST /api/load-errors/{id}/analyze. Re-runs the deterministic rules for
-// groups created before analysis was stored on ingest.
+// handleAnalyzeLoadError: POST /api/load-errors/{id}/analyze[?ai=1]. The default runs deterministic
+// rules; ai=1 asks the model for cases the rules leave unclear.
 func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	item, err := s.Store.LoadError(r.Context(), id)
@@ -75,8 +76,23 @@ func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) 
 		s.serverError(w, err)
 		return
 	}
-	analysis := triage.AnalyzeLoadError(item.Message)
-	if err := s.Store.SetLoadErrorAnalysis(r.Context(), id, analysis); err != nil {
+	result := triage.AnalyzeLoadError(item.Message)
+	if r.URL.Query().Get("ai") == "1" {
+		if s.Analyzer == nil {
+			writeError(w, http.StatusServiceUnavailable, analysis.ErrAIDisabled.Error())
+			return
+		}
+		result, err = s.Analyzer.AnalyzeLoadError(r.Context(), item.Message)
+		if errors.Is(err, analysis.ErrAIDisabled) || errors.Is(err, analysis.ErrBudgetExceeded) {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "analisis AI gagal, cek log server")
+			return
+		}
+	}
+	if err := s.Store.SetLoadErrorAnalysis(r.Context(), id, result); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "load error tidak ditemukan")
 			return
@@ -84,5 +100,5 @@ func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) 
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, analysis)
+	writeJSON(w, http.StatusOK, result)
 }

@@ -545,6 +545,15 @@ func (a *fakeAnalyzer) Analyze(_ context.Context, fp string, force bool) (*store
 	return &store.Analysis{Fingerprint: fp, Source: "ai", Category: "backend_bug"}, !force, nil
 }
 
+func (a *fakeAnalyzer) AnalyzeLoadError(_ context.Context, message string) (triage.LoadErrorAnalysis, error) {
+	if a.err != nil {
+		return triage.LoadErrorAnalysis{}, a.err
+	}
+	return triage.LoadErrorAnalysis{
+		Category: "test_bug", Confidence: "medium", Source: "ai",
+		Summary: "AI classified: " + message, NextStep: "Fix the import.",
+	}, nil
+}
 func (a *fakeAnalyzer) AnalyzeLocal(_ context.Context, fp string, _ bool) (*store.Analysis, error) {
 	if a.err != nil {
 		return nil, a.err
@@ -2121,5 +2130,11 @@ func TestLoadErrorAPI(t *testing.T) {
 	}
 	if rec := do(h, http.MethodPost, "/api/load-errors/missing/analyze", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("analyze missing = %d, want 404", rec.Code)
+	}
+	fs.loadErrors[0].Category = ""
+	rec = do(h, http.MethodPost, "/api/load-errors/le-1/analyze?ai=1", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"source": "ai"`) ||
+		fs.loadErrors[0].AnalysisSource != "ai" || fs.loadErrors[0].Summary == "" {
+		t.Errorf("AI analyze load error = %d: %s -> %+v", rec.Code, rec.Body, fs.loadErrors[0])
 	}
 }
