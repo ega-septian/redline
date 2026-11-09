@@ -5,6 +5,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { api } from "@/api/client";
 import type { ApiQuarantineSuggestion, TestHealthRow, TestRunPoint } from "@/api/types";
+import { TestHealthTrend } from "@/components/test-health-trend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,9 +32,14 @@ export function HealthPage() {
     queryKey: ["quarantine-suggestions", days, project],
     queryFn: () => api.quarantineSuggestions(days, project),
   });
+  const trendQuery = useQuery({
+    queryKey: ["test-trend", days, project],
+    queryFn: () => api.testTrend(days, project),
+  });
   const suggestions = suggestionsQuery.data ?? [];
   const summary = healthQuery.data?.summary;
   const tests = healthQuery.data?.tests ?? [];
+  const trend = trendQuery.data ?? [];
   const quarantined = tests.filter((test) => test.quarantined).length;
 
   const filtered = useMemo(() => {
@@ -159,6 +165,8 @@ export function HealthPage() {
           hint="mean time to resolve"
         />
       </section>
+
+      <TestHealthTrend points={trend} />
 
       {suggestions.length > 0 && (
         <SuggestionsPanel suggestions={suggestions} onSelect={setSelected} />

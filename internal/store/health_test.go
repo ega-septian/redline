@@ -29,6 +29,41 @@ func healthSpec(title, tag, status string) report.Spec {
 	return spec
 }
 
+func TestTestHealthTrend(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "passed"),
+		healthSpec("B", "TC-B", "failed"),
+	), store.RunMeta{Branch: "main", CommitSHA: "one"})
+	ingest(t, s, shopReport(
+		healthSpec("A", "TC-A", "passed"),
+		healthSpec("B", "TC-B", "passed"),
+		healthSpec("C", "TC-C", "flaky"),
+	), store.RunMeta{Branch: "main", CommitSHA: "two"})
+
+	points, err := s.TestHealthTrend(ctx, "api", 365, 10)
+	if err != nil || len(points) != 2 {
+		t.Fatalf("trend = %+v %v", points, err)
+	}
+	if points[0].RunID >= points[1].RunID || points[0].Passed != 1 || points[0].Failed != 1 {
+		t.Errorf("trend run pertama salah: %+v", points)
+	}
+	if points[1].Passed != 2 || points[1].Flaky != 1 || math.Abs(points[1].PassRate-2.0/3.0) > 1e-9 ||
+		math.Abs(points[1].FlakeRate-1.0/3.0) > 1e-9 {
+		t.Errorf("trend run terakhir salah: %+v", points[1])
+	}
+
+	latest, err := s.TestHealthTrend(ctx, "api", 365, 1)
+	if err != nil || len(latest) != 1 || latest[0].RunID != points[1].RunID {
+		t.Errorf("trend limit salah: %+v %v", latest, err)
+	}
+	if other, err := s.TestHealthTrend(ctx, "other", 365, 10); err != nil || len(other) != 0 {
+		t.Errorf("trend project lain harus kosong: %+v %v", other, err)
+	}
+}
+
 func TestTestHealthDurationDelta(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

@@ -39,6 +39,7 @@ type Store interface {
 	PreviousRun(ctx context.Context, id int64, branch string) (store.Run, bool, error)
 	RunResults(ctx context.Context, runID int64) ([]store.RunResult, error)
 	TestHealth(ctx context.Context, project string, days int) (store.TestHealthSummary, []store.TestHealthRow, error)
+	TestHealthTrend(ctx context.Context, project string, days, limit int) ([]store.TestHealthPoint, error)
 	TestHistory(ctx context.Context, test string, days, limit int) (store.TestHealthRow, []store.TestRunPoint, error)
 	FindTest(ctx context.Context, test string) (store.TestIdentity, error)
 	SetQuarantine(ctx context.Context, q store.Quarantine) (store.Quarantine, error)
@@ -161,6 +162,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("GET /api/runs/{id}/compare", s.handleCompareRun)
 	mux.HandleFunc("GET /api/tests/history", s.handleTestHistory)
+	mux.HandleFunc("GET /api/tests/trend", s.handleTestTrend)
 	mux.HandleFunc("GET /api/tests", s.handleTestHealth)
 	mux.HandleFunc("GET /api/tests/quarantine", s.handleListQuarantine)
 	mux.HandleFunc("PUT /api/tests/quarantine", s.handleSetQuarantine)
@@ -374,6 +376,27 @@ func (s *Server) handleTestHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"summary": summary, "tests": tests})
+}
+
+// handleTestTrend: GET /api/tests/trend?days=30&project=...&limit=20
+func (s *Server) handleTestTrend(w http.ResponseWriter, r *http.Request) {
+	days, err := queryInt(r, "days", 30, 1, 365)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit, err := queryInt(r, "limit", 20, 1, 50)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	points, err := s.Store.TestHealthTrend(r.Context(), project, days, limit)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
 }
 
 func (s *Server) handleTestHistory(w http.ResponseWriter, r *http.Request) {

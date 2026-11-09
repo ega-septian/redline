@@ -22,6 +22,7 @@ import type {
   RunDetail,
   Scoreboard,
   TestHealth,
+  TestHealthPoint,
   TestHistory,
 } from "./types";
 
@@ -155,6 +156,10 @@ export const api = {
   testHealth: (days: number, project: string) =>
     request<TestHealth>(
       `/api/tests?days=${days}${project ? `&project=${encodeURIComponent(project)}` : ""}`,
+    ),
+  testTrend: (days: number, project: string, limit = 20) =>
+    request<TestHealthPoint[]>(
+      `/api/tests/trend?days=${days}&limit=${limit}${project ? `&project=${encodeURIComponent(project)}` : ""}`,
     ),
   testHistory: (test: string, days: number) =>
     request<TestHistory>(`/api/tests/history?test=${encodeURIComponent(test)}&days=${days}`),

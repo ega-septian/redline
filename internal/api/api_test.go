@@ -40,6 +40,7 @@ type fakeStore struct {
 	notifications      store.NotificationSettings
 	channels           map[string]store.NotificationChannel
 	healthRows         []store.TestHealthRow
+	testTrend          []store.TestHealthPoint
 	dismissals         map[string]time.Time
 	dismissed          string
 	ingest             *store.IngestResult
@@ -147,6 +148,16 @@ func (f *fakeStore) GetArtifact(_ context.Context, id int64) (store.Artifact, er
 		}
 	}
 	return store.Artifact{}, store.ErrNotFound
+}
+func (f *fakeStore) TestHealthTrend(_ context.Context, _ string, _ int, limit int) ([]store.TestHealthPoint, error) {
+	out := f.testTrend
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
 }
 func (f *fakeStore) TestHealth(context.Context, string, int) (store.TestHealthSummary, []store.TestHealthRow, error) {
 	if f.healthRows != nil {
@@ -1964,5 +1975,31 @@ func TestSourceHistory(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/config/contracts/history?project=toolshop&limit=0", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("source history limit invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestTestTrend(t *testing.T) {
+	now := time.Now()
+	fs := &fakeStore{testTrend: []store.TestHealthPoint{
+		{RunID: 1, At: now.Add(-time.Hour), Passed: 2, Failed: 1, PassRate: 2.0 / 3.0},
+		{RunID: 2, At: now, Passed: 3, Flaky: 1, PassRate: 0.75, FlakeRate: 0.25},
+	}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/tests/trend?project=toolshop&limit=1", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"run_id": 2`) ||
+		strings.Contains(rec.Body.String(), `"run_id": 1`) {
+		t.Errorf("test trend limit = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/tests/trend?project=toolshop", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"run_id": 1`) ||
+		!strings.Contains(rec.Body.String(), `"flake_rate": 0.25`) {
+		t.Errorf("test trend = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/trend?days=0", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("test trend days invalid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodGet, "/api/tests/trend?limit=51", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("test trend limit invalid = %d, want 400", rec.Code)
 	}
 }

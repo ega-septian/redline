@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-run trend, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -363,6 +363,7 @@ Voyage AI.
 | `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
 | `GET /api/runs/{id}/artifacts`, `GET /api/artifacts/{id}`          | List/download uploaded artifacts                               |
 | `GET /api/tests`                                                   | Test health: pass/flake rates, top failures, slowest tests, duration regressions and per-test rows |
+| `GET /api/tests/trend?days=30&project=...&limit=20`                | One point per run: passed, failed, flaky, skipped and rates    |
 | `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
 | `GET /api/tests/quarantine`                                        | Active quarantined tests (`?project=...` scopes them)          |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
@@ -405,8 +406,9 @@ Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every activ
 ### Test health
 
 The Health page summarizes the selected window and project: pass/flake rates, flips, top flaky and
-failing tests, slowest tests, and duration regressions. A regression compares the latest executed
-result with the previous executed result for the same test; it must be at least 30% and 100 ms slower
+failing tests, slowest tests, duration regressions, and a per-run pass/fail/flaky trend. A regression
+compares the latest executed result with the previous executed result for the same test; it must be at
+least 30% and 100 ms slower
 to appear. Select a row for the per-test timeline, last/previous duration and owner.
 
 ### Quarantine page
