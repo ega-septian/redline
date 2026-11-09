@@ -190,6 +190,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
+	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge.md", s.handleGroupKnowledgeMarkdown)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
 	var h http.Handler = mux

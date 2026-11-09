@@ -32,6 +32,26 @@ export class ApiError extends Error {
   }
 }
 
+async function requestMarkdown(path: string): Promise<string> {
+  const response = await fetch(path, { credentials: "same-origin" });
+  if (response.status === 401) {
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.assign(`/ui/login?next=${next}`);
+    throw new ApiError(401, "unauthorized");
+  }
+  if (!response.ok) {
+    let message = `${path} returned ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Non-JSON errors keep the generic message.
+    }
+    throw new ApiError(response.status, message);
+  }
+  return response.text();
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin", ...init });
   if (response.status === 401) {
@@ -76,6 +96,8 @@ export const api = {
     request<GroupDetail>(`/api/groups/${encodeURIComponent(fingerprint)}`),
   knowledge: (fingerprint: string) =>
     request<Knowledge>(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge`),
+  knowledgeMarkdown: (fingerprint: string) =>
+    requestMarkdown(`/api/groups/${encodeURIComponent(fingerprint)}/knowledge.md`),
   runs: (project?: string) =>
     request<ApiRun[]>(
       `/api/runs?limit=50${project ? `&project=${encodeURIComponent(project)}` : ""}`,
