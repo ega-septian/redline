@@ -28,7 +28,9 @@ func TestLoadErrors(t *testing.T) {
 	item := items[0]
 	if !strings.Contains(item.Message, "helpers/brands") || item.Occurrences != 2 ||
 		item.FirstSeenRun != first.RunID || item.LastSeenRun != second.RunID ||
-		item.TriageStatus != "open" {
+		item.TriageStatus != "open" || item.Category != "test_bug" ||
+		item.AnalysisSource != "rule" || item.Summary == "" || item.NextStep == "" ||
+		item.AnalyzedAt == nil {
 		t.Errorf("load error salah: %+v", item)
 	}
 

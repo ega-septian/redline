@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { categoryLabel, type Category } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
 const statuses = ["open", "acknowledged", "in_progress", "muted", "wont_fix", "resolved"] as const;
@@ -30,6 +31,14 @@ const statusTone: Record<LoadStatus, "neutral" | "brand" | "env" | "backend" | "
   muted: "neutral",
   wont_fix: "backend",
   resolved: "flaky",
+};
+
+const categoryTone: Record<string, "backend" | "test" | "env" | "flaky" | "neutral"> = {
+  backend_bug: "backend",
+  test_bug: "test",
+  environment: "env",
+  flaky: "flaky",
+  unclear: "neutral",
 };
 
 export function LoadErrorsPage() {
@@ -124,6 +133,12 @@ function LoadErrorRow({ item }: { item: ApiLoadError }) {
   const [note, setNote] = useState(item.triage_note ?? "");
   const [error, setError] = useState("");
 
+  const analyze = useMutation({
+    mutationFn: () => api.analyzeLoadError(item.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["load-errors"] }),
+    onError: (err) => setError(err instanceof Error ? err.message : "Analysis failed."),
+  });
+
   const save = useMutation({
     mutationFn: () => api.triageLoadError(item.id, { status, owner: owner.trim(), note: note.trim() }),
     onSuccess: async () => {
@@ -148,6 +163,13 @@ function LoadErrorRow({ item }: { item: ApiLoadError }) {
             <Badge tone={statusTone[(item.triage_status as LoadStatus) || "open"] ?? "neutral"}>
               {statusLabel[(item.triage_status as LoadStatus) || "open"] ?? item.triage_status}
             </Badge>
+            {item.category ? (
+              <Badge tone={categoryTone[item.category] ?? "neutral"}>
+                {categoryLabel[item.category as Category] ?? item.category}
+              </Badge>
+            ) : (
+              <Badge tone="neutral">not analyzed</Badge>
+            )}
             {item.triage_owner && <Badge tone="neutral">owner {item.triage_owner}</Badge>}
             <span className="text-[10.5px] text-faint">
               {item.occurrences} occurrence{item.occurrences === 1 ? "" : "s"}
@@ -166,15 +188,31 @@ function LoadErrorRow({ item }: { item: ApiLoadError }) {
           >
             {item.message.split("\n")[0]}
           </div>
+          {item.summary && <div className="mt-1 text-[11px] text-muted">{item.summary}</div>}
+          {item.next_step && (
+            <div className="mt-0.5 text-[10.5px] text-faint">→ {item.next_step}</div>
+          )}
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-faint">
             <span>first seen {when(item.first_seen_at)} · run #{item.first_seen_run}</span>
             <span>last seen {when(item.last_seen_at)}</span>
             {item.triage_note && <span className="truncate">note: {item.triage_note}</span>}
           </div>
         </div>
-        <Button size="sm" variant={open ? "default" : "outline"} onClick={() => setOpen((value) => !value)}>
-          {open ? "Cancel" : "Triage"}
-        </Button>
+        <div className="flex shrink-0 items-start gap-1">
+          {!item.category && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => analyze.mutate()}
+              disabled={analyze.isPending}
+            >
+              {analyze.isPending ? "Analyzing…" : "Analyze"}
+            </Button>
+          )}
+          <Button size="sm" variant={open ? "default" : "outline"} onClick={() => setOpen((value) => !value)}>
+            {open ? "Cancel" : "Triage"}
+          </Button>
+        </div>
       </div>
 
       {open && (

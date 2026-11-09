@@ -27,6 +27,7 @@ import (
 	"redline/internal/report"
 	"redline/internal/reportportal"
 	"redline/internal/store"
+	"redline/internal/triage"
 )
 
 // Store adalah bagian dari database yang dipakai API (interface supaya mudah dites).
@@ -36,6 +37,8 @@ type Store interface {
 	RunsWithReportErrors(ctx context.Context, limit int) ([]store.Run, error)
 	LoadErrors(ctx context.Context, limit int) ([]store.LoadError, error)
 	SetLoadErrorTriage(ctx context.Context, id, status, owner, note, by string) error
+	LoadError(ctx context.Context, id string) (store.LoadError, error)
+	SetLoadErrorAnalysis(ctx context.Context, id string, analysis triage.LoadErrorAnalysis) error
 	ListRunsForProject(ctx context.Context, project string, limit int) ([]store.Run, error)
 	ProjectSummaries(ctx context.Context) ([]store.ProjectSummary, error)
 	GetRun(ctx context.Context, id int64) (store.Run, error)
@@ -206,6 +209,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/load-errors", s.handleListLoadErrors)
 	mux.HandleFunc("PUT /api/load-errors/{id}/triage", s.handleTriageLoadError)
+	mux.HandleFunc("POST /api/load-errors/{id}/analyze", s.handleAnalyzeLoadError)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge.md", s.handleGroupKnowledgeMarkdown)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)

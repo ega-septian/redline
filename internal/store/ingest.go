@@ -219,6 +219,7 @@ func saveLoadErrors(ctx context.Context, tx neo4j.ManagedTransaction, runID int6
 			continue
 		}
 		seen[id] = true
+		analysis := triage.AnalyzeLoadError(message)
 		if _, err := tx.Run(ctx, `
 			MATCH (run:Run {id: $runId})
 			MERGE (e:LoadError {id: $id})
@@ -227,9 +228,15 @@ func saveLoadErrors(ctx context.Context, tx neo4j.ManagedTransaction, runID int6
 				e.triageUpdatedBy = ''
 			SET e.lastSeenRun = $runId, e.lastSeenAt = datetime(),
 				e.occurrences = e.occurrences + 1,
+				e.category = $category, e.confidence = $confidence, e.analysisSource = $source,
+				e.summary = $summary, e.nextStep = $nextStep, e.analyzedAt = datetime(),
 				e.triageStatus = CASE WHEN e.triageStatus = 'resolved' THEN 'open' ELSE e.triageStatus END
 			MERGE (run)-[:LOAD_ERROR]->(e)`,
-			map[string]any{"runId": runID, "id": id, "message": clipLoadError(message)}); err != nil {
+			map[string]any{
+				"runId": runID, "id": id, "message": clipLoadError(message),
+				"category": analysis.Category, "confidence": analysis.Confidence, "source": analysis.Source,
+				"summary": analysis.Summary, "nextStep": analysis.NextStep,
+			}); err != nil {
 			return fmt.Errorf("simpan load error: %w", err)
 		}
 	}

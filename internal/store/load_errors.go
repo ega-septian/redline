@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+
+	"redline/internal/triage"
 )
 
 // LoadErrorStatuses are the triage states for a suite load failure. A load error has no test result,
@@ -37,6 +39,13 @@ type LoadError struct {
 	TriageNote      string     `json:"triage_note,omitempty"`
 	TriageUpdatedBy string     `json:"triage_updated_by,omitempty"`
 	TriageUpdatedAt *time.Time `json:"triage_updated_at,omitempty"`
+
+	Category       string     `json:"category,omitempty"`
+	Confidence     string     `json:"confidence,omitempty"`
+	AnalysisSource string     `json:"analysis_source,omitempty"`
+	Summary        string     `json:"summary,omitempty"`
+	NextStep       string     `json:"next_step,omitempty"`
+	AnalyzedAt     *time.Time `json:"analyzed_at,omitempty"`
 }
 
 // LoadErrors returns the newest load-error groups, most recently seen first.
@@ -56,6 +65,39 @@ func (s *Store) LoadErrors(ctx context.Context, limit int) ([]LoadError, error) 
 		out = append(out, toLoadError(node.(neo4j.Node).Props))
 	}
 	return out, nil
+}
+
+// LoadError returns one group, or ErrNotFound.
+func (s *Store) LoadError(ctx context.Context, id string) (LoadError, error) {
+	res, err := s.query(ctx, `MATCH (e:LoadError {id: $id}) RETURN e`, map[string]any{"id": id})
+	if err != nil {
+		return LoadError{}, err
+	}
+	if len(res.Records) == 0 {
+		return LoadError{}, ErrNotFound
+	}
+	node, _ := res.Records[0].Get("e")
+	return toLoadError(node.(neo4j.Node).Props), nil
+}
+
+// SetLoadErrorAnalysis stores the rule-based diagnosis for one group.
+func (s *Store) SetLoadErrorAnalysis(ctx context.Context, id string, analysis triage.LoadErrorAnalysis) error {
+	res, err := s.query(ctx, `
+		MATCH (e:LoadError {id: $id})
+		SET e.category = $category, e.confidence = $confidence, e.analysisSource = $source,
+		    e.summary = $summary, e.nextStep = $nextStep, e.analyzedAt = datetime()
+		RETURN count(e) AS n`,
+		map[string]any{
+			"id": id, "category": analysis.Category, "confidence": analysis.Confidence,
+			"source": analysis.Source, "summary": analysis.Summary, "nextStep": analysis.NextStep,
+		})
+	if err != nil {
+		return err
+	}
+	if len(res.Records) == 0 || recInt64(res.Records[0], "n") == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetLoadErrorTriage updates the owner/status/note for one load-error group.
@@ -84,6 +126,9 @@ func toLoadError(p map[string]any) LoadError {
 		FirstSeenRun: i64(p, "firstSeenRun"), LastSeenRun: i64(p, "lastSeenRun"),
 		TriageStatus: str(p, "triageStatus"), TriageOwner: str(p, "triageOwner"),
 		TriageNote: str(p, "triageNote"), TriageUpdatedBy: str(p, "triageUpdatedBy"),
+		Category: str(p, "category"), Confidence: str(p, "confidence"),
+		AnalysisSource: str(p, "analysisSource"), Summary: str(p, "summary"),
+		NextStep: str(p, "nextStep"),
 	}
 	item.FirstSeenAt = local(p["firstSeenAt"])
 	item.LastSeenAt = local(p["lastSeenAt"])
@@ -93,6 +138,10 @@ func toLoadError(p map[string]any) LoadError {
 	if value, ok := p["triageUpdatedAt"]; ok && value != nil {
 		at := local(value)
 		item.TriageUpdatedAt = &at
+	}
+	if value, ok := p["analyzedAt"]; ok && value != nil {
+		at := local(value)
+		item.AnalyzedAt = &at
 	}
 	return item
 }
