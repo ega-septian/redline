@@ -34,6 +34,8 @@ type Store interface {
 	IngestReport(ctx context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error)
 	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
 	RunsWithReportErrors(ctx context.Context, limit int) ([]store.Run, error)
+	LoadErrors(ctx context.Context, limit int) ([]store.LoadError, error)
+	SetLoadErrorTriage(ctx context.Context, id, status, owner, note, by string) error
 	ListRunsForProject(ctx context.Context, project string, limit int) ([]store.Run, error)
 	ProjectSummaries(ctx context.Context) ([]store.ProjectSummary, error)
 	GetRun(ctx context.Context, id int64) (store.Run, error)
@@ -202,6 +204,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
 	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
+	mux.HandleFunc("GET /api/load-errors", s.handleListLoadErrors)
+	mux.HandleFunc("PUT /api/load-errors/{id}/triage", s.handleTriageLoadError)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /api/groups/{fingerprint}/knowledge.md", s.handleGroupKnowledgeMarkdown)
 	mux.HandleFunc("GET /api/impact", s.handleImpact)

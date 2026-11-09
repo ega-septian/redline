@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Activity,
   BarChart3,
+  FileWarning,
   GitBranch,
   LayoutDashboard,
   Layers,
@@ -31,6 +32,7 @@ const pages = [
   { path: "/overview", title: "Overview", subtitle: "quality at a glance" },
   { path: "/runs", title: "Runs", subtitle: "recent runs" },
   { path: "/health", title: "Health", subtitle: "test health and stability" },
+  { path: "/load-errors", title: "Load errors", subtitle: "suite load failures" },
   { path: "/quarantine", title: "Quarantine", subtitle: "active exceptions and expiry" },
   { path: "/impact", title: "Impact", subtitle: "graph" },
   { path: "/coverage", title: "Coverage", subtitle: "contract vs tests" },
@@ -44,6 +46,7 @@ const nav = [
   { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
   { label: "Runs", icon: GitBranch, to: "/runs" as const },
   { label: "Health", icon: Activity, to: "/health" as const },
+  { label: "Load errors", icon: FileWarning, to: "/load-errors" as const },
   { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
   { label: "Coverage", icon: Layers, to: "/coverage" as const },
@@ -116,7 +119,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 7).map((item) => (
+          {items.slice(0, 8).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -126,7 +129,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Knowledge
           </div>
-          {items.slice(7, 9).map((item) => (
+          {items.slice(8, 10).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -136,7 +139,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Settings
           </div>
-          {items.slice(9).map((item) => (
+          {items.slice(10).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -208,6 +211,7 @@ function NavItem({
     | "/overview"
     | "/runs"
     | "/health"
+    | "/load-errors"
     | "/quarantine"
     | "/impact"
     | "/coverage"

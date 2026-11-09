@@ -326,6 +326,21 @@ export type ApiQuarantineSuggestion = {
   last_failure_at?: string | null;
 };
 
+export type ApiLoadError = {
+  id: string;
+  message: string;
+  occurrences: number;
+  first_seen_run: number;
+  last_seen_run: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  triage_status: string;
+  triage_owner?: string;
+  triage_note?: string;
+  triage_updated_by?: string;
+  triage_updated_at?: string | null;
+};
+
 export type ApiQuarantine = {
   key: string;
   test?: string;

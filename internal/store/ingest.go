@@ -60,6 +60,9 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 			return nil, fmt.Errorf("simpan run: %w", err)
 		}
 
+		if err := saveLoadErrors(ctx, tx, runID, reportErrors); err != nil {
+			return nil, err
+		}
 		sourceIDs, err := saveSources(ctx, tx, rep.Sources)
 		if err != nil {
 			return nil, err
@@ -200,6 +203,46 @@ func saveFiles(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, fi
 		return fmt.Errorf("simpan graph import: %w", err)
 	}
 	return nil
+}
+
+// saveLoadErrors aggregates report-level errors (spec/global setup failures) into LoadError groups.
+// They have no test result, so they are stored separately from Failure.
+func saveLoadErrors(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, messages []string) error {
+	seen := map[string]bool{}
+	for _, message := range messages {
+		normalized := triage.Normalize(message)
+		if normalized == "" {
+			continue
+		}
+		id := triage.Fingerprint("__load_error__", normalized)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if _, err := tx.Run(ctx, `
+			MATCH (run:Run {id: $runId})
+			MERGE (e:LoadError {id: $id})
+			ON CREATE SET e.message = $message, e.firstSeenRun = $runId, e.firstSeenAt = datetime(),
+				e.occurrences = 0, e.triageStatus = 'open', e.triageOwner = '', e.triageNote = '',
+				e.triageUpdatedBy = ''
+			SET e.lastSeenRun = $runId, e.lastSeenAt = datetime(),
+				e.occurrences = e.occurrences + 1,
+				e.triageStatus = CASE WHEN e.triageStatus = 'resolved' THEN 'open' ELSE e.triageStatus END
+			MERGE (run)-[:LOAD_ERROR]->(e)`,
+			map[string]any{"runId": runID, "id": id, "message": clipLoadError(message)}); err != nil {
+			return fmt.Errorf("simpan load error: %w", err)
+		}
+	}
+	return nil
+}
+
+func clipLoadError(value string) string {
+	const max = 4000
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 // saveResult menyimpan hasil satu test di run ini, beserta test-nya dan bentuk response-nya.

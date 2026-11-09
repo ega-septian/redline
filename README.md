@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-run trend, suite load errors, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-run trend, suite load errors, per-test timeline), a **load errors** page with owner/status triage, **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -359,6 +359,8 @@ Voyage AI.
 | `POST /api/runs`                                                   | Send a Playwright JSON report                                  |
 | `GET /api/runs`                                                    | Recent runs (`?project=...` scopes them)                       |
 | `GET /api/runs/errors?limit=20`                                    | Workspace-level runs whose spec or setup failed before tests   |
+| `GET /api/load-errors?limit=50`                                    | Grouped report-level load errors with owner/status/note       |
+| `PUT /api/load-errors/{id}/triage`                                 | Triage a load error: `{"status": "...", "owner": "...", "note": "...", "by": "..."}` |
 | `GET /api/projects`                                                | Projects with tests, runs and open-failure counts              |
 | `GET /api/runs/{id}`, `GET /api/runs/{id}/compare`                 | Run detail, and comparison with the previous run               |
 | `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
@@ -412,7 +414,8 @@ load errors. A regression compares the latest executed result with the previous 
 same test; it must be at least 30% and 100 ms slower to appear. Select a row for the per-test timeline,
 last/previous duration and owner. Runs with report-level errors (a spec failed to load, or global setup
 failed) appear in a workspace-level **Suite load errors** card; the Runs page still marks project runs
-that contain report errors.
+that contain report errors. The dedicated **Load errors** page groups these messages across runs and
+supports owner, status and note. Resolving is manual; a resolved error reopens if it appears again.
 
 ### Quarantine page
 
@@ -592,7 +595,7 @@ failing in a confusing way.
 ## What's next
 
 - **ReportPortal, the other way**: labels corrected by the team in ReportPortal flow back into Redline as proven cases.
-- Group and triage errors that stop a spec from loading (syntax errors, broken imports) as first-class failures.
+- Analyse load-error messages with rules/AI (for example broken import vs missing dependency).
 - An inferred contract for APIs without documentation.
 
 ## License
