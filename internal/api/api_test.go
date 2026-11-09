@@ -42,6 +42,7 @@ type fakeStore struct {
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
 	runErrors          []store.Run
+	loadErrors         []store.LoadError
 	dismissals         map[string]time.Time
 	dismissed          string
 	ingest             *store.IngestResult
@@ -94,6 +95,29 @@ func (f *fakeStore) IngestReport(_ context.Context, rep *report.Report, meta sto
 	return &store.IngestResult{RunID: 7, Total: f.gotTests}, nil
 }
 func (f *fakeStore) ListRuns(context.Context, int) ([]store.Run, error) { return []store.Run{}, nil }
+func (f *fakeStore) LoadErrors(_ context.Context, limit int) ([]store.LoadError, error) {
+	out := f.loadErrors
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+func (f *fakeStore) SetLoadErrorTriage(_ context.Context, id, status, owner, note, by string) error {
+	for i := range f.loadErrors {
+		if f.loadErrors[i].ID != id {
+			continue
+		}
+		f.loadErrors[i].TriageStatus = status
+		f.loadErrors[i].TriageOwner = owner
+		f.loadErrors[i].TriageNote = note
+		f.loadErrors[i].TriageUpdatedBy = by
+		return nil
+	}
+	return store.ErrNotFound
+}
 func (f *fakeStore) RunsWithReportErrors(_ context.Context, limit int) ([]store.Run, error) {
 	out := f.runErrors
 	if limit <= 0 || limit > 100 {
@@ -2033,5 +2057,36 @@ func TestRunReportErrors(t *testing.T) {
 	}
 	if rec := do(h, http.MethodGet, "/api/runs/errors?limit=101", nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("run errors limit invalid = %d, want 400", rec.Code)
+	}
+}
+
+func TestLoadErrorAPI(t *testing.T) {
+	fs := &fakeStore{loadErrors: []store.LoadError{{
+		ID: "le-1", Message: "Cannot find module './helpers/brands'", Occurrences: 2,
+		FirstSeenRun: 1, LastSeenRun: 2, TriageStatus: "open",
+	}}}
+	h := newServer(fs, 0)
+
+	rec := do(h, http.MethodGet, "/api/load-errors?limit=10", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id": "le-1"`) ||
+		!strings.Contains(rec.Body.String(), `"occurrences": 2`) {
+		t.Errorf("load errors = %d: %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodPut, "/api/load-errors/le-1/triage",
+		strings.NewReader(`{"status":"acknowledged","owner":"ega","note":"fix import","by":"ega"}`))
+	if rec.Code != http.StatusOK || fs.loadErrors[0].TriageStatus != "acknowledged" ||
+		fs.loadErrors[0].TriageOwner != "ega" {
+		t.Errorf("triage load error = %d: %s -> %+v", rec.Code, rec.Body, fs.loadErrors[0])
+	}
+	if rec := do(h, http.MethodGet, "/api/load-errors?limit=101", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("load errors limit invalid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPut, "/api/load-errors/le-1/triage",
+		strings.NewReader(`{"status":"bogus","owner":"ega"}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("triage status invalid = %d, want 400", rec.Code)
+	}
+	if rec := do(h, http.MethodPut, "/api/load-errors/missing/triage",
+		strings.NewReader(`{"status":"open","owner":"ega"}`)); rec.Code != http.StatusNotFound {
+		t.Errorf("triage missing = %d, want 404", rec.Code)
 	}
 }

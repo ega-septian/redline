@@ -1,6 +1,7 @@
 import type {
   AnalyzeResult,
   ApiGroup,
+  ApiLoadError,
   ApiProject,
   ApiQuarantine,
   ApiQuarantineSuggestion,
@@ -106,6 +107,19 @@ export const api = {
       `/api/runs?limit=50${project ? `&project=${encodeURIComponent(project)}` : ""}`,
     ),
   runErrors: (limit = 20) => request<ApiRun[]>(`/api/runs/errors?limit=${limit}`),
+  loadErrors: (limit = 50) => request<ApiLoadError[]>(`/api/load-errors?limit=${limit}`),
+  triageLoadError: (
+    id: string,
+    input: { status: string; owner: string; note: string },
+  ) =>
+    request<{ status: string; owner: string; note: string; by: string }>(
+      `/api/load-errors/${encodeURIComponent(id)}/triage`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify({ ...input, by: "ui" }),
+      },
+    ),
   run: (id: number) => request<RunDetail>(`/api/runs/${id}`),
   compareRun: (id: number) => request<RunComparison>(`/api/runs/${id}/compare`),
   impact: (kind: "file" | "endpoint", query: string) =>

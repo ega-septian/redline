@@ -400,6 +400,9 @@ function LoadErrors({ runs }: { runs: ApiRun[] }) {
         <span className="text-[10.5px] text-faint">
           runs where a spec or global setup failed before tests could run
         </span>
+        <Link to="/load-errors" className="ml-auto text-[10.5px] text-brand hover:underline">
+          Open load errors →
+        </Link>
       </div>
       <div className="flex flex-col divide-y divide-line-soft">
         {runs.map((run) => (

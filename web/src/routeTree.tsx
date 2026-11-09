@@ -55,6 +55,12 @@ const quarantineRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/quarantine"), "QuarantinePage"),
 });
 
+const loadErrorsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/load-errors",
+  component: lazyRouteComponent(() => import("@/pages/load-errors"), "LoadErrorsPage"),
+});
+
 const impactRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/impact",
@@ -92,6 +98,7 @@ export const routeTree = rootRoute.addChildren([
   runDetailRoute,
   healthRoute,
   quarantineRoute,
+  loadErrorsRoute,
   impactRoute,
   coverageRoute,
   configRoute,
