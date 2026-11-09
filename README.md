@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -398,6 +398,8 @@ Voyage AI.
 
 Labels: `backend_bug`, `test_bug`, `environment`, `flaky`, `unknown`.
 Triage statuses: `open`, `acknowledged`, `in_progress`, `muted`, `wont_fix`; `resolved` is automatic when the test passes again.
+The Failures page shows **Triage health**: aging buckets (0–1d, 2–7d, >7d) and owner workload.
+Click a bucket or owner to filter the list; muted and won't-fix failures are excluded from this panel.
 Quarantine is keyed by `@TC-` ID when present, so a rename keeps it. Every active quarantine needs an owner, a reason and an expiry (1–90 days); expired or released entries are no longer active.
 
 ### Quarantine page

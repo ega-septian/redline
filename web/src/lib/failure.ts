@@ -50,6 +50,7 @@ export type Failure = {
   cost: string;
   latency: string;
   firstSeen: string;
+  firstSeenAt: string;
   labelNote: string;
   runs: FailureRun[];
 };
@@ -221,6 +222,7 @@ export function toFailure(
     cost: analysis?.cost_usd ? `$${analysis.cost_usd.toFixed(5)}` : "—",
     latency: "—",
     firstSeen: when(group.first_seen_at),
+    firstSeenAt: group.first_seen_at,
     labelNote: group.human_note ?? "",
     runs: runsOf(detail),
   };

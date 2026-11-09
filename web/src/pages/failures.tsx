@@ -6,6 +6,13 @@ import { api } from "@/api/client";
 import { FailureDetail } from "@/components/failures/failure-detail";
 import { FailureTable } from "@/components/failures/failure-table";
 import { Kpis } from "@/components/failures/kpis";
+import {
+  TriageHealth,
+  ageBucketOf,
+  ownerKey,
+  type AgeBucket,
+  type AgeFilter,
+} from "@/components/failures/triage-health";
 import { SetupChecklist } from "@/components/setup-checklist";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -171,6 +178,14 @@ export function FailuresPage() {
     if (value === "all") return "all";
     return value && value in triageLabel ? (value as TriageStatus) : "active";
   });
+  const [age, setAge] = useState<AgeFilter>(() => {
+    const value = params.get("age");
+    return value === "fresh" || value === "week" || value === "stale" ? value : "all";
+  });
+  const [owner, setOwner] = useState(() => {
+    const value = params.get("owner");
+    return value && value !== "all" ? value : "all";
+  });
   // Deep link from a run detail's "Failure history" button.
   const [selected, setSelected] = useState(() => params.get("failure") ?? "");
   const [grouped, setGrouped] = useState(() => params.get("group") !== "flat");
@@ -205,6 +220,8 @@ export function FailuresPage() {
         return false;
       }
       if (category !== "all" && failure.category !== category) return false;
+      if (age !== "all" && ageBucketOf(failure.firstSeenAt) !== age) return false;
+      if (owner !== "all" && ownerKey(failure.triageOwner) !== owner) return false;
       if (!needle) return true;
       return [
         failure.title,
@@ -220,7 +237,7 @@ export function FailuresPage() {
         .toLowerCase()
         .includes(needle);
     });
-  }, [triageScoped, status, category, query]);
+  }, [triageScoped, status, category, age, owner, query]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -253,6 +270,8 @@ export function FailuresPage() {
     if (query) next.set("q", query);
     if (sort !== "recent") next.set("sort", sort);
     if (triage !== "active") next.set("triage", triage);
+    if (age !== "all") next.set("age", age);
+    if (owner !== "all") next.set("owner", owner);
     if (!grouped) next.set("group", "flat");
     if (activeFingerprint) next.set("failure", activeFingerprint);
     const search = next.toString();
@@ -260,7 +279,7 @@ export function FailuresPage() {
     if (url !== `${window.location.pathname}${window.location.search}`) {
       window.history.replaceState(null, "", url);
     }
-  }, [status, category, query, sort, triage, grouped, activeFingerprint]);
+  }, [status, category, query, sort, triage, age, owner, grouped, activeFingerprint]);
 
   const activeGroup = groups.find((group) => group.fingerprint === activeFingerprint);
   const detailQuery = useQuery({
@@ -348,20 +367,22 @@ export function FailuresPage() {
 
   useEffect(() => {
     setSelection(new Set());
-  }, [status, category, query, triage]);
+  }, [status, category, query, triage, age, owner]);
 
-  const stats = useMemo(() => {
-    const active = base.filter(
-      (failure) => failure.triageStatus !== "muted" && failure.triageStatus !== "wont_fix",
-    );
-    return {
-      open: active.length,
+  const triageDebt = useMemo(
+    () => base.filter((failure) => failure.triageStatus !== "muted" && failure.triageStatus !== "wont_fix"),
+    [base],
+  );
+  const stats = useMemo(
+    () => ({
+      open: triageDebt.length,
       occurrences: groups.reduce((total, group) => total + group.occurrences, 0),
       newToday: groups.filter((group) => isToday(group.first_seen_at)).length,
-      needsAI: active.filter((failure) => failure.needsAI).length,
+      needsAI: triageDebt.filter((failure) => failure.needsAI).length,
       project,
-    };
-  }, [groups, base, project]);
+    }),
+    [groups, triageDebt, project],
+  );
 
   if (groupsQuery.isPending) {
     return (
@@ -389,6 +410,26 @@ export function FailuresPage() {
     <>
       <SetupChecklist />
       <Kpis {...stats} />
+
+      {triageDebt.length > 0 && (
+        <TriageHealth
+          failures={triageDebt}
+          age={age}
+          owner={owner}
+          onAge={(next: AgeBucket) => {
+            setAge((current) => (current === next ? "all" : next));
+            setTriage("active");
+          }}
+          onOwner={(next) => {
+            setOwner((current) => (current === next ? "all" : next));
+            setTriage("active");
+          }}
+          onClear={() => {
+            setAge("all");
+            setOwner("all");
+          }}
+        />
+      )}
 
       <section className="rounded-[10px] border border-line bg-surface p-2">
         <div className="flex flex-wrap items-center gap-2">
