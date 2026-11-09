@@ -4,7 +4,7 @@ import { Activity, AlertTriangle, Check, Clock, Copy, Search, Sparkles, Timer, T
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { api } from "@/api/client";
-import type { ApiQuarantineSuggestion, TestHealthRow, TestRunPoint } from "@/api/types";
+import type { ApiQuarantineSuggestion, ApiRun, TestHealthRow, TestRunPoint } from "@/api/types";
 import { TestHealthTrend } from "@/components/test-health-trend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,10 +36,15 @@ export function HealthPage() {
     queryKey: ["test-trend", days, project],
     queryFn: () => api.testTrend(days, project),
   });
+  const errorsQuery = useQuery({
+    queryKey: ["run-errors"],
+    queryFn: () => api.runErrors(20),
+  });
   const suggestions = suggestionsQuery.data ?? [];
   const summary = healthQuery.data?.summary;
   const tests = healthQuery.data?.tests ?? [];
   const trend = trendQuery.data ?? [];
+  const loadErrors = (errorsQuery.data ?? []).slice(0, 5);
   const quarantined = tests.filter((test) => test.quarantined).length;
 
   const filtered = useMemo(() => {
@@ -167,6 +172,8 @@ export function HealthPage() {
       </section>
 
       <TestHealthTrend points={trend} />
+
+      {loadErrors.length > 0 && <LoadErrors runs={loadErrors} />}
 
       {suggestions.length > 0 && (
         <SuggestionsPanel suggestions={suggestions} onSelect={setSelected} />
@@ -377,6 +384,47 @@ function TestDetail({ row, days, onClose }: { row: TestHealthRow; days: number; 
             <RunPoint key={`${run.run_id}-${run.at}`} point={run} />
           ))}
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function LoadErrors({ runs }: { runs: ApiRun[] }) {
+  return (
+    <Card className="overflow-hidden border-danger/30">
+      <div className="flex flex-wrap items-center gap-2 border-b border-danger/20 bg-danger/5 px-3.5 py-2.5">
+        <AlertTriangle className="h-3.5 w-3.5 text-danger" />
+        <span className="text-[12.5px] font-semibold">Suite load errors</span>
+        <Badge tone="backend">{runs.length}</Badge>
+        <Badge tone="neutral">workspace</Badge>
+        <span className="text-[10.5px] text-faint">
+          runs where a spec or global setup failed before tests could run
+        </span>
+      </div>
+      <div className="flex flex-col divide-y divide-line-soft">
+        {runs.map((run) => (
+          <Link
+            key={run.id}
+            to="/runs/$runId"
+            params={{ runId: String(run.id) }}
+            className="px-3.5 py-2 transition-colors hover:bg-[#12171e]"
+          >
+            <div className="flex flex-wrap items-center gap-2 text-[10.5px]">
+              <span className="font-mono text-muted">run #{run.id}</span>
+              <span className="text-faint">{when(run.created_at)}</span>
+              {run.branch && <span className="truncate text-faint">{run.branch}</span>}
+              <span className="ml-auto text-danger">
+                {run.report_errors.length} error{run.report_errors.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div
+              className="mt-1 truncate font-mono text-[10.5px] text-[#ffb3ad]"
+              title={run.report_errors.join("\n")}
+            >
+              {oneLine(run.report_errors[0])}
+            </div>
+          </Link>
+        ))}
       </div>
     </Card>
   );

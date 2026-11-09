@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"redline/internal/report"
 	"redline/internal/store"
 )
 
@@ -92,5 +93,25 @@ func TestRunDetail(t *testing.T) {
 		if result.Category != "backend_bug" || result.Confidence != "high" || result.HumanLabel != "backend_bug" {
 			t.Errorf("hasil harus membawa analisis dan label terbaru: %+v", result)
 		}
+	}
+}
+
+func TestRunsWithReportErrors(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	ingest(t, s, shopReport(healthSpec("A", "TC-A", "passed")), store.RunMeta{Branch: "main"})
+	broken := shopReport()
+	broken.Errors = []report.ErrorEntry{{Message: "Cannot find module './helpers/brands'"}}
+	run := ingest(t, s, broken, store.RunMeta{Branch: "main"})
+
+	runs, err := s.RunsWithReportErrors(ctx, 10)
+	if err != nil || len(runs) != 1 || runs[0].ID != run.RunID {
+		t.Fatalf("run errors = %+v %v", runs, err)
+	}
+	if len(runs[0].ReportErrors) != 1 || !strings.Contains(runs[0].ReportErrors[0], "helpers/brands") {
+		t.Errorf("report errors salah: %+v", runs[0].ReportErrors)
+	}
+	if limited, err := s.RunsWithReportErrors(ctx, 0); err != nil || len(limited) != 1 {
+		t.Errorf("limit default salah: %+v %v", limited, err)
 	}
 }

@@ -33,6 +33,7 @@ import (
 type Store interface {
 	IngestReport(ctx context.Context, rep *report.Report, meta store.RunMeta) (*store.IngestResult, error)
 	ListRuns(ctx context.Context, limit int) ([]store.Run, error)
+	RunsWithReportErrors(ctx context.Context, limit int) ([]store.Run, error)
 	ListRunsForProject(ctx context.Context, project string, limit int) ([]store.Run, error)
 	ProjectSummaries(ctx context.Context) ([]store.ProjectSummary, error)
 	GetRun(ctx context.Context, id int64) (store.Run, error)
@@ -184,6 +185,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)
+	mux.HandleFunc("GET /api/runs/errors", s.handleRunsWithErrors)
 	mux.HandleFunc("GET /api/runs/{id}", s.handleGetRun)
 	mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	mux.HandleFunc("GET /api/groups/{fingerprint}", s.handleGetGroup)
@@ -554,6 +556,21 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	runs, err := s.Store.ListRunsForProject(r.Context(), project, limit)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runs)
+}
+
+// handleRunsWithErrors: GET /api/runs/errors?limit=20 — workspace-level suite load failures.
+func (s *Server) handleRunsWithErrors(w http.ResponseWriter, r *http.Request) {
+	limit, err := queryInt(r, "limit", 20, 1, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	runs, err := s.Store.RunsWithReportErrors(r.Context(), limit)
 	if err != nil {
 		s.serverError(w, err)
 		return
