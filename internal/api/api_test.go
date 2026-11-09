@@ -49,6 +49,11 @@ type fakeStore struct {
 	lastGroupProject   string
 	snapshots          []store.ContractSnapshot
 	calls              []store.EndpointCall
+	group              *store.Group
+	occurrences        []store.Occurrence
+	analysis           *store.Analysis
+	knowledge          *store.Knowledge
+	experiments        []store.Experiment
 }
 
 type fakeNotifier struct {
@@ -329,10 +334,16 @@ func (f *fakeStore) ListGroupsForProject(_ context.Context, statuses []string, l
 	f.lastGroupProject = project
 	return f.ListGroups(context.Background(), statuses, limit)
 }
-func (f *fakeStore) GetGroup(_ context.Context, fp string) (store.Group, []store.Occurrence, error) {
+func (f *fakeStore) GetGroup(_ context.Context, _ string) (store.Group, []store.Occurrence, error) {
+	if f.group != nil {
+		return *f.group, f.occurrences, nil
+	}
 	return store.Group{}, nil, store.ErrNotFound
 }
 func (f *fakeStore) GetAnalysis(context.Context, string, string) (store.Analysis, error) {
+	if f.analysis != nil {
+		return *f.analysis, nil
+	}
 	return store.Analysis{}, store.ErrNotFound
 }
 func (f *fakeStore) SetLabel(_ context.Context, fp, label, note, by string) error {
@@ -363,6 +374,9 @@ func (f *fakeStore) SaveExperiment(_ context.Context, e store.Experiment) (int64
 	return 1, nil
 }
 func (f *fakeStore) ListExperiments(context.Context, string) ([]store.Experiment, error) {
+	if f.experiments != nil {
+		return f.experiments, nil
+	}
 	return []store.Experiment{}, nil
 }
 func (f *fakeStore) ListRules(context.Context, string) ([]store.LearnedRule, error) {
@@ -381,6 +395,9 @@ func (f *fakeStore) Scores(_ context.Context, groupID string, _ int) (*store.Sco
 }
 
 func (f *fakeStore) Knowledge(_ context.Context, fp string) (*store.Knowledge, error) {
+	if f.knowledge != nil {
+		return f.knowledge, nil
+	}
 	if fp != "abc" {
 		return nil, store.ErrNotFound
 	}
@@ -1642,5 +1659,76 @@ func TestCoverageChangeImpact(t *testing.T) {
 	}
 	if got := byPath["/many"]; got.tests != 25 || len(got.keys) != 20 {
 		t.Errorf("impact /many harus 25 test dan 20 key: %+v", got)
+	}
+}
+
+func TestGroupKnowledgeMarkdown(t *testing.T) {
+	now := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	fs := &fakeStore{
+		group: &store.Group{
+			Fingerprint: "fp-brand", TestKey: "toolshop › brand.spec.ts › get all",
+			TestCaseID: "TC-BRD-001", Project: "toolshop", File: "api/toolshop/brand.spec.ts",
+			Title: "GET /brands returns a brand with a string id", Status: "recurring",
+			Summary: "The API changed id from number to string.", Cause: "GET /brands → id type",
+			Occurrences: 2, Regressions: 1, FirstSeenRun: 10, LastSeenRun: 12,
+			FirstSeenAt: now.Add(-48 * time.Hour), LastSeenAt: now,
+			TriageStatus: "acknowledged", TriageOwner: "ega", TriageNote: "reviewing",
+			Category: "test_bug", Confidence: "high", AnalysisSource: "ai",
+			AnalysisModel: "claude-haiku-5-5", AnalysisSummary: "The test expects a number.",
+			SampleError: "expect(received).toBe(expected)\nExpected: number\nReceived: string",
+		},
+		occurrences: []store.Occurrence{
+			{RunID: 12, RunCreatedAt: now, Status: "failed", Branch: "main", CommitSHA: "abcdef123456", AppVersion: "v1.2.0", Source: "ci"},
+			{RunID: 10, RunCreatedAt: now.Add(-48 * time.Hour), Status: "failed", Branch: "main", CommitSHA: "1234567890", AppVersion: "v1.1.0", Source: "ci"},
+		},
+		analysis: &store.Analysis{
+			Source: "ai", Model: "claude-haiku-5-5", Category: "test_bug", Confidence: "high",
+			Summary: "The test expects a number.", Evidence: []string{"Expected: number", "Received: string"},
+			NextStep: "Update the schema to accept string ids.", CreatedAt: now,
+		},
+		knowledge: &store.Knowledge{
+			RunID: 12, PassRunID: 11, Compared: true,
+			Files: []store.FileFact{{
+				Path: "schemas/brand.ts", Direct: true, Changed: true,
+				Others: store.TestSplit{Failed: []string{"TC-BRD-002"}, Passed: []string{"TC-BRD-003"}},
+			}},
+			Endpoints: []store.EndpointFact{{
+				Key: "GET /brands", SeenPassing: true,
+				Without: store.TestSplit{Failed: []string{"TC-BRD-004"}},
+			}},
+		},
+		experiments: []store.Experiment{{
+			Kind: "rerun", Outcome: "passed", Hypothesis: "The failure is flaky.", Runs: 3, Passes: 2,
+			CreatedAt: now,
+		}},
+	}
+	h := newServer(fs, 0)
+	rec := do(h, http.MethodGet, "/api/groups/fp-brand/knowledge.md", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("knowledge markdown = %d: %s", rec.Code, rec.Body)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/markdown") {
+		t.Errorf("content type = %q", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, "redline-TC-BRD-001.md") {
+		t.Errorf("content disposition = %q", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"# GET /brands returns a brand with a string id",
+		"TC-BRD-001",
+		"run #12",
+		"## Run history",
+		"## Knowledge graph",
+		"schemas/brand.ts",
+		"GET /brands",
+		"## Proof",
+		"## Sources",
+		"Expected: number",
+		"Update the schema to accept string ids.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("markdown harus memuat %q:\n%s", want, body)
+		}
 	}
 }

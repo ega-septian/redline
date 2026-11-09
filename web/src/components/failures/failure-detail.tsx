@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { BookOpen, Check, Copy, Download, ExternalLink } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { api } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DiagnosisPanel } from "@/components/failures/diagnosis-panel";
@@ -30,6 +31,9 @@ export function FailureDetail({
   const [tab, setTab] = useState<Tab>("Analysis");
   const [copied, setCopied] = useState(false);
   const [copiedRerun, setCopiedRerun] = useState(false);
+  const [copiedMarkdown, setCopiedMarkdown] = useState(false);
+  const [markdownBusy, setMarkdownBusy] = useState(false);
+  const [markdownError, setMarkdownError] = useState("");
 
   async function copyError() {
     await navigator.clipboard.writeText(failure.reproduce);
@@ -44,6 +48,41 @@ export function FailureDetail({
     await navigator.clipboard.writeText(`npx playwright test --grep "${pattern}"`);
     setCopiedRerun(true);
     window.setTimeout(() => setCopiedRerun(false), 1500);
+  }
+
+  async function copyMarkdown() {
+    setMarkdownBusy(true);
+    setMarkdownError("");
+    try {
+      const markdown = await api.knowledgeMarkdown(failure.fingerprint);
+      await navigator.clipboard.writeText(markdown);
+      setCopiedMarkdown(true);
+      window.setTimeout(() => setCopiedMarkdown(false), 1500);
+    } catch (error) {
+      setMarkdownError(error instanceof Error ? error.message : "Could not build the knowledge page.");
+    } finally {
+      setMarkdownBusy(false);
+    }
+  }
+
+  async function downloadMarkdown() {
+    setMarkdownBusy(true);
+    setMarkdownError("");
+    try {
+      const markdown = await api.knowledgeMarkdown(failure.fingerprint);
+      const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = markdownFilename(failure.testCaseId || failure.fingerprint.slice(0, 8));
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setMarkdownError(error instanceof Error ? error.message : "Could not download the knowledge page.");
+    } finally {
+      setMarkdownBusy(false);
+    }
   }
 
   return (
@@ -112,7 +151,16 @@ export function FailureDetail({
       <div className="flex flex-col gap-3.5 p-4">
         {tab === "Analysis" && <Analysis failure={failure} />}
         {tab === "Occurrences" && <Occurrences failure={failure} />}
-        {tab === "Knowledge" && <Knowledge failure={failure} />}
+        {tab === "Knowledge" && (
+          <Knowledge
+            failure={failure}
+            busy={markdownBusy}
+            copied={copiedMarkdown}
+            error={markdownError}
+            onCopy={copyMarkdown}
+            onDownload={downloadMarkdown}
+          />
+        )}
 
         <DiagnosisPanel key={failure.fingerprint} failure={failure} />
         <TriagePanel key={`triage-${failure.fingerprint}`} failure={failure} />
@@ -297,7 +345,21 @@ function Occurrences({ failure }: { failure: Failure }) {
   );
 }
 
-function Knowledge({ failure }: { failure: Failure }) {
+function Knowledge({
+  failure,
+  busy,
+  copied,
+  error,
+  onCopy,
+  onDownload,
+}: {
+  failure: Failure;
+  busy: boolean;
+  copied: boolean;
+  error: string;
+  onCopy: () => void;
+  onDownload: () => void;
+}) {
   return (
     <section className="flex flex-col gap-2">
       <BlockLabel>Knowledge graph</BlockLabel>
@@ -309,6 +371,29 @@ function Knowledge({ failure }: { failure: Failure }) {
         The graph stores which files and endpoints each test uses, so a shared schema or a failing
         endpoint is visible across specs.
       </p>
+
+      <div className="mt-1 rounded-md border border-line-soft bg-canvas p-2.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <BookOpen className="h-3.5 w-3.5 text-brand" />
+          <span className="text-[11.5px] font-semibold">Knowledge page</span>
+          <Badge tone="neutral">Markdown</Badge>
+        </div>
+        <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
+          Read-only summary with run and analysis citations. Generated from stored facts, no extra
+          LLM call.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button size="sm" onClick={onCopy} disabled={busy}>
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied" : "Copy Markdown"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDownload} disabled={busy}>
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </Button>
+        </div>
+        {error && <div className="mt-1.5 text-[10.5px] text-danger">{error}</div>}
+      </div>
     </section>
   );
 }
@@ -330,4 +415,9 @@ function BlockLabel({ children }: { children: ReactNode }) {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function markdownFilename(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "group";
+  return `redline-${safe}.md`;
 }

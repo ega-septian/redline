@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules and the scoreboard.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage, a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky tests, per-test timeline), **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources, Discord notifications and delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -281,6 +281,14 @@ touched). It uses Claude, so the server needs `ANTHROPIC_API_KEY`:
 The patch is saved to `test-results/redline/<id>.patch` to review. Patches that remove assertions or add
 `skip`, `try/catch` or retries are rejected. About $0.001 per verify.
 
+### Knowledge page
+
+The **Knowledge** tab on a failure can copy or download a Markdown page built from stored facts: test
+identity, cause and evidence, last error, run history, graph facts and proof experiments. Every section
+names its run or analysis, so the export can be reviewed like any other piece of evidence. It is
+generated from Neo4j and never calls an LLM. The same document is available at
+`GET /api/groups/{id}/knowledge.md`.
+
 ## Reports
 
 - **Markdown**: `test-results/redline-report.md`, with the cause, evidence and a curl per failed request.
@@ -376,6 +384,7 @@ Voyage AI.
 | `PUT /api/groups/{id}/label`                                       | Label it: `{"label": "test_bug", "note": "...", "by": "name"}` |
 | `PUT /api/groups/{id}/triage`                                      | Triage: `{"status": "acknowledged", "owner": "ega", "note": "...", "by": "ega"}` |
 | `GET /api/groups/{id}/knowledge`                                   | Graph facts behind a decision                                  |
+| `GET /api/groups/{id}/knowledge.md`                                | Read-only Markdown knowledge page with run and analysis citations |
 | `POST /api/groups/{id}/fix`, `.../experiments`                     | Used by `verify`                                               |
 | `GET /api/rules`, `POST /api/rules/propose`, `PUT /api/rules/{id}` | Learned rules                                                  |
 | `GET /api/rules/candidates`, `POST /api/rules/candidates/promote` | AI rule candidates, promoted only after proof                 |
