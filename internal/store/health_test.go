@@ -29,6 +29,46 @@ func healthSpec(title, tag, status string) report.Spec {
 	return spec
 }
 
+func TestTestHealthDurationDelta(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	spec := func(title, tag string, ms float64) report.Spec {
+		item := healthSpec(title, tag, "passed")
+		for i := range item.Tests {
+			for j := range item.Tests[i].Results {
+				item.Tests[i].Results[j].Duration = ms
+			}
+		}
+		return item
+	}
+
+	ingest(t, s, shopReport(
+		spec("A", "TC-A", 1000),
+		spec("B", "TC-B", 500),
+	), store.RunMeta{Branch: "main", CommitSHA: "one"})
+	ingest(t, s, shopReport(
+		spec("A", "TC-A", 2000),
+		spec("B", "TC-B", 500),
+	), store.RunMeta{Branch: "main", CommitSHA: "two"})
+
+	_, tests, err := s.TestHealth(ctx, "api", 365)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string]store.TestHealthRow{}
+	for _, row := range tests {
+		byKey[row.Key] = row
+	}
+	if a := byKey["TC-A"]; a.LastDurationMs != 2000 || a.PreviousDurationMs != 1000 ||
+		a.AvgDurationMs != 1500 || math.Abs(a.DurationDeltaPct-100) > 1e-9 {
+		t.Errorf("durasi TC-A salah: %+v", a)
+	}
+	if b := byKey["TC-B"]; b.LastDurationMs != 500 || b.PreviousDurationMs != 500 ||
+		b.AvgDurationMs != 500 || b.DurationDeltaPct != 0 {
+		t.Errorf("durasi TC-B salah: %+v", b)
+	}
+}
+
 func TestTestHealth(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

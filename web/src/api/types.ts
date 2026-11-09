@@ -282,6 +282,9 @@ export type TestHealthRow = {
   flake_rate: number;
   flips: number;
   avg_duration_ms: number;
+  last_duration_ms?: number;
+  previous_duration_ms?: number;
+  duration_delta_pct?: number;
   last_status: string;
   last_run_at?: string | null;
   last_failure_at?: string | null;

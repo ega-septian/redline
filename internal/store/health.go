@@ -41,17 +41,20 @@ type TestHealthRow struct {
 	FlakeRate  float64 `json:"flake_rate"`
 	// Flips counts pass↔fail transitions in the last 10 executed results (newest first). A test that
 	// alternates without Playwright retries still has a high flip count.
-	Flips            int        `json:"flips"`
-	AvgDurationMs    int        `json:"avg_duration_ms"`
-	LastStatus       string     `json:"last_status"`
-	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
-	LastFailureAt    *time.Time `json:"last_failure_at,omitempty"`
-	TriageOwner      string     `json:"triage_owner,omitempty"`
-	TriageStatus     string     `json:"triage_status,omitempty"`
-	Quarantined      bool       `json:"quarantined"`
-	QuarantineOwner  string     `json:"quarantine_owner,omitempty"`
-	QuarantineReason string     `json:"quarantine_reason,omitempty"`
-	QuarantineUntil  *time.Time `json:"quarantine_until,omitempty"`
+	Flips              int        `json:"flips"`
+	AvgDurationMs      int        `json:"avg_duration_ms"`
+	LastDurationMs     int        `json:"last_duration_ms,omitempty"`
+	PreviousDurationMs int        `json:"previous_duration_ms,omitempty"`
+	DurationDeltaPct   float64    `json:"duration_delta_pct,omitempty"`
+	LastStatus         string     `json:"last_status"`
+	LastRunAt          *time.Time `json:"last_run_at,omitempty"`
+	LastFailureAt      *time.Time `json:"last_failure_at,omitempty"`
+	TriageOwner        string     `json:"triage_owner,omitempty"`
+	TriageStatus       string     `json:"triage_status,omitempty"`
+	Quarantined        bool       `json:"quarantined"`
+	QuarantineOwner    string     `json:"quarantine_owner,omitempty"`
+	QuarantineReason   string     `json:"quarantine_reason,omitempty"`
+	QuarantineUntil    *time.Time `json:"quarantine_until,omitempty"`
 }
 
 // TestRunPoint is one result in a test's timeline.
@@ -86,12 +89,14 @@ type healthRow struct {
 }
 
 type testAgg struct {
-	row            TestHealthRow
-	executed       int
-	durationSum    int
-	lastExecuted   string
-	recentExecuted int
-	flips          int
+	row              TestHealthRow
+	executed         int
+	durationSum      int
+	lastDuration     int
+	previousDuration int
+	lastExecuted     string
+	recentExecuted   int
+	flips            int
 }
 
 // TestHealth returns the suite summary and one row per test for the last days.
@@ -302,6 +307,12 @@ func aggregateTests(rows []healthRow) []TestHealthRow {
 			agg.row.Skipped++
 		}
 		if item.Status != "skipped" {
+			if agg.executed == 0 {
+				agg.lastDuration = item.DurationMs
+			}
+			if agg.executed == 1 {
+				agg.previousDuration = item.DurationMs
+			}
 			agg.executed++
 			agg.durationSum += item.DurationMs
 			// healthRows is newest first; compare each result with the previous executed one.
@@ -327,6 +338,11 @@ func aggregateTests(rows []healthRow) []TestHealthRow {
 		agg.row.Flips = agg.flips
 		if agg.executed > 0 {
 			agg.row.AvgDurationMs = agg.durationSum / agg.executed
+		}
+		agg.row.LastDurationMs = agg.lastDuration
+		agg.row.PreviousDurationMs = agg.previousDuration
+		if agg.lastDuration > 0 && agg.previousDuration > 0 {
+			agg.row.DurationDeltaPct = float64(agg.lastDuration-agg.previousDuration) / float64(agg.previousDuration) * 100
 		}
 		tests = append(tests, agg.row)
 	}
