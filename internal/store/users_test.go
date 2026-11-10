@@ -25,6 +25,9 @@ func TestUsersAndAuthSecret(t *testing.T) {
 	if count, err := s.UserCount(ctx); err != nil || count != 1 {
 		t.Errorf("count = %d %v", count, err)
 	}
+	if _, err := s.CreateAdmin(ctx, "second", "$2a$12$hash"); !errors.Is(err, store.ErrAdminExists) {
+		t.Errorf("admin kedua: mau ErrAdminExists, dapat %v", err)
+	}
 	got, err := s.User(ctx, "ega")
 	if err != nil || got.Username != "ega" || got.Role != "admin" {
 		t.Errorf("user = %+v %v", got, err)

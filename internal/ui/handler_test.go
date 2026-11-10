@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -123,34 +122,15 @@ func TestAssetsStayPublic(t *testing.T) {
 	}
 }
 
-func TestLoginFlow(t *testing.T) {
+func TestSessionCookieRendersApp(t *testing.T) {
 	h := securedHandler(t)
+	sessions := auth.New("secret", nil)
 
-	if rec := get(t, h, "/login"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in") {
-		t.Fatalf("login page: %d %q", rec.Code, rec.Body)
-	}
-
-	post := func(key string) *httptest.ResponseRecorder {
-		form := url.Values{"key": {key}, "next": {"/ui/failures/abc"}}
-		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec
-	}
-
-	if rec := post("wrong"); rec.Code != http.StatusUnauthorized {
-		t.Errorf("wrong key status = %d", rec.Code)
-	}
-
-	rec := post("secret")
-	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/ui/failures/abc" {
-		t.Fatalf("login: %d %q", rec.Code, rec.Header().Get("Location"))
-	}
-	cookies := rec.Result().Cookies()
+	rec := httptest.NewRecorder()
+	sessions.SetCookie(rec, httptest.NewRequest(http.MethodPost, "/ui/login", nil), "admin")
 	var session *http.Cookie
 	hasCSRF := false
-	for _, cookie := range cookies {
+	for _, cookie := range rec.Result().Cookies() {
 		if cookie.Name == auth.CookieName {
 			session = cookie
 		}
@@ -159,7 +139,7 @@ func TestLoginFlow(t *testing.T) {
 		}
 	}
 	if session == nil || !session.HttpOnly || !hasCSRF {
-		t.Fatalf("cookies = %+v", cookies)
+		t.Fatalf("cookies = %+v", rec.Result().Cookies())
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/failures/abc", nil)

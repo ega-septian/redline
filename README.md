@@ -158,7 +158,6 @@ Everything has a default that works on a laptop. The settings you are most likel
 | `HOST`            | `127.0.0.1`    | Interface to bind. A non-loopback host requires `REDLINE_API_KEY` |
 | `PORT`            | `8787`         | HTTP port                                                        |
 | `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host     |
-| `REDLINE_SETUP_TOKEN` | empty      | One-time token for `/ui/setup`; empty = generated and logged when no admin exists |
 | `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all`     |
 | `RETENTION_DAYS`  | `30`           | Old test details and artifacts are cleaned up (`0` = never)      |
 | `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                                   |
@@ -194,7 +193,7 @@ on a non-loopback host without one.
 # server .env
 HOST=0.0.0.0
 REDLINE_API_KEY=$(openssl rand -hex 32)
-# optional: one key per person, used for login and label audit
+# optional: one key per person, used for API clients and label audit
 # REDLINE_USERS=ega:key-ega,budi:key-budi
 
 # every Playwright project .env
@@ -202,11 +201,11 @@ REDLINE_URL=http://your-server:8787
 REDLINE_API_KEY=<the same key>
 ```
 
-A user key still works for API clients and as a legacy UI login, but the recommended UI path is now
-the admin account. On a fresh install with no admin, the server prints a one-time setup token at
-startup (or use `REDLINE_SETUP_TOKEN`). Open `/ui/setup`, enter the token and create the admin
-username/password. After that, `/ui/login` asks for the username/password, and **Account** in the
-sidebar lets the admin change the password.
+A user key still works for API clients and label audit, but the UI now uses the admin account.
+On a fresh install with no admin, `/ui/login` redirects to `/ui/register`; create the first admin
+username/password there. Registration is only available until the first account exists.
+After that, `/ui/login` asks for the username/password, and **Account** in the sidebar lets the admin
+change the password. Finish registration before exposing the server on a network.
 
 `REDLINE_API_KEY` and `REDLINE_USERS` remain the machine/CI credentials: API clients send
 `Authorization: Bearer <key>`. The UI session is a signed, HttpOnly cookie for 12 hours; API reads accept

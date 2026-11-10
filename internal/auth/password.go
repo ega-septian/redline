@@ -21,10 +21,10 @@ func ValidUsername(value string) bool { return usernamePattern.MatchString(value
 // passwords are rejected instead of being silently truncated.
 func HashPassword(password string) (string, error) {
 	if len(password) < 12 {
-		return "", errors.New("password minimal 12 karakter")
+		return "", errors.New("password must be at least 12 characters")
 	}
 	if len(password) > 72 {
-		return "", errors.New("password maksimal 72 karakter")
+		return "", errors.New("password must be at most 72 bytes")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
 	if err != nil {

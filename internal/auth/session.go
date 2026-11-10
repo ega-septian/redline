@@ -1,8 +1,9 @@
 // Package auth provides the UI session cookie and the shared API key check.
 //
-// The cookie is signed with a key derived from REDLINE_API_KEY, so restarting
-// the server keeps sessions valid while rotating the key invalidates them. An
-// empty REDLINE_API_KEY means the server is open (loopback only, by config).
+// The cookie is signed with the stable secret stored in Neo4j, falling back to
+// material derived from REDLINE_API_KEY and REDLINE_USERS. Restarting the server
+// keeps sessions valid; rotating the credentials invalidates them. An empty key
+// and secret means the server is open (loopback only, by config).
 package auth
 
 import (

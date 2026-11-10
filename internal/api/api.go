@@ -160,7 +160,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok", "version": s.version(), "api": APIVersion,
-			"auth": s.AuthEnabled || s.APIKey != "",
+			"auth": s.AuthEnabled || s.APIKey != "" || s.Session != nil,
 		})
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
