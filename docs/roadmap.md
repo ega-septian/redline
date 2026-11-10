@@ -3,7 +3,7 @@
 What we build next, in order, and what "done" means. The order is deliberate: each phase gives
 the next one something it needs. Decisions already made are recorded at the bottom.
 
-Status: agreed after v0.6.0. Owner: Ega. Last updated: 2026-10-29.
+Status: agreed after v0.6.0. Phase 1 shipped in v1.13.0; pilot metrics still open. Owner: Ega. Last updated: 2026-11-10.
 
 ## Phase 1 — Team-ready triage (3–4 weeks)
 
@@ -13,8 +13,8 @@ Status: agreed after v0.6.0. Owner: Ega. Last updated: 2026-10-29.
 
 - Read-only UI in the same repository (`web/`, React + TypeScript + Vite, embedded with
   `go:embed`): Failures list and detail, Runs, Rules, Impact, Scoreboard.
-- Auth: the existing Bearer key for API/CLI, plus an HttpOnly cookie for the UI. No key in
-  `localStorage`.
+- Auth: admin username/password for the UI, per-project API keys from Config, and the Bearer key for
+  API/CLI. No key in `localStorage`.
 - Labels and rule approval from the UI (the endpoints already exist). This is the first write path.
 - GitHub Action + sticky PR comment: new failure vs already failing on main vs flaky.
 - `Dockerfile` and `docker-compose.yml` (server + Neo4j/DozerDB) and a Deploy section in the README.
