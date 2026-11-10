@@ -45,6 +45,12 @@ type Config struct {
 	// daftar bawaan. Keduanya harus diisi bersama; 0 = pakai harga bawaan.
 	AnthropicInputPrice  float64
 	AnthropicOutputPrice float64
+	// AIMode: "fallback" (default) calls AI only when rules are not high-confidence; "always"
+	// calls AI for every new/regressed group while keeping rules as fallback.
+	AIMode string
+	// AIMaxPerRun limits AI calls per run ID (0 = unlimited). It protects against a run with
+	// hundreds of distinct causes; rules remain available as fallback.
+	AIMaxPerRun int
 	// AIDailyBudgetUSD: batas biaya analisis AI per hari (0 = tanpa batas). Kalau tercapai, aturan
 	// tetap dipakai tetapi AI tidak dipanggil.
 	AIDailyBudgetUSD float64
@@ -117,6 +123,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	aiMode := strings.ToLower(strings.TrimSpace(getenv("AI_MODE", "fallback")))
+	if aiMode != "fallback" && aiMode != "always" {
+		return Config{}, fmt.Errorf("AI_MODE must be fallback or always, got %q", aiMode)
+	}
+	aiMaxPerRun, err := intEnv("AI_MAX_PER_RUN", 20)
+	if err != nil {
+		return Config{}, err
+	}
 	var sources []string
 	if from := strings.ToLower(getenv("STATUS_FROM", "ci")); from != "all" {
 		for _, s := range strings.Split(from, ",") {
@@ -143,6 +157,8 @@ func Load() (Config, error) {
 
 		AnthropicInputPrice:  inputPrice,
 		AnthropicOutputPrice: outputPrice,
+		AIMode:               aiMode,
+		AIMaxPerRun:          aiMaxPerRun,
 		AIDailyBudgetUSD:     budget,
 
 		Neo4jURI:      getenv("NEO4J_URI", "bolt://localhost:7688"),
@@ -214,6 +230,18 @@ func parseUsers(raw string) (map[string]string, error) {
 }
 
 // priceEnv membaca angka non-negatif (harga USD atau batas biaya). Kosong = 0.
+func intEnv(key string, fallback int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("%s must be 0 or greater, got %q", key, raw)
+	}
+	return v, nil
+}
+
 func priceEnv(key string) (float64, error) {
 	raw := os.Getenv(key)
 	if raw == "" {
