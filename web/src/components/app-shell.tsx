@@ -3,14 +3,12 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   AlertTriangle,
   Activity,
-  BarChart3,
   FileWarning,
   GitBranch,
   LayoutDashboard,
   Layers,
   Settings2,
   ShieldOff,
-  Sparkles,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
@@ -50,8 +48,8 @@ const nav = [
   { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const },
   { label: "Impact", icon: Waypoints, to: "/impact" as const },
   { label: "Coverage", icon: Layers, to: "/coverage" as const },
-  { label: "Rules", icon: Sparkles, to: "/rules" as const },
-  { label: "Scoreboard", icon: BarChart3, to: "/scoreboard" as const },
+  // Rules and Scoreboard are intentionally hidden from the sidebar for rules-only/AI-optional
+  // deployments. Their routes and API remain available for later.
   { label: "Config", icon: Settings2, to: "/config" as const },
 ];
 
@@ -127,19 +125,9 @@ export function AppShell() {
             />
           ))}
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
-            Knowledge
-          </div>
-          {items.slice(8, 10).map((item) => (
-            <NavItem
-              key={item.label}
-              {...item}
-              active={"to" in item && isActive(item.to)}
-            />
-          ))}
-          <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Settings
           </div>
-          {items.slice(10).map((item) => (
+          {items.slice(8).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -151,7 +139,7 @@ export function AppShell() {
         <div className="mt-auto border-t border-line pt-3 text-[11px] leading-relaxed text-faint">
           <span className="font-semibold text-muted">Operator</span>
           <br />
-          Labels and rule decisions are saved here. Analysis stays in the CLI or API.
+          Labels and triage decisions are saved here. Analysis stays in the CLI or API.
           {health.data?.auth && (
             <div className="mt-2 flex gap-3">
               <a href="/ui/account" className="text-[11px] text-brand hover:underline">
