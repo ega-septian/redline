@@ -96,4 +96,13 @@ The patch is saved to `test-results/redline/<id>.patch`. Patches that remove ass
 
 ## Privacy
 
-Redline redacts tokens, passwords, JWTs, card/NIK numbers, email addresses and phone numbers before storing anything. Response shapes keep field names and types, never values. AI is opt-in, budget-capped and receives the same redacted facts; Voyage receives redacted error messages for similarity search.
+| Data | When |
+| --- | --- |
+| Test results, error messages and the code around the error | every run |
+| File paths and content hashes of the test code and its imports | every run |
+| Response shapes: field names and types, **no values** | with the fixture |
+| Source code of failed tests | failed tests only |
+
+Everything is redacted before it is stored, including tokens, passwords, JWTs, card/NIK numbers, email addresses and phone numbers. Response values are never stored.
+
+AI is opt-in and budget-capped. With AI on, the redacted facts go to Claude and redacted error messages go to Voyage AI for similarity search. Without AI, nothing leaves the server for analysis.

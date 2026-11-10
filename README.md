@@ -174,12 +174,6 @@ Full list and examples: [`.env.example`](.env.example).
 | `npx redline comment` | Create or update a sticky PR comment. |
 | `npx redline analyze --run 112` | Analyze an existing run without rerunning tests. |
 
-## Privacy
-
-Redline redacts tokens, passwords, JWTs, card/NIK numbers, email addresses and phone numbers before
-storing anything. Response shapes keep field names and types, never values. AI is opt-in, budget-capped
-and receives the same redacted facts.
-
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -194,6 +188,7 @@ and receives the same redacted facts.
 
 - [Screenshots](docs/screenshots/README.md)
 - [Feature details](docs/features.md)
+- [Privacy and data handling](docs/features.md#privacy)
 - [API reference](docs/api.md)
 - [Deploy on Render or a VPS](docs/deploy.md)
 - [GitHub Actions PR comment](docs/github-action.md)
