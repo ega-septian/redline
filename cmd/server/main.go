@@ -180,7 +180,11 @@ func run(log *slog.Logger) error {
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion(),
 		Contracts: registry, Notifier: notify.NewDiscord()}
-	sessions := auth.New(cfg.APIKey, cfg.Users)
+	authSecret, err := db.AuthSecret(ctx)
+	if err != nil {
+		return fmt.Errorf("session secret: %w", err)
+	}
+	sessions := auth.NewWithSecret(cfg.APIKey, cfg.Users, authSecret)
 	srv.AuthEnabled = sessions.Enabled()
 	srv.ValidateKey = sessions.ValidKey
 	srv.User = sessions.User
@@ -193,6 +197,24 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Info("API key mati (REDLINE_API_KEY kosong): aman untuk server di laptop sendiri, wajib diisi kalau server bisa dijangkau orang lain")
 	}
+	adminCount, err := db.UserCount(ctx)
+	if err != nil {
+		return fmt.Errorf("baca admin UI: %w", err)
+	}
+	setupToken := cfg.SetupToken
+	if adminCount == 0 {
+		if setupToken == "" {
+			setupToken, err = auth.NewToken(32)
+			if err != nil {
+				return fmt.Errorf("buat setup token: %w", err)
+			}
+			log.Warn("belum ada admin UI; buka /ui/setup dan masukkan token ini sekali", "setup_token", setupToken)
+		} else {
+			log.Info("setup admin UI memakai REDLINE_SETUP_TOKEN")
+		}
+	} else {
+		log.Info("admin UI sudah ada", "users", adminCount)
+	}
 	if cfg.ReportPortalURL != "" {
 		srv.ReportPortal = &reportportal.Syncer{
 			Client:   &reportportal.Client{BaseURL: cfg.ReportPortalURL, Project: cfg.ReportPortalProject, APIKey: cfg.ReportPortalAPIKey},
@@ -204,7 +226,7 @@ func run(log *slog.Logger) error {
 	}
 	root := http.NewServeMux()
 	root.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
-	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log, sessions)))
+	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log, sessions, ui.WithAccounts(db, setupToken))))
 	root.Handle("/", srv.Routes())
 
 	httpSrv := &http.Server{

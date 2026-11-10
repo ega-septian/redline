@@ -35,6 +35,9 @@ type Config struct {
 	// Users: nama -> key untuk login UI dan audit label (REDLINE_USERS=ega:key,budi:key).
 	// Key lama (REDLINE_API_KEY) tetap diterima sebagai user "admin".
 	Users map[string]string
+	// SetupToken is the one-time token for the first-run admin account. Empty means the server
+	// generates one and prints it once when no admin exists yet.
+	SetupToken string
 
 	// Analisis AI. Kosongkan ANTHROPIC_API_KEY untuk mematikan AI (aturan tetap jalan).
 	AnthropicAPIKey  string
@@ -135,6 +138,7 @@ func Load() (Config, error) {
 		MaxArtifactMB: maxArtifactMB,
 		APIKey:        apiKey,
 		Users:         users,
+		SetupToken:    os.Getenv("REDLINE_SETUP_TOKEN"),
 
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:   getenv("ANTHROPIC_MODEL", "claude-haiku-5-5"),

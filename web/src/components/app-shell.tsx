@@ -153,11 +153,16 @@ export function AppShell() {
           <br />
           Labels and rule decisions are saved here. Analysis stays in the CLI or API.
           {health.data?.auth && (
-            <form method="post" action="/ui/logout" className="mt-2">
-              <button type="submit" className="text-[11px] text-brand hover:underline">
-                Sign out
-              </button>
-            </form>
+            <div className="mt-2 flex gap-3">
+              <a href="/ui/account" className="text-[11px] text-brand hover:underline">
+                Account
+              </a>
+              <form method="post" action="/ui/logout">
+                <button type="submit" className="text-[11px] text-brand hover:underline">
+                  Sign out
+                </button>
+              </form>
+            </div>
           )}
         </div>
       </aside>
