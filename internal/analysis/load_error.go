@@ -51,7 +51,7 @@ func (a *Analyzer) AnalyzeLoadError(ctx context.Context, message string) (triage
 	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(text, "```"), "```json"))
 	var verdict loadErrorVerdict
 	if err := json.Unmarshal([]byte(text), &verdict); err != nil {
-		return triage.LoadErrorAnalysis{}, fmt.Errorf("jawaban AI load error tidak valid: %w", err)
+		return triage.LoadErrorAnalysis{}, fmt.Errorf("invalid AI load-error response: %w", err)
 	}
 	if verdict.Category == "unknown" || !store.ValidCategory(verdict.Category) {
 		verdict.Category = "unclear"
@@ -62,7 +62,7 @@ func (a *Analyzer) AnalyzeLoadError(ctx context.Context, message string) (triage
 	verdict.Summary = strings.TrimSpace(verdict.Summary)
 	verdict.NextStep = strings.TrimSpace(verdict.NextStep)
 	if verdict.Summary == "" {
-		return triage.LoadErrorAnalysis{}, fmt.Errorf("AI load error tidak memberi summary")
+		return triage.LoadErrorAnalysis{}, fmt.Errorf("AI load error did not provide a summary")
 	}
 	if verdict.NextStep == "" {
 		verdict.NextStep = "Inspect the full report error in the run detail."
@@ -70,7 +70,7 @@ func (a *Analyzer) AnalyzeLoadError(ctx context.Context, message string) (triage
 	cost := a.Pricing.Cost(resp.Usage)
 	if cost > 0 {
 		if err := a.Store.RecordSpend(ctx, cost); err != nil {
-			a.logger().Warn("gagal mencatat biaya AI load error", "err", err)
+			a.logger().Warn("failed to record AI load-error cost", "err", err)
 		}
 	}
 	return triage.LoadErrorAnalysis{

@@ -40,7 +40,7 @@ func (s *Store) Knowledge(ctx context.Context, fingerprint string) (*Knowledge, 
 		       passHasGraph AND now IS NOT NULL AND coalesce(before.hash, '') <> now.hash AS changed
 		ORDER BY path`, params)
 	if err != nil {
-		return nil, fmt.Errorf("file yang dipakai: %w", err)
+		return nil, fmt.Errorf("files used: %w", err)
 	}
 	changed := []string{}
 	if len(res.Records) > 0 {
@@ -63,7 +63,7 @@ func (s *Store) Knowledge(ctx context.Context, fingerprint string) (*Knowledge, 
 			RETURN f.path AS path, o.testKey AS test, o.status AS status`,
 			map[string]any{"run": k.RunID, "key": key, "changed": changed})
 		if err != nil {
-			return nil, fmt.Errorf("pemakai file yang berubah: %w", err)
+			return nil, fmt.Errorf("users of the changed file: %w", err)
 		}
 		byPath := map[string]*TestSplit{}
 		for i := range k.Files {
@@ -83,7 +83,7 @@ func (s *Store) Knowledge(ctx context.Context, fingerprint string) (*Knowledge, 
 		       EXISTS { MATCH (e)<-[:CALLED]-(p:Result) WHERE p.status IN ['passed', 'flaky'] AND p.runId < $run } AS seen
 		ORDER BY endpoint`, params)
 	if err != nil {
-		return nil, fmt.Errorf("endpoint yang dipanggil: %w", err)
+		return nil, fmt.Errorf("endpoints called: %w", err)
 	}
 	byKey := map[string]*EndpointFact{}
 	for _, rec := range res.Records {
@@ -102,7 +102,7 @@ func (s *Store) Knowledge(ctx context.Context, fingerprint string) (*Knowledge, 
 		       EXISTS { MATCH (o)-[:DEPENDS_ON]->(f:File) WHERE f.path IN $changed } AS usesChanged`,
 		map[string]any{"run": k.RunID, "key": key, "changed": changed})
 	if err != nil {
-		return nil, fmt.Errorf("pemanggil endpoint yang sama: %w", err)
+		return nil, fmt.Errorf("callers of the same endpoint: %w", err)
 	}
 	for _, rec := range res.Records {
 		p := rec.AsMap()

@@ -52,7 +52,7 @@ func TestProposeFix(t *testing.T) {
 		t.Fatalf("hanya edit ke file yang dikirim yang boleh lolos: %+v", fix)
 	}
 	prompt := fake.lastReq.Messages[0].Content
-	for _, want := range []string{"=== tests/order.spec.ts ===", "PERCOBAAN SEBELUMNYA", "matcher salah", "Pesan error:"} {
+	for _, want := range []string{"=== tests/order.spec.ts ===", "PREVIOUS ATTEMPTS", "matcher salah", "Error message:"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt harus memuat %q", want)
 		}
@@ -144,7 +144,7 @@ func TestProposeRules_LearnApproveApply(t *testing.T) {
 	if res.Cases != 1 || len(res.Proposed) != 1 || len(res.Rejected) != 1 {
 		t.Fatalf("mau 1 kasus baru (register sudah ditangani aturan 5xx), 1 usulan, 1 ditolak: %+v", res)
 	}
-	if !strings.Contains(res.Rejected[0].Reason, "terbukti backend_bug") {
+	if !strings.Contains(res.Rejected[0].Reason, "with category backend_bug") {
 		t.Errorf("pola yang cocok dengan kasus berkategori lain harus ditolak: %+v", res.Rejected[0])
 	}
 	if !strings.Contains(fake.lastReq.Messages[0].Content, "id: "+fp) {
@@ -181,7 +181,7 @@ func TestProposeRules_LearnApproveApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(fake.lastReq.Messages[0].Content, "SUDAH DITOLAK") || len(res.Proposed) != 0 {
+	if !strings.Contains(fake.lastReq.Messages[0].Content, "ALREADY REJECTED") || len(res.Proposed) != 0 {
 		t.Errorf("pola yang ditolak harus dikirim ke AI dan tidak tersimpan dua kali: %+v", res)
 	}
 
@@ -190,7 +190,7 @@ func TestProposeRules_LearnApproveApply(t *testing.T) {
 		{"pattern": `(?i)expected: "paid"`, "category": "test_bug", "summary": "Sama saja.", "next_step": "-", "case_ids": []string{fp}},
 	}}
 	if res, err = a.ProposeRules(ctx); err != nil || len(res.Rejected) != 1 ||
-		!strings.Contains(res.Rejected[0].Reason, "sudah ditolak") {
+		!strings.Contains(res.Rejected[0].Reason, "identical to rejected rule") {
 		t.Errorf("variasi pola yang ditolak harus ditolak: %+v %v", res, err)
 	}
 }

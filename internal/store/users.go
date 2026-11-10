@@ -101,7 +101,7 @@ func (s *Store) AuthSecret(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if len(res.Records) == 0 {
-		return "", fmt.Errorf("session secret tidak tersedia")
+		return "", fmt.Errorf("session secret is not available")
 	}
 	return recString(res.Records[0], "secret"), nil
 }

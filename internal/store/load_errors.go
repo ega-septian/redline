@@ -103,7 +103,7 @@ func (s *Store) SetLoadErrorAnalysis(ctx context.Context, id string, analysis tr
 // SetLoadErrorTriage updates the owner/status/note for one load-error group.
 func (s *Store) SetLoadErrorTriage(ctx context.Context, id, status, owner, note, by string) error {
 	if !ValidLoadErrorStatus(status) {
-		return fmt.Errorf("status triage %q tidak valid", status)
+		return fmt.Errorf("invalid triage status %q", status)
 	}
 	res, err := s.query(ctx, `
 		MATCH (e:LoadError {id: $id})

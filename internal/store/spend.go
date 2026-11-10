@@ -14,7 +14,7 @@ func (s *Store) RecordSpend(ctx context.Context, costUSD float64) error {
 	}
 	if _, err := s.query(ctx, `CREATE (:AiSpend {at: datetime(), costUSD: $cost})`,
 		map[string]any{"cost": costUSD}); err != nil {
-		return fmt.Errorf("catat biaya AI: %w", err)
+		return fmt.Errorf("record AI cost: %w", err)
 	}
 	return nil
 }
@@ -25,7 +25,7 @@ func (s *Store) SpendSince(ctx context.Context, since time.Time) (float64, error
 		`MATCH (s:AiSpend) WHERE s.at >= datetime($since) RETURN coalesce(sum(s.costUSD), 0.0) AS usd`,
 		map[string]any{"since": since.Format(time.RFC3339)})
 	if err != nil {
-		return 0, fmt.Errorf("hitung biaya AI: %w", err)
+		return 0, fmt.Errorf("calculate AI cost: %w", err)
 	}
 	if len(res.Records) == 0 {
 		return 0, nil

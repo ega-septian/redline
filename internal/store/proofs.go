@@ -202,7 +202,7 @@ func (s *Store) Scores(ctx context.Context, groupID string, limit int) (*Scorebo
 			category = e.Category
 		}
 		at := e.CreatedAt
-		truths[gid.(string)] = truth{category: category, by: "eksperimen", test: tests[gid.(string)], at: &at}
+		truths[gid.(string)] = truth{category: category, by: "experiment", test: tests[gid.(string)], at: &at}
 	}
 
 	board := &Scoreboard{Sources: []Score{{Source: "rule"}, {Source: "ai"}}, Entries: []ScoreEntry{}}

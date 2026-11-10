@@ -27,7 +27,7 @@ var (
 // Hanya 5xx yang dipakai dari panggilan HTTP: 4xx bisa jadi memang diharapkan oleh test negatif.
 func IncidentKey(normalizedErr string, calls []report.HTTPCall) (key, kind, label string) {
 	if m := connCode.FindStringSubmatchIndex(normalizedErr); m != nil {
-		label = "Tidak bisa terhubung: " + normalizedErr[m[2]:m[3]]
+		label = "Cannot connect: " + normalizedErr[m[2]:m[3]]
 		// Alamat tujuan adalah kata setelah kodenya: "ECONNREFUSED ::1:9", "ENOTFOUND api.example.com".
 		if f := strings.Fields(firstLine(normalizedErr[m[1]:])); len(f) > 0 {
 			label += " " + loopback.ReplaceAllString(strings.Trim(f[0], ".,;'\"()"), "localhost$1")

@@ -13,7 +13,7 @@ import (
 )
 
 // ErrNothingToLearn: belum ada kasus terbukti yang belum ditangani aturan.
-var ErrNothingToLearn = errors.New("belum ada kasus terbukti yang baru: beri label manual atau jalankan eksperimen dulu")
+var ErrNothingToLearn = errors.New("no new proven cases: label one manually or run an experiment first")
 
 // RejectedRule adalah usulan AI yang gagal diuji ke kasus lama, beserta alasannya.
 type RejectedRule struct {
@@ -32,25 +32,25 @@ type LearnResult struct {
 
 const learnToolName = "propose_rules"
 
-const learnSystemPrompt = `Kamu membantu Redline belajar aturan deterministik dari kegagalan test yang penyebabnya
-SUDAH TERBUKTI (dilabeli manusia, atau test lulus setelah patch).
+const learnSystemPrompt = `You help Redline learn deterministic rules from test failures whose cause is
+ALREADY PROVEN (labeled by a human, or the test passed after a patch).
 
-Tugasmu: cari POLA di pesan error yang menandai penyebab yang sama, lalu tulis sebagai regex.
-Aturan yang bagus:
-- Menangkap MEKANISME error (misalnya "received Promise", "Cannot read properties of undefined"),
-  bukan nama test, ID, nilai data, URL, atau angka yang berubah-ubah.
-- Cukup spesifik supaya tidak cocok dengan kasus berkategori lain.
-- Berlaku untuk kasus serupa di masa depan, bukan hanya kasus ini.
-- Sintaks regex Go (RE2): tanpa lookahead/lookbehind dan tanpa backreference. Pakai (?i) kalau perlu.
+Your job: find a PATTERN in the error message that marks the same cause, then write it as a regex.
+A good rule:
+- Captures the MECHANISM of the error (for example "received Promise", "Cannot read properties of undefined"),
+  not the test name, ID, data value, URL, or changing numbers.
+- Specific enough not to match cases with another category.
+- Applies to similar future cases, not just this one.
+- Go (RE2) regex syntax: no lookahead/lookbehind and no backreferences. Use (?i) if needed.
 
-Kalau tidak ada pola yang layak dijadikan aturan, kembalikan daftar kosong. Lebih baik tidak ada aturan
-daripada aturan yang salah. Maksimal 3 aturan.
-summary harus BENAR UNTUK SEMUA error yang cocok dengan pola, bukan hanya untuk kasus contoh: jangan menyebut
-test, endpoint, atau nama variabel tertentu. Kalau pola yang sama bisa berarti penyebab lain (misalnya field hilang
-karena API berubah), sebutkan itu, atau buat pola yang lebih sempit. next_step satu langkah konkret.
-Keduanya dalam bahasa Indonesia.
+If there is no pattern worth a rule, return an empty list. Better no rule than a wrong rule.
+At most 3 rules.
+summary must be TRUE FOR EVERY error matching the pattern, not just the example case: do not mention
+the test, endpoint, or a specific variable name. If the same pattern can mean another cause (for example a missing field
+because the API changed), say so, or make the pattern narrower. next_step is one concrete action.
+Both in English.
 
-Jawab dengan memanggil tool propose_rules.`
+Answer by calling the propose_rules tool.`
 
 var learnTool = json.RawMessage(`{
   "type": "object",
@@ -60,11 +60,11 @@ var learnTool = json.RawMessage(`{
       "items": {
         "type": "object",
         "properties": {
-          "pattern":   {"type": "string", "description": "Regex Go (RE2) terhadap pesan error."},
+          "pattern":   {"type": "string", "description": "Go (RE2) regex against the error message."},
           "category":  {"type": "string", "enum": ["backend_bug", "test_bug", "environment", "flaky", "unknown"]},
-          "summary":   {"type": "string", "description": "Penyebab umum yang benar untuk SEMUA error yang cocok dengan pattern. Jangan sebut nama test, endpoint, atau variabel dari kasus contoh."},
-          "next_step": {"type": "string", "description": "Satu langkah konkret, juga berlaku umum."},
-          "case_ids":  {"type": "array", "items": {"type": "string"}, "description": "ID kasus yang menjadi dasar aturan."}
+          "summary":   {"type": "string", "description": "General cause that is correct for EVERY error matching the pattern. Do not mention the test name, endpoint, or a variable from the example case."},
+          "next_step": {"type": "string", "description": "One concrete, general next step."},
+          "case_ids":  {"type": "array", "items": {"type": "string"}, "description": "IDs of the cases this rule is based on."}
         },
         "required": ["pattern", "category", "summary", "next_step", "case_ids"]
       }
@@ -123,7 +123,7 @@ func (a *Analyzer) ProposeRules(ctx context.Context) (*LearnResult, error) {
 		Messages:  []llm.Message{{Role: "user", Content: learnPrompt(uncovered, rejected)}},
 		Tools: []llm.Tool{{
 			Name:        learnToolName,
-			Description: "Usulkan aturan deterministik dari kasus terbukti.",
+			Description: "Propose deterministic rules from proven cases.",
 			InputSchema: learnTool,
 		}},
 		ToolChoice: &llm.ToolChoice{Type: "tool", Name: learnToolName},
@@ -133,13 +133,13 @@ func (a *Analyzer) ProposeRules(ctx context.Context) (*LearnResult, error) {
 	}
 	raw, ok := resp.ToolInput(learnToolName)
 	if !ok {
-		return nil, fmt.Errorf("AI tidak memanggil %s (stop_reason=%s)", learnToolName, resp.StopReason)
+		return nil, fmt.Errorf("AI did not call %s (stop_reason=%s)", learnToolName, resp.StopReason)
 	}
 	var out struct {
 		Rules []ruleCandidate `json:"rules"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("jawaban AI tidak valid: %w", err)
+		return nil, fmt.Errorf("invalid AI response: %w", err)
 	}
 
 	all, err := a.Store.RecentGroupErrors(ctx, 5000)
@@ -164,7 +164,7 @@ func (a *Analyzer) ProposeRules(ctx context.Context) (*LearnResult, error) {
 		rule.CostUSD = share
 		id, err := a.Store.SaveRule(ctx, rule)
 		if errors.Is(err, store.ErrDuplicate) {
-			res.Rejected = append(res.Rejected, RejectedRule{Pattern: c.Pattern, Category: c.Category, Reason: "aturan yang sama sudah ada"})
+			res.Rejected = append(res.Rejected, RejectedRule{Pattern: c.Pattern, Category: c.Category, Reason: "an identical rule already exists"})
 			continue
 		}
 		if err != nil {
@@ -173,27 +173,27 @@ func (a *Analyzer) ProposeRules(ctx context.Context) (*LearnResult, error) {
 		rule.ID, rule.Status = id, "proposed"
 		res.Proposed = append(res.Proposed, rule)
 	}
-	a.logger().Info("usulan aturan", "kasus", len(uncovered), "diusulkan", len(res.Proposed),
-		"ditolak", len(res.Rejected), "cost_usd", res.CostUSD)
+	a.logger().Info("rule proposal", "cases", len(uncovered), "proposed", len(res.Proposed),
+		"rejected", len(res.Rejected), "cost_usd", res.CostUSD)
 	return res, nil
 }
 
 func learnPrompt(cases []store.Case, rejected []store.LearnedRule) string {
 	var b strings.Builder
 	if len(rejected) > 0 {
-		b.WriteString("POLA YANG SUDAH DITOLAK MANUSIA (jangan diusulkan lagi, termasuk variasi kecilnya):\n")
+		b.WriteString("PATTERNS ALREADY REJECTED BY A HUMAN (do not propose them again, including small variations):\n")
 		for _, r := range rejected {
 			fmt.Fprintf(&b, "- /%s/ -> %s: %s\n", r.Pattern, r.Category, clip(r.Summary, 200))
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("KASUS TERBUKTI:\n")
+	b.WriteString("PROVEN CASES:\n")
 	for _, c := range cases {
-		fmt.Fprintf(&b, "\n--- id: %s\nkategori: %s (bukti: %s)\n", c.GroupID, c.Category, c.Source)
+		fmt.Fprintf(&b, "\n--- id: %s\ncategory: %s (evidence: %s)\n", c.GroupID, c.Category, c.Source)
 		if c.Reason != "" {
-			fmt.Fprintf(&b, "alasan: %s\n", clip(c.Reason, 300))
+			fmt.Fprintf(&b, "reason: %s\n", clip(c.Reason, 300))
 		}
-		fmt.Fprintf(&b, "pesan error:\n%s\n", clip(c.Error, 800))
+		fmt.Fprintf(&b, "error message:\n%s\n", clip(c.Error, 800))
 	}
 	return b.String()
 }
@@ -206,20 +206,20 @@ func learnPrompt(cases []store.Case, rejected []store.LearnedRule) string {
 func Backtest(c ruleCandidate, cases []store.Case, all []store.GroupError) (store.LearnedRule, string) {
 	pattern := strings.TrimSpace(c.Pattern)
 	if !store.ValidCategory(c.Category) || c.Category == "unknown" {
-		return store.LearnedRule{}, "kategori harus jelas, bukan unknown"
+		return store.LearnedRule{}, "category must be clear, not unknown"
 	}
 	if strings.TrimSpace(c.Summary) == "" {
-		return store.LearnedRule{}, "summary kosong"
+		return store.LearnedRule{}, "summary is empty"
 	}
 	if len(pattern) < 6 {
-		return store.LearnedRule{}, "pola terlalu pendek"
+		return store.LearnedRule{}, "pattern is too short"
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return store.LearnedRule{}, "regex tidak valid: " + err.Error()
+		return store.LearnedRule{}, "invalid regex: " + err.Error()
 	}
 	if re.MatchString("") {
-		return store.LearnedRule{}, "pola cocok dengan teks kosong"
+		return store.LearnedRule{}, "pattern matches empty text"
 	}
 
 	confirmed := map[string]bool{}
@@ -230,12 +230,12 @@ func Backtest(c ruleCandidate, cases []store.Case, all []store.GroupError) (stor
 			continue
 		}
 		if k.Category != c.Category {
-			return store.LearnedRule{}, fmt.Sprintf("cocok dengan kasus %s yang terbukti %s", k.GroupID, k.Category)
+			return store.LearnedRule{}, fmt.Sprintf("matches proven case %s with category %s", k.GroupID, k.Category)
 		}
 		from = append(from, k.GroupID)
 	}
 	if len(from) == 0 {
-		return store.LearnedRule{}, "tidak cocok dengan satu pun kasus terbukti"
+		return store.LearnedRule{}, "does not match any proven case"
 	}
 	matched, also := 0, 0
 	for _, g := range all {
@@ -247,7 +247,7 @@ func Backtest(c ruleCandidate, cases []store.Case, all []store.GroupError) (stor
 		}
 	}
 	if len(all) >= 6 && matched*2 > len(all) {
-		return store.LearnedRule{}, fmt.Sprintf("terlalu umum: cocok dengan %d dari %d kelompok", matched, len(all))
+		return store.LearnedRule{}, fmt.Sprintf("too general: matches %d of %d groups", matched, len(all))
 	}
 	return store.LearnedRule{
 		Pattern:     pattern,
@@ -321,7 +321,7 @@ func (a *Analyzer) PromoteCandidates(ctx context.Context, fingerprint string) (*
 		}
 		id, err := a.Store.SaveRule(ctx, rule)
 		if errors.Is(err, store.ErrDuplicate) {
-			reason = "aturan yang sama sudah ada"
+			reason = "an identical rule already exists"
 			if err := a.Store.MarkRuleCandidate(ctx, c.ID, "rejected", reason, 0, 0, 0); err != nil {
 				return nil, err
 			}
@@ -336,7 +336,7 @@ func (a *Analyzer) PromoteCandidates(ctx context.Context, fingerprint string) (*
 		}
 		rule.ID, rule.Status = id, "proposed"
 		res.Promoted = append(res.Promoted, rule)
-		a.logger().Info("candidate dipromosikan", "candidate", c.ID, "rule", id, "hits", rule.Hits)
+		a.logger().Info("candidate promoted", "candidate", c.ID, "rule", id, "hits", rule.Hits)
 	}
 	return res, nil
 }
@@ -361,7 +361,7 @@ func sameAsRejected(rule store.LearnedRule, rejected []store.LearnedRule, all []
 			}
 		}
 		if same {
-			return fmt.Sprintf("sama dengan aturan #%d yang sudah ditolak", r.ID)
+			return fmt.Sprintf("identical to rejected rule #%d", r.ID)
 		}
 	}
 	return ""

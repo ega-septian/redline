@@ -20,19 +20,19 @@ func TestIncidentKey(t *testing.T) {
 			name:      "server mati",
 			err:       "Error: apiRequestContext.get: connect ECONNREFUSED 127.0.0.1:8091",
 			wantKind:  IncidentConnection,
-			wantLabel: "Tidak bisa terhubung: ECONNREFUSED localhost:8091",
+			wantLabel: "Cannot connect: ECONNREFUSED localhost:8091",
 		},
 		{
 			name:      "server mati, localhost lewat IPv6",
 			err:       "AggregateError: apiRequestContext.call: connect ECONNREFUSED ::1:9\n- → GET http://localhost:9/products",
 			wantKind:  IncidentConnection,
-			wantLabel: "Tidak bisa terhubung: ECONNREFUSED localhost:9",
+			wantLabel: "Cannot connect: ECONNREFUSED localhost:9",
 		},
 		{
 			name:      "host tidak ditemukan",
 			err:       "Error: getaddrinfo ENOTFOUND api.toolshop.test",
 			wantKind:  IncidentConnection,
-			wantLabel: "Tidak bisa terhubung: ENOTFOUND api.toolshop.test",
+			wantLabel: "Cannot connect: ENOTFOUND api.toolshop.test",
 		},
 		{
 			name:      "endpoint 5xx",

@@ -92,7 +92,7 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 	if err := run(log); err != nil {
-		log.Error("server berhenti", "err", err)
+		log.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
 }
@@ -104,7 +104,7 @@ func run(log *slog.Logger) error {
 	}
 	loc, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
-		return fmt.Errorf("TIMEZONE %q tidak dikenal: %w", cfg.Timezone, err)
+		return fmt.Errorf("unknown TIMEZONE %q: %w", cfg.Timezone, err)
 	}
 	// Semua time.Time dari database dan log memakai zona ini, termasuk di server yang jam sistemnya UTC.
 	time.Local = loc
@@ -117,15 +117,15 @@ func run(log *slog.Logger) error {
 	}
 	defer closeDB()
 	if len(cfg.StatusSources) == 0 {
-		log.Info("semua run mengubah status kelompok (STATUS_FROM=all)")
+		log.Info("all runs may change group status (STATUS_FROM=all)")
 	} else {
-		log.Info("hanya run ini yang mengubah status kelompok; run lain hanya pratinjau", "source", cfg.StatusSources)
+		log.Info("only this run may change group status; other runs are previews", "source", cfg.StatusSources)
 	}
 
 	if cfg.RetentionDays > 0 {
 		go pruneLoop(ctx, db, cfg.RetentionDays, log)
 	} else {
-		log.Info("retensi mati (RETENTION_DAYS=0); semua detail test disimpan")
+		log.Info("retention disabled (RETENTION_DAYS=0); all test details are kept")
 	}
 
 	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log}
@@ -137,25 +137,25 @@ func run(log *slog.Logger) error {
 	analyzer.Pricing = price
 	if cfg.AIDailyBudgetUSD > 0 {
 		analyzer.DailyBudgetUSD = cfg.AIDailyBudgetUSD
-		log.Info("batas biaya AI harian aktif", "usd", cfg.AIDailyBudgetUSD)
+		log.Info("daily AI budget enabled", "usd", cfg.AIDailyBudgetUSD)
 	}
 	if cfg.AnthropicAPIKey != "" && !knownPrice {
-		log.Warn("harga model tidak dikenal, biaya AI dicatat 0; set ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE",
+		log.Warn("unknown model price; AI cost is recorded as 0; set ANTHROPIC_INPUT_PRICE and ANTHROPIC_OUTPUT_PRICE",
 			"model", cfg.AnthropicModel)
 	}
 	if cfg.AnthropicAPIKey != "" {
 		analyzer.LLM = llm.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
-		log.Info("analisis AI aktif", "model", cfg.AnthropicModel)
+		log.Info("AI analysis enabled", "model", cfg.AnthropicModel)
 	} else {
-		log.Info("analisis AI mati (ANTHROPIC_API_KEY kosong); hanya aturan deterministik yang jalan")
+		log.Info("AI analysis disabled (ANTHROPIC_API_KEY is empty); only deterministic rules run")
 	}
 	// Contract sources live in the database and are managed from the Config page; no environment override.
 	registry := contract.NewRegistry(nil)
 	analyzer.Contracts = registry
 	if sources, err := db.ContractSources(ctx); err != nil {
-		log.Warn("gagal membaca contract sources; analisis kontrak dan Coverage mati sampai database bisa dibaca", "err", err)
+		log.Warn("failed to read contract sources; contract analysis and Coverage are disabled until the database is readable", "err", err)
 	} else if len(sources) == 0 {
-		log.Warn("belum ada contract source; analisis kontrak dan Coverage mati sampai source ditambahkan di halaman Config")
+		log.Warn("no contract source yet; contract analysis and Coverage are disabled until a source is added in Config")
 	} else {
 		for _, source := range sources {
 			if source.Enabled && source.URL != "" {
@@ -164,17 +164,17 @@ func run(log *slog.Logger) error {
 				registry.Delete(source.Project)
 			}
 		}
-		log.Info("contract sources dari database aktif", "project", strings.Join(sourcesProjects(sources), ","))
+		log.Info("contract sources from the database enabled", "project", strings.Join(sourcesProjects(sources), ","))
 	}
 	if os.Getenv("OPENAPI_SPECS") != "" {
-		log.Warn("OPENAPI_SPECS diabaikan; atur contract source di halaman Config")
+		log.Warn("OPENAPI_SPECS is ignored; configure the contract source in Config")
 	}
 	if cfg.VoyageAPIKey != "" {
 		analyzer.Embed = embed.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel, cfg.VoyageBaseURL)
 		analyzer.EmbedModel = cfg.VoyageModel
-		log.Info("pencarian kasus mirip aktif", "model", cfg.VoyageModel)
+		log.Info("similar-case search enabled", "model", cfg.VoyageModel)
 	} else {
-		log.Info("pencarian kasus mirip mati (VOYAGE_API_KEY kosong)")
+		log.Info("similar-case search disabled (VOYAGE_API_KEY is empty)")
 	}
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
@@ -217,20 +217,20 @@ func run(log *slog.Logger) error {
 	}
 	switch {
 	case cfg.APIKey != "" || len(cfg.Users) > 0:
-		log.Info("API key dari environment aktif: request /api/... wajib membawa Bearer key")
+		log.Info("API key from the environment enabled: /api/... requests must send a Bearer key")
 	case apiKeyCount > 0:
-		log.Info("API key dari Config aktif: request /api/... wajib membawa Bearer key", "keys", apiKeyCount)
+		log.Info("API keys from Config enabled: /api/... requests must send a Bearer key", "keys", apiKeyCount)
 	default:
-		log.Info("API terbuka tanpa key; buat API key di Config untuk mengaktifkan Bearer auth")
+		log.Info("API is open without a key; create an API key in Config to enable Bearer auth")
 	}
 	adminCount, err := db.UserCount(ctx)
 	if err != nil {
-		return fmt.Errorf("baca admin UI: %w", err)
+		return fmt.Errorf("read UI admin: %w", err)
 	}
 	if adminCount == 0 {
-		log.Warn("belum ada admin UI; buka /ui/register untuk membuat akun admin pertama")
+		log.Warn("no UI admin yet; open /ui/register to create the first admin account")
 	} else {
-		log.Info("admin UI sudah ada", "users", adminCount)
+		log.Info("UI admin exists", "users", adminCount)
 	}
 	if cfg.ReportPortalURL != "" {
 		srv.ReportPortal = &reportportal.Syncer{
@@ -239,7 +239,7 @@ func run(log *slog.Logger) error {
 			Analyzer: analyzer,
 			Log:      log,
 		}
-		log.Info("integrasi ReportPortal aktif", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
+		log.Info("ReportPortal integration enabled", "url", cfg.ReportPortalURL, "project", cfg.ReportPortalProject)
 	}
 	root := http.NewServeMux()
 	root.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
@@ -253,7 +253,7 @@ func run(log *slog.Logger) error {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("Redline jalan", "url", "http://"+httpSrv.Addr)
+		log.Info("Redline is running", "url", "http://"+httpSrv.Addr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -294,14 +294,14 @@ func pruneLoop(ctx context.Context, db *store.Store, days int, log *slog.Logger)
 	for {
 		before := time.Now().AddDate(0, 0, -days)
 		if res, err := db.Prune(ctx, before); err != nil {
-			log.Error("retensi gagal", "err", err)
+			log.Error("retention failed", "err", err)
 		} else if res.TestResults+res.Shapes+res.Sources+res.Artifacts > 0 {
 			for _, path := range res.ArtifactPaths {
 				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					log.Warn("hapus file artifact gagal", "path", path, "err", err)
+					log.Warn("failed to delete artifact file", "path", path, "err", err)
 				}
 			}
-			log.Info("retensi selesai", "hari", days, "test_results", res.TestResults, "response_shapes", res.Shapes,
+			log.Info("retention finished", "days", days, "test_results", res.TestResults, "response_shapes", res.Shapes,
 				"source_files", res.Sources, "artifacts", res.Artifacts)
 		}
 		select {

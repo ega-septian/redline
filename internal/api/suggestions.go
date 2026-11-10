@@ -127,23 +127,23 @@ func (s *Server) handleDismissQuarantineSuggestion(w http.ResponseWriter, r *htt
 		By   string `json:"by"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"test\": \"TC-...\", \"days\": 7}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"test\": \"TC-...\", \"days\": 7}")
 		return
 	}
 	key := strings.TrimSpace(body.Test)
 	if key == "" {
-		writeError(w, http.StatusBadRequest, "test wajib diisi")
+		writeError(w, http.StatusBadRequest, "test is required")
 		return
 	}
 	if len(key) > 300 {
-		writeError(w, http.StatusBadRequest, "test terlalu panjang (maks 300 karakter)")
+		writeError(w, http.StatusBadRequest, "test is too long (max 300 characters)")
 		return
 	}
 	if body.Days == 0 {
 		body.Days = suggestionDays
 	}
 	if body.Days < 1 || body.Days > 90 {
-		writeError(w, http.StatusBadRequest, "days harus antara 1 dan 90")
+		writeError(w, http.StatusBadRequest, "days must be between 1 and 90")
 		return
 	}
 	until := time.Now().AddDate(0, 0, body.Days)

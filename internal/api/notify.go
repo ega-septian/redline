@@ -46,7 +46,7 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 	for _, project := range projects {
 		settings, err := s.Store.NotificationSettingsFor(context.Background(), project)
 		if err != nil {
-			s.logWarn("notifikasi tidak bisa membaca settings", "run", res.RunID, "project", project, "err", err)
+			s.logWarn("notification settings could not be read", "run", res.RunID, "project", project, "err", err)
 			continue
 		}
 		if !settings.Enabled || settings.WebhookURL == "" {
@@ -84,11 +84,11 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 		}
 		if sendErr != nil {
 			delivery.Error = sendErr.Error()
-			s.logWarn("notifikasi gagal", "run", res.RunID, "project", project, "err", sendErr)
+			s.logWarn("notification failed", "run", res.RunID, "project", project, "err", sendErr)
 		}
 		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
-			s.logWarn("delivery log gagal disimpan", "run", res.RunID, "project", project, "err", err)
+			s.logWarn("delivery log could not be stored", "run", res.RunID, "project", project, "err", err)
 		}
 		recordCancel()
 	}
@@ -100,7 +100,7 @@ func (s *Server) notifyRun(meta store.RunMeta, res *store.IngestResult) {
 func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
 	expiring, err := s.Store.ExpiringQuarantines(context.Background(), 24*time.Hour)
 	if err != nil {
-		s.logWarn("expiry notification gagal membaca quarantine", "run", runID, "err", err)
+		s.logWarn("expiry notification could not read quarantines", "run", runID, "err", err)
 		return
 	}
 	if len(expiring) == 0 {
@@ -119,7 +119,7 @@ func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
 	for _, project := range projects {
 		settings, err := s.Store.NotificationSettingsFor(context.Background(), project)
 		if err != nil {
-			s.logWarn("expiry notification tidak bisa membaca settings", "run", runID, "project", project, "err", err)
+			s.logWarn("expiry notification settings could not be read", "run", runID, "project", project, "err", err)
 			continue
 		}
 		if !settings.Enabled || settings.WebhookURL == "" || !contains(settings.Events, "quarantine_expiring") {
@@ -136,11 +136,11 @@ func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
 		}
 		if sendErr != nil {
 			delivery.Error = sendErr.Error()
-			s.logWarn("expiry notification gagal", "run", runID, "project", project, "err", sendErr)
+			s.logWarn("expiry notification failed", "run", runID, "project", project, "err", sendErr)
 		}
 		recordCtx, recordCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := s.Store.RecordNotificationDelivery(recordCtx, delivery); err != nil {
-			s.logWarn("delivery log gagal disimpan", "run", runID, "project", project, "err", err)
+			s.logWarn("delivery log could not be stored", "run", runID, "project", project, "err", err)
 		}
 		if sendErr != nil {
 			recordCancel()
@@ -151,7 +151,7 @@ func (s *Server) notifyExpiring(meta store.RunMeta, runID int64) {
 			keys = append(keys, quarantine.Key)
 		}
 		if err := s.Store.MarkQuarantineExpiryNotified(recordCtx, keys); err != nil {
-			s.logWarn("expiry notification tidak bisa ditandai", "run", runID, "project", project, "err", err)
+			s.logWarn("expiry notification could not be marked", "run", runID, "project", project, "err", err)
 		}
 		recordCancel()
 	}
@@ -230,7 +230,7 @@ func (s *Server) sendNotification(
 	message notify.Message,
 ) (attempts int, status int, err error) {
 	if s.Notifier == nil {
-		return 0, 0, fmt.Errorf("notifier belum dikonfigurasi")
+		return 0, 0, fmt.Errorf("notifier is not configured")
 	}
 	for attempt := 1; attempt <= 2; attempt++ {
 		err = s.Notifier.Send(ctx, webhook, message)

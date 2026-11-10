@@ -25,7 +25,7 @@ func TestStatements(t *testing.T) {
 func TestOpen_InvalidName(t *testing.T) {
 	for _, name := range []string{"redline_test", "Redline", "1abc", "ab"} {
 		if _, err := Open(context.Background(), Config{URI: "bolt://localhost:1", Database: name}); err == nil ||
-			!strings.Contains(err.Error(), "tidak valid") {
+			!strings.Contains(err.Error(), "invalid Neo4j database name") {
 			t.Errorf("%q harus ditolak, dapat %v", name, err)
 		}
 	}

@@ -66,7 +66,7 @@ func testFactsSignals(t *testing.T, b *store.Store) {
 		t.Errorf("gagal pertama/terakhir salah: first=%+v fail=%d", f.FirstFail, f.FailRunID)
 	}
 	if f.TestChanged != "tidak" || f.Response.Verdict != triage.ResponseChanged ||
-		!strings.Contains(strings.Join(f.Response.Lines, "\n"), "GET /brands: field hilang: [].slug (string)") {
+		!strings.Contains(strings.Join(f.Response.Lines, "\n"), "GET /brands: missing field: [].slug (string)") {
 		t.Errorf("sinyal perubahan salah: test=%s response=%+v", f.TestChanged, f.Response)
 	}
 	if len(f.CurrentCalls) == 0 || f.CurrentCalls[0].Method != "GET" || f.CurrentCalls[0].Path != "/brands" {

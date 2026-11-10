@@ -23,13 +23,13 @@ func TestDiffCalls(t *testing.T) {
 	}{
 		{"field hilang", []report.HTTPCall{call("GET", "/brands", 200, brands)},
 			[]report.HTTPCall{call("GET", "/brands", 200, `[{"id":"string","name":"string"}]`)},
-			ResponseChanged, []string{"GET /brands: field hilang: [].slug (string)"}},
+			ResponseChanged, []string{"GET /brands: missing field: [].slug (string)"}},
 		{"field baru saja", []report.HTTPCall{call("GET", "/brands", 200, brands)},
 			[]report.HTTPCall{call("GET", "/brands", 200, `[{"id":"string","name":"string","slug":"string","logo":"null|string"}]`)},
-			ResponseAddedOnly, []string{"GET /brands: field baru: [].logo (null|string)"}},
+			ResponseAddedOnly, []string{"GET /brands: new field: [].logo (null|string)"}},
 		{"tipe berubah", []report.HTTPCall{call("GET", "/orders", 200, `{"total":"number","items":[]}`)},
 			[]report.HTTPCall{call("GET", "/orders", 200, `{"total":"string","items":[{"sku":"string"}]}`)},
-			ResponseChanged, []string{"GET /orders: tipe berubah di total: number -> string"}},
+			ResponseChanged, []string{"GET /orders: type changed at total: number -> string"}},
 		{"status berubah", []report.HTTPCall{call("POST", "/users/register", 201, `{"id":"string"}`)},
 			[]report.HTTPCall{call("POST", "/users/register", 500, `{"message":"string"}`)},
 			ResponseChanged, []string{"POST /users/register: status 201 -> 500"}},
@@ -38,11 +38,11 @@ func TestDiffCalls(t *testing.T) {
 			ResponseSame, nil},
 		{"objek jadi null", []report.HTTPCall{call("GET", "/me", 200, `{"profile":{"name":"string"}}`)},
 			[]report.HTTPCall{call("GET", "/me", 200, `{"profile":"null"}`)},
-			ResponseChanged, []string{"GET /me: tipe berubah di profile: object -> null"}},
+			ResponseChanged, []string{"GET /me: type changed at profile: object -> null"}},
 		{"tanpa pembanding", nil, []report.HTTPCall{call("GET", "/brands", 200, brands)}, ResponseUnknown, nil},
 		{"endpoint lain", []report.HTTPCall{call("GET", "/brands", 200, brands)},
 			[]report.HTTPCall{call("GET", "/categories", 200, `[]`)},
-			ResponseUnknown, []string{"GET /categories: endpoint ini tidak dipanggil saat terakhir lulus"}},
+			ResponseUnknown, []string{"GET /categories: this endpoint was not called in the last passing run"}},
 	}
 	for _, c := range cases {
 		got := DiffCalls(c.before, c.after)

@@ -41,12 +41,12 @@ func TestOperation(t *testing.T) {
 		}
 	}
 	post := doc.Operation("POST", "/brands")
-	for _, want := range []string{"POST /brands (kontrak: /brands)", "201", "id: number(integer)", "request body:"} {
+	for _, want := range []string{"POST /brands (contract: /brands)", "201", "id: number(integer)", "request body:"} {
 		if !strings.Contains(post, want) {
 			t.Errorf("kontrak POST /brands harus memuat %q:\n%s", want, post)
 		}
 	}
-	if got := doc.Operation("PATCH", "/brands"); !strings.Contains(got, "method ini tidak ada") {
+	if got := doc.Operation("PATCH", "/brands"); !strings.Contains(got, "this method is not in the contract") {
 		t.Errorf("method yang tidak ada harus disebut: %q", got)
 	}
 }
@@ -70,7 +70,7 @@ func TestFetchAndDescribe(t *testing.T) {
 	}
 	calls := []report.HTTPCall{{Method: "GET", Path: "/brands/:id"}, {Method: "GET", Path: "/brands/:id"}, {Method: "GET", Path: "/brand/:id"}}
 	text := d.Describe(calls)
-	if strings.Count(text, "GET /brands/:id") != 1 || !strings.Contains(text, "GET /brand/:id: tidak ada di kontrak") {
+	if strings.Count(text, "GET /brands/:id") != 1 || !strings.Contains(text, "GET /brand/:id: not in the contract") {
 		t.Errorf("ringkasan salah:\n%s", text)
 	}
 }
@@ -84,11 +84,11 @@ func TestViolations(t *testing.T) {
 		t.Errorf("response sesuai kontrak (field tambahan boleh): %v", v)
 	}
 	cases := map[string][]string{
-		"field slug ada di kontrak tapi tidak ada": call("GET", "/brands/:id", 200, `{"id":"number","name":"string"}`),
-		"id bertipe string, kontrak: integer":      call("GET", "/brands/:id", 200, `{"id":"string","name":"string","slug":"string"}`),
-		"status 200 tidak ada di kontrak":          call("POST", "/brands", 200, `{"id":"number","name":"string","slug":"string"}`),
-		"[].sub_categories ada di kontrak":         call("GET", "/categories/tree", 200, `[{"id":"number","name":"string","slug":"string","parent_id":"null"}]`),
-		"price bertipe string, kontrak: number":    call("GET", "/products/:id", 200, `{"id":"number","name":"string","price":"string"}`),
+		"field slug is in the contract but missing from the response": call("GET", "/brands/:id", 200, `{"id":"number","name":"string"}`),
+		"id has type string, contract: integer":                       call("GET", "/brands/:id", 200, `{"id":"string","name":"string","slug":"string"}`),
+		"status 200 is not in the contract":                           call("POST", "/brands", 200, `{"id":"number","name":"string","slug":"string"}`),
+		"field [].sub_categories is in the contract":                  call("GET", "/categories/tree", 200, `[{"id":"number","name":"string","slug":"string","parent_id":"null"}]`),
+		"price has type string, contract: number":                     call("GET", "/products/:id", 200, `{"id":"number","name":"string","price":"string"}`),
 	}
 	for want, got := range cases {
 		if !strings.Contains(strings.Join(got, " | "), want) {

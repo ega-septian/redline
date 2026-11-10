@@ -23,7 +23,7 @@ func (s *Server) requireKeyAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	if s.CSRF == nil || !s.CSRF(r) {
-		writeError(w, http.StatusForbidden, "CSRF token salah atau tidak ada: kirim header X-CSRF-Token")
+		writeError(w, http.StatusForbidden, "missing or invalid CSRF token: send the X-CSRF-Token header")
 		return false
 	}
 	return true
@@ -54,12 +54,12 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"name\": \"coba2-ci\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"name\": \"coba2-ci\"}")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if !apiKeyName.MatchString(name) {
-		writeError(w, http.StatusBadRequest, "name hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		writeError(w, http.StatusBadRequest, "name may only contain letters, digits, dots, underscores or dashes (max 64)")
 		return
 	}
 
@@ -73,7 +73,7 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Name: name, Prefix: key[:9], Hash: auth.HashToken(key), CreatedBy: s.actor(r, ""),
 	})
 	if errors.Is(err, store.ErrAPIKeyExists) {
-		writeError(w, http.StatusConflict, "nama API key sudah dipakai (key yang dicabut tetap menyimpan namanya)")
+		writeError(w, http.StatusConflict, "API key name is already in use (revoked keys keep their name)")
 		return
 	}
 	if err != nil {
@@ -92,12 +92,12 @@ func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "id API key wajib diisi")
+		writeError(w, http.StatusBadRequest, "API key id is required")
 		return
 	}
 	key, err := s.Store.RevokeAPIKey(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "API key tidak ditemukan")
+		writeError(w, http.StatusNotFound, "API key not found")
 		return
 	}
 	if err != nil {

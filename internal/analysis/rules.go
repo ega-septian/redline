@@ -23,11 +23,11 @@ var (
 )
 
 // ApplyRules mengembalikan hasil kalau penyebabnya jelas tanpa AI, atau nil. Hasil berkeyakinan di bawah
-// high (matriks "kode test berubah") hanya dipakai kalau AI mati atau gagal; lihat Analyzer.decide.
+// high (matriks "kode test changed") hanya dipakai kalau AI mati atau gagal; lihat Analyzer.decide.
 // Aturan sengaja sedikit dan ketat: lebih baik diserahkan ke AI daripada salah yakin.
-// Urutan: aturan bawaan yang spesifik, matriks "test tetap + API berubah" (bukti kuat bug backend), kontrak,
+// Urutan: aturan bawaan yang spesifik, matriks "test tetap + API changed" (bukti kuat bug backend), kontrak,
 // pengetahuan graph (KAG), aturan yang dipelajari, lalu sisa matriks perubahan. Aturan yang dipelajari hanya melihat teks error,
-// jadi tidak boleh mengalahkan bukti bahwa API-lah yang berubah.
+// jadi tidak boleh mengalahkan bukti bahwa API-lah yang changed.
 func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
 	if res := builtinRules(f.ErrorMessage); res != nil {
 		return res
@@ -49,7 +49,7 @@ func ApplyRules(f *store.Facts, learned ...store.LearnedRule) *store.Analysis {
 }
 
 // contractRule: response yang melanggar kontrak saat test gagal (status tidak terdokumentasi, field hilang,
-// tipe berbeda) adalah penyimpangan API, selama kode test tidak sedang berubah.
+// tipe berbeda) adalah penyimpangan API, selama kode test tidak sedang changed.
 func contractRule(f *store.Facts) *store.Analysis {
 	if len(f.ContractViolations) == 0 || f.TestChanged == "ya" {
 		return nil
@@ -58,10 +58,10 @@ func contractRule(f *store.Facts) *store.Analysis {
 		Source:     "rule",
 		Category:   "backend_bug",
 		Confidence: "high",
-		Summary: fmt.Sprintf("Response API tidak sesuai kontrak (OpenAPI) yang berlaku saat test gagal: %s.",
+		Summary: fmt.Sprintf("API response does not match the OpenAPI contract in effect when the test failed: %s.",
 			f.ContractViolations[0]),
 		Evidence: first(f.ContractViolations, 3),
-		NextStep: "Laporkan ke tim backend beserta bagian kontraknya. Kalau ternyata kontraknya yang usang, minta dokumentasi diperbarui.",
+		NextStep: "Report it to the backend team with the relevant contract section. If the contract is outdated, ask for the documentation to be updated.",
 	}
 }
 
@@ -73,9 +73,9 @@ func builtinRules(msg string) *store.Analysis {
 			Source:     "rule",
 			Category:   "environment",
 			Confidence: "high",
-			Summary:    "Target tidak bisa dihubungi, jadi test belum sempat menguji perilaku API atau aplikasi.",
+			Summary:    "The target could not be reached, so the test never exercised the API or application.",
 			Evidence:   []string{m},
-			NextStep:   "Pastikan service target jalan (misalnya `docker ps`) dan baseURL di playwright.config.ts benar, lalu jalankan ulang.",
+			NextStep:   "Make sure the target service is running (for example `docker ps`) and that baseURL in playwright.config.ts is correct, then rerun.",
 		}
 	}
 
@@ -84,10 +84,10 @@ func builtinRules(msg string) *store.Analysis {
 			Source:     "rule",
 			Category:   "backend_bug",
 			Confidence: "high",
-			Summary: fmt.Sprintf("API membalas %s padahal test mengharapkan %s. Kode 5xx berarti server gagal memproses request. "+
-				"Walaupun data dari test ikut memicu, server seharusnya membalas 4xx dengan pesan validasi, bukan 5xx.", r[1], e[1]),
+			Summary: fmt.Sprintf("The API returned %s while the test expected %s. A 5xx means the server failed to process the request. "+
+				"Even if test data triggered it, the server should return 4xx with a validation message, not 5xx.", r[1], e[1]),
 			Evidence: []string{e[0], r[0]},
-			NextStep: "Cek log backend pada waktu run ini (misalnya `docker logs <container-api>`) untuk melihat exception-nya, lalu laporkan ke tim backend beserta request-nya.",
+			NextStep: "Check the backend logs for this run (for example `docker logs <container-api>`) to find the exception, then report it to the backend team with the request.",
 		}
 	}
 
@@ -96,11 +96,11 @@ func builtinRules(msg string) *store.Analysis {
 			Source:     "rule",
 			Category:   "test_bug",
 			Confidence: "high",
-			Summary: "Test memeriksa sebuah Promise, bukan hasilnya. Hampir pasti ada `await` yang hilang, " +
-				"misalnya `response.json()` tanpa `await` atau `test.step` yang tidak di-await.",
+			Summary: "The test checks a Promise instead of its result. An `await` is almost certainly missing, " +
+				"for example `response.json()` without `await`, or a `test.step` that is not awaited.",
 			Evidence: []string{strings.TrimSpace(m)},
-			NextStep: "Tambahkan `await` di pemanggilan async yang nilainya diperiksa (contoh: `parse(await response.json())`). " +
-				"Jalankan `npm run lint`: aturan playwright/missing-playwright-await menangkap `test.step` atau `expect` yang lupa di-await.",
+			NextStep: "Add `await` to the async call whose value is checked (for example: `parse(await response.json())`). " +
+				"Run `npm run lint`: the playwright/missing-playwright-await rule catches a `test.step` or `expect` that is missing an await.",
 		}
 	}
 
@@ -109,10 +109,10 @@ func builtinRules(msg string) *store.Analysis {
 			Source:     "rule",
 			Category:   "test_bug",
 			Confidence: "high",
-			Summary: "Test memeriksa objek response Playwright (APIResponse), bukan isi body-nya. " +
-				"Kemungkinan besar lupa membaca body dengan `.json()` atau `.text()`.",
+			Summary: "The test checks the Playwright response object (APIResponse), not its body. " +
+				"It most likely forgot to read the body with `.json()` or `.text()`.",
 			Evidence: []string{strings.TrimSpace(m)},
-			NextStep: "Baca body dulu sebelum divalidasi, misalnya `Schema.parse(await response.json())`.",
+			NextStep: "Read the body before validating it, for example `Schema.parse(await response.json())`.",
 		}
 	}
 
@@ -133,7 +133,7 @@ func learnedRules(msg string, rules []store.LearnedRule) *store.Analysis {
 				Confidence: "high",
 				Summary:    r.Summary,
 				Evidence: []string{strings.TrimSpace(firstLineOf(m)),
-					fmt.Sprintf("Aturan #%d, dipelajari dari %d kasus terbukti", r.ID, len(r.LearnedFrom))},
+					fmt.Sprintf("Rule #%d, learned from %d confirmed cases", r.ID, len(r.LearnedFrom))},
 				NextStep: r.NextStep,
 			}
 		}
@@ -149,44 +149,44 @@ func matrixRules(f *store.Facts) *store.Analysis {
 	switch {
 	case f.TestChanged == "tidak" && f.Response.Verdict == triage.ResponseChanged && f.ContractChanged == "ya" &&
 		len(f.ContractViolations) == 0:
-		// Dimensi ketiga: kontrak ikut berubah dan response mengikuti kontrak baru, jadi perubahannya disengaja.
+		// Dimensi ketiga: kontrak ikut changed dan response mengikuti kontrak baru, jadi perubahannya disengaja.
 		return &store.Analysis{
 			Source:     "rule",
 			Category:   "test_bug",
 			Confidence: "high",
-			Summary: fmt.Sprintf("Kontrak API untuk endpoint ini berubah sejak run lulus terakhir (#%d), dan response sekarang "+
-				"sesuai kontrak baru: %s. Perubahannya disengaja; test belum mengikuti kontrak baru.",
+			Summary: fmt.Sprintf("The API contract for this endpoint changed since the last passing run (#%d), and the response now "+
+				"matches the new contract: %s. The change is intentional; the test has not caught up with the new contract.",
 				f.LastPass.RunID, f.Response.Lines[0]),
-			Evidence: append([]string{"Kode test berubah: tidak", "Kontrak API berubah: ya"}, first(f.Response.Lines, 2)...),
-			NextStep: "Sesuaikan test dan schema dengan kontrak baru. Kalau perubahan kontrak ini tidak disengaja, laporkan ke tim backend.",
+			Evidence: append([]string{"Test code changed: no", "API contract changed: yes"}, first(f.Response.Lines, 2)...),
+			NextStep: "Update the test and schema to the new contract. If the contract change was not intentional, report it to the backend team.",
 		}
 	case f.TestChanged == "tidak" && f.Response.Verdict == triage.ResponseChanged:
 		return &store.Analysis{
 			Source:     "rule",
 			Category:   "backend_bug",
 			Confidence: "high",
-			Summary: fmt.Sprintf("Kode test sama persis dengan saat terakhir lulus (run #%d), tetapi bentuk response API berubah: %s. "+
-				"Perubahan datang dari sisi API.", f.LastPass.RunID, f.Response.Lines[0]),
-			Evidence: append([]string{"Kode test berubah: tidak"}, first(f.Response.Lines, 3)...),
-			NextStep: "Konfirmasi ke tim backend apakah perubahan kontrak ini disengaja. Kalau disengaja, update test dan schema; kalau tidak, laporkan sebagai bug.",
+			Summary: fmt.Sprintf("The test code is identical to the last passing run (#%d), but the API response shape changed: %s. "+
+				"The change came from the API side.", f.LastPass.RunID, f.Response.Lines[0]),
+			Evidence: append([]string{"Test code changed: no"}, first(f.Response.Lines, 3)...),
+			NextStep: "Confirm with the backend team whether this contract change is intentional. If it is, update the test and schema; if not, report it as a bug.",
 		}
 	case f.TestChanged == "ya" && (f.Response.Verdict == triage.ResponseSame || f.Response.Verdict == triage.ResponseAddedOnly):
 		return &store.Analysis{
 			Source:     "rule",
 			Category:   "test_bug",
 			Confidence: "medium",
-			Summary: fmt.Sprintf("Bentuk response API sama dengan saat terakhir lulus (run #%d), sedangkan kode test berubah. "+
-				"Kemungkinan besar perubahan di test yang membuatnya gagal.", f.LastPass.RunID),
-			Evidence: []string{"Kode test berubah: ya", "Response API: " + f.Response.Verdict},
-			NextStep: "Bandingkan perubahan test terakhir (git diff). Kalau assertion baru memang sengaja dibuat untuk menangkap bug lama, ganti label kelompok ini menjadi backend_bug.",
+			Summary: fmt.Sprintf("The API response shape is the same as the last passing run (#%d), while the test code changed. "+
+				"The change in the test is the most likely cause of the failure.", f.LastPass.RunID),
+			Evidence: []string{"Test code changed: yes", "API response: " + responseVerdictLabel(f.Response.Verdict)},
+			NextStep: "Compare the latest test change (git diff). If the new assertion was intentionally added to catch an old bug, change this group label to backend_bug.",
 		}
 	}
 	return nil
 }
 
 // graphRules: aturan dari pengetahuan graph (KAG). Dijalankan setelah matriks yang yakin dan kontrak, jadi
-// tidak pernah mengalahkan bukti bahwa response atau kontrak API berubah. Hanya dipakai kalau ada pembanding
-// (run lulus terakhir yang juga punya graph import), supaya "file berubah" bisa dipercaya.
+// tidak pernah mengalahkan bukti bahwa response atau kontrak API changed. Hanya dipakai kalau ada pembanding
+// (run lulus terakhir yang juga punya graph import), supaya "file changed" bisa dipercaya.
 func graphRules(f *store.Facts) *store.Analysis {
 	k := f.Knowledge
 	if k == nil || f.LastPass == nil || !k.Compared {
@@ -194,7 +194,7 @@ func graphRules(f *store.Facts) *store.Analysis {
 	}
 	ownSpec := specOf(f.Group.TestKey)
 
-	// 1. Endpoint yang sama gagal untuk test di spec lain yang TIDAK memakai kode yang berubah, dan tidak ada
+	// 1. Endpoint yang sama gagal untuk test di spec lain yang TIDAK memakai kode yang changed, dan tidak ada
 	// yang lulus: masalahnya di endpoint, bukan di kode test.
 	for _, e := range k.Endpoints {
 		others := otherSpecs(e.Without.Failed, ownSpec)
@@ -205,11 +205,11 @@ func graphRules(f *store.Facts) *store.Analysis {
 			Source:     "rule",
 			Category:   "backend_bug",
 			Confidence: "high",
-			Summary: fmt.Sprintf("%s juga gagal untuk %d test lain di spec berbeda yang tidak memakai kode yang berubah, "+
-				"dan tidak ada test yang lulus di endpoint itu. Masalahnya di endpoint, bukan di kode test ini.",
+			Summary: fmt.Sprintf("%s also failed for %d other tests in different specs that do not use the changed code, "+
+				"and no test passed on that endpoint. The problem is in the endpoint, not in this test code.",
 				e.Key, len(e.Without.Failed)),
-			Evidence: append([]string{e.Key + ": test lain tanpa kode yang berubah gagal"}, first(titles(others), 3)...),
-			NextStep: "Periksa " + e.Key + " (response dan data) bersama tim backend; semua test yang memanggilnya ikut gagal.",
+			Evidence: append([]string{e.Key + ": other tests without the changed code failed"}, first(titles(others), 3)...),
+			NextStep: "Check " + e.Key + " (response and data) with the backend team; every test that calls it failed too.",
 		}
 	}
 
@@ -227,7 +227,7 @@ func graphRules(f *store.Facts) *store.Analysis {
 		paths = append(paths, describeFile(c))
 	}
 
-	// 2. Endpoint yang belum pernah lulus, dan hanya dipanggil lewat kode yang berubah: kode test yang baru
+	// 2. Endpoint yang belum pernah lulus, dan hanya dipanggil lewat kode yang changed: kode test yang baru
 	// memanggil endpoint itu (misalnya salah ketik path).
 	for _, e := range k.Endpoints {
 		if e.SeenPassing || len(e.Without.Passed)+len(e.Without.Failed) > 0 {
@@ -237,16 +237,16 @@ func graphRules(f *store.Facts) *store.Analysis {
 			Source:     "rule",
 			Category:   "test_bug",
 			Confidence: "high",
-			Summary: fmt.Sprintf("Test memanggil %s, yang belum pernah dipanggil test yang lulus, dan hanya dipanggil lewat "+
-				"kode yang berubah sejak run lulus terakhir (#%d): %s. Kemungkinan path atau method di kode test salah.",
+			Summary: fmt.Sprintf("The test calls %s, which was never called by a passing test, and is only called through "+
+				"code that changed since the last passing run (#%d): %s. The test code likely has a wrong path or method.",
 				e.Key, f.LastPass.RunID, strings.Join(paths, ", ")),
-			Evidence: append([]string{e.Key + ": belum pernah dipanggil test yang lulus"}, paths...),
-			NextStep: "Bandingkan path di " + changed[0].Path + " dengan kontrak API atau path sebelum diubah.",
+			Evidence: append([]string{e.Key + ": never called by a passing test"}, paths...),
+			NextStep: "Compare the path in " + changed[0].Path + " with the API contract or the path before the change.",
 		}
 	}
 
-	// 3. Kode bersama berubah, bentuk response tetap, dan test lain yang memanggil endpoint yang sama tanpa
-	// kode itu lulus: endpoint-nya sehat, yang berubah kode test.
+	// 3. Kode bersama changed, bentuk response tetap, dan test lain yang memanggil endpoint yang sama tanpa
+	// kode itu lulus: endpoint-nya sehat, yang changed kode test.
 	if f.Response.Verdict != triage.ResponseSame && f.Response.Verdict != triage.ResponseAddedOnly {
 		return nil
 	}
@@ -262,7 +262,7 @@ func graphRules(f *store.Facts) *store.Analysis {
 	if healthy == nil {
 		return nil
 	}
-	// Lebih yakin kalau test lain yang memakai file yang berubah ikut gagal.
+	// Lebih yakin kalau test lain yang memakai file yang changed ikut gagal.
 	confidence := "medium"
 	for _, c := range changed {
 		if len(c.Others.Failed) > 0 {
@@ -273,22 +273,22 @@ func graphRules(f *store.Facts) *store.Analysis {
 		Source:     "rule",
 		Category:   "test_bug",
 		Confidence: confidence,
-		Summary: fmt.Sprintf("Kode yang dipakai test ini berubah sejak run lulus terakhir (#%d): %s. Bentuk response API "+
-			"tetap, dan %s lulus untuk test lain yang tidak memakai kode itu. Penyebabnya di kode yang berubah.",
+		Summary: fmt.Sprintf("The code used by this test changed since the last passing run (#%d): %s. The API response shape "+
+			"stayed the same, and %s passed for other tests that do not use that code. The cause is in the changed code.",
 			f.LastPass.RunID, strings.Join(paths, ", "), healthy.Key),
 		Evidence: append(append([]string{}, paths...),
-			fmt.Sprintf("%s: lulus untuk %s", healthy.Key, strings.Join(first(titles(healthy.Without.Passed), 2), ", ")),
-			"Response API: "+f.Response.Verdict),
-		NextStep: "Periksa perubahan di " + changed[0].Path + " (git diff); file itu dipakai juga oleh test lain.",
+			fmt.Sprintf("%s: passed for %s", healthy.Key, strings.Join(first(titles(healthy.Without.Passed), 2), ", ")),
+			"API response: "+responseVerdictLabel(f.Response.Verdict)),
+		NextStep: "Check the change in " + changed[0].Path + " (git diff); other tests use that file too.",
 	}
 }
 
 // describeFile: "schemas/brand.ts (lewat import lain)".
 func describeFile(f store.FileFact) string {
 	if f.Direct {
-		return f.Path + " berubah"
+		return f.Path + " changed"
 	}
-	return f.Path + " berubah (lewat import lain)"
+	return f.Path + " changed (through another import)"
 }
 
 // specOf mengambil file spec dari kunci test "project › file › judul".
@@ -348,4 +348,30 @@ func first(lines []string, n int) []string {
 		return lines
 	}
 	return lines[:n]
+}
+
+// yesNo converts the internal yes/no/unknown states to English output.
+func yesNo(value string) string {
+	switch value {
+	case "ya":
+		return "yes"
+	case "tidak":
+		return "no"
+	default:
+		return "unknown"
+	}
+}
+
+// responseVerdictLabel keeps the stored verdict values stable while showing English text.
+func responseVerdictLabel(value string) string {
+	switch value {
+	case triage.ResponseChanged:
+		return "changed"
+	case triage.ResponseAddedOnly:
+		return "added fields only"
+	case triage.ResponseSame:
+		return "unchanged"
+	default:
+		return "unknown"
+	}
 }

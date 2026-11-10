@@ -48,10 +48,10 @@ var databaseName = regexp.MustCompile(`^[a-z][a-z0-9.-]{2,62}$`)
 // Open terhubung ke Neo4j dan memastikan database-nya ada dan online.
 func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if !databaseName.MatchString(cfg.Database) {
-		return nil, fmt.Errorf("nama database Neo4j %q tidak valid: huruf kecil, angka, titik, dan tanda hubung, diawali huruf", cfg.Database)
+		return nil, fmt.Errorf("invalid Neo4j database name %q: lowercase letters, digits, dots and dashes, starting with a letter", cfg.Database)
 	}
 	if cfg.Reset && cfg.Database == "neo4j" {
-		return nil, fmt.Errorf("database bawaan \"neo4j\" tidak boleh dikosongkan; pakai nama lain, misalnya bench-history")
+		return nil, fmt.Errorf("the default \"neo4j\" database cannot be cleared; use another name, for example bench-history")
 	}
 	driver, err := neo4j.NewDriverWithContext(cfg.URI, neo4j.BasicAuth(cfg.Username, cfg.Password, ""))
 	if err != nil {
@@ -61,7 +61,7 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	defer cancel()
 	if err := driver.VerifyConnectivity(pingCtx); err != nil {
 		driver.Close(ctx)
-		return nil, fmt.Errorf("koneksi Neo4j %s (sudah jalankan `docker compose up -d neo4j`?): %w", cfg.URI, err)
+		return nil, fmt.Errorf("Neo4j connection %s (did you run `docker compose up -d neo4j`?): %w", cfg.URI, err)
 	}
 	if err := createDatabase(ctx, driver, cfg.Database, cfg.Reset); err != nil {
 		driver.Close(ctx)
@@ -94,7 +94,7 @@ func createDatabase(ctx context.Context, driver neo4j.DriverWithContext, name st
 	for _, stmt := range stmts {
 		if _, err := neo4j.ExecuteQuery(ctx, driver, stmt, nil, neo4j.EagerResultTransformer,
 			neo4j.ExecuteQueryWithDatabase("system")); err != nil {
-			return fmt.Errorf("buat database Neo4j %s (butuh DozerDB untuk banyak database): %w", name, err)
+			return fmt.Errorf("create Neo4j database %s (DozerDB is required for multiple databases): %w", name, err)
 		}
 	}
 	deadline := time.Now().Add(60 * time.Second)
@@ -110,7 +110,7 @@ func createDatabase(ctx context.Context, driver neo4j.DriverWithContext, name st
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("database Neo4j %s tidak online dalam 60 detik", name)
+			return fmt.Errorf("Neo4j database %s did not come online within 60 seconds", name)
 		}
 		select {
 		case <-ctx.Done():
@@ -159,7 +159,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 		if _, err := s.query(ctx, `MERGE (m:SchemaMigration {version: $v}) ON CREATE SET m.appliedAt = datetime()`,
 			map[string]any{"v": version}); err != nil {
-			return fmt.Errorf("catat migrasi %s: %w", version, err)
+			return fmt.Errorf("record migration %s: %w", version, err)
 		}
 	}
 	return nil

@@ -35,24 +35,24 @@ func (s *Server) handleTriageLoadError(w http.ResponseWriter, r *http.Request) {
 		By     string `json:"by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"...\", \"owner\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"status\": \"...\", \"owner\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	body.Status = strings.TrimSpace(body.Status)
 	body.Owner = strings.TrimSpace(body.Owner)
 	body.Note = strings.TrimSpace(body.Note)
 	if !store.ValidLoadErrorStatus(body.Status) {
-		writeError(w, http.StatusBadRequest, "status harus salah satu dari: "+strings.Join(store.LoadErrorStatuses, ", "))
+		writeError(w, http.StatusBadRequest, "status must be one of: "+strings.Join(store.LoadErrorStatuses, ", "))
 		return
 	}
 	if len(body.Owner) > 80 || len(body.Note) > 500 {
-		writeError(w, http.StatusBadRequest, "owner maksimal 80 karakter dan note maksimal 500 karakter")
+		writeError(w, http.StatusBadRequest, "owner must be at most 80 characters and note at most 500 characters")
 		return
 	}
 	by := s.actor(r, body.By)
 	if err := s.Store.SetLoadErrorTriage(r.Context(), r.PathValue("id"), body.Status, body.Owner, body.Note, by); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "load error tidak ditemukan")
+			writeError(w, http.StatusNotFound, "load error not found")
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -69,7 +69,7 @@ func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 	item, err := s.Store.LoadError(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "load error tidak ditemukan")
+		writeError(w, http.StatusNotFound, "load error not found")
 		return
 	}
 	if err != nil {
@@ -88,13 +88,13 @@ func (s *Server) handleAnalyzeLoadError(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "analisis AI gagal, cek log server")
+			writeError(w, http.StatusBadGateway, "AI analysis failed; check the server logs")
 			return
 		}
 	}
 	if err := s.Store.SetLoadErrorAnalysis(r.Context(), id, result); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "load error tidak ditemukan")
+			writeError(w, http.StatusNotFound, "load error not found")
 			return
 		}
 		s.serverError(w, err)

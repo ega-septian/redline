@@ -44,39 +44,39 @@ func ValidateSource(ctx context.Context, raw string) (check SourceCheck) {
 
 	parsed, err := url.Parse(check.URL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return check.failed("invalid_url", "URL harus http(s)://host/path", "Contoh: https://api.example.com/docs")
+		return check.failed("invalid_url", "URL must be http(s)://host/path", "Contoh: https://api.example.com/docs")
 	}
 	if blockedSpecHost(parsed.Hostname()) {
-		return check.failed("blocked", "host ini tidak diizinkan (alamat metadata cloud)",
-			"Pakai URL dokumentasi aplikasi, bukan endpoint metadata penyedia cloud.")
+		return check.failed("blocked", "this host is not allowed (cloud metadata address)",
+			"Use the application documentation URL, not a cloud provider metadata endpoint.")
 	}
 
 	client := &http.Client{
 		Timeout: 20 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
-				return errors.New("terlalu banyak redirect")
+				return errors.New("too many redirects")
 			}
 			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-				return fmt.Errorf("redirect ke scheme %q tidak diizinkan", req.URL.Scheme)
+				return fmt.Errorf("redirect to scheme %q is not allowed", req.URL.Scheme)
 			}
 			return nil
 		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, check.URL, nil)
 	if err != nil {
-		return check.failed("invalid_url", "URL tidak bisa dipakai: "+err.Error(), "")
+		return check.failed("invalid_url", "URL cannot be used: "+err.Error(), "")
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		var netErr net.Error
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return check.failed("timeout", "server tidak menjawab dalam 20 detik",
-				"Pastikan URL bisa dijangkau dari server Redline, bukan hanya dari browser.")
+			return check.failed("timeout", "server did not respond within 20 seconds",
+				"Make sure the URL is reachable from the Redline server, not only from your browser.")
 		}
-		return check.failed("network", "tidak bisa mengambil URL: "+err.Error(),
-			"Untuk Docker, gunakan host.docker.internal untuk service di host.")
+		return check.failed("network", "could not fetch URL: "+err.Error(),
+			"For Docker, use host.docker.internal for a service running on the host.")
 	}
 	defer resp.Body.Close()
 	check.StatusCode = resp.StatusCode
@@ -84,41 +84,41 @@ func ValidateSource(ctx context.Context, raw string) (check SourceCheck) {
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxSpecBytes+1))
 	if err != nil {
-		return check.failed("network", "gagal membaca respons: "+err.Error(), "")
+		return check.failed("network", "failed to read response: "+err.Error(), "")
 	}
 	if len(body) > MaxSpecBytes {
-		return check.failed("too_large", "dokumen lebih dari 10 MB", "Periksa apakah URL menunjuk ke file OpenAPI, bukan arsip.")
+		return check.failed("too_large", "document is larger than 10 MB", "Check that the URL points to an OpenAPI file, not an archive.")
 	}
 	if resp.StatusCode != http.StatusOK {
-		hint := "Periksa apakah URL dan path-nya benar."
+		hint := "Check that the URL and path are correct."
 		switch resp.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			hint = "Dokumen ini butuh autentikasi. Pakai URL publik atau tambahkan token di sisi server."
+			hint = "This document requires authentication. Use a public URL or add a token on the server side."
 		case http.StatusNotFound:
-			hint = "Swagger UI biasanya berada di path lain dari file JSON-nya. Cari URL yang di-load halaman itu."
+			hint = "Swagger UI is usually served from a different path than its JSON file. Find the URL the page loads."
 		}
 		return check.failed("status", fmt.Sprintf("URL membalas HTTP %d", resp.StatusCode), hint)
 	}
 	if isHTML(check.ContentType, body) {
-		failed := check.failed("html", "URL mengembalikan halaman HTML (Swagger UI), bukan dokumen JSON",
-			"Buka halaman Swagger UI dan cari file JSON yang di-load (sering /docs, /openapi.json atau /swagger.json).")
+		failed := check.failed("html", "URL returned an HTML page (Swagger UI), not a JSON document",
+			"Open the Swagger UI page and find the JSON file it loads (often /docs, /openapi.json or /swagger.json).")
 		failed.Candidates = specCandidates(check.URL, body)
 		return failed
 	}
 
 	var root map[string]any
 	if err := json.Unmarshal(body, &root); err != nil {
-		return check.failed("json", "respons bukan JSON yang valid: "+err.Error(),
-			"Redline membutuhkan dokumen OpenAPI dalam format JSON.")
+		return check.failed("json", "response is not valid JSON: "+err.Error(),
+			"Redline needs an OpenAPI document in JSON format.")
 	}
 	if _, ok := root["swagger"]; ok {
 		return check.failed("not_openapi", "dokumen ini Swagger 2.0; Redline membutuhkan OpenAPI 3",
-			"Kalau aplikasi hanya punya Swagger 2.0, konversi dulu atau pakai kontrak OpenAPI 3.")
+			"If the application only has Swagger 2.0, convert it first or use an OpenAPI 3 contract.")
 	}
 	doc, err := Parse(body)
 	if err != nil {
 		return check.failed("not_openapi", err.Error(),
-			"Pastikan field \"openapi\" berisi versi 3.x dan dokumennya JSON, bukan YAML.")
+			"Make sure the \"openapi\" field is version 3.x and the document is JSON, not YAML.")
 	}
 	check.OK = true
 	check.Version = "OpenAPI " + stringValue(root["openapi"])

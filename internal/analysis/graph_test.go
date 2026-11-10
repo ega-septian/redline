@@ -36,7 +36,7 @@ func graphFacts(testKey, response string, testChanged string, k *store.Knowledge
 		LastPass:     &store.RunRef{RunID: 1},
 		FirstFail:    store.RunRef{RunID: 2},
 		TestChanged:  testChanged,
-		Response:     triage.ResponseDiff{Verdict: response, Lines: []string{"GET /brands/:id: field hilang: name (string)"}},
+		Response:     triage.ResponseDiff{Verdict: response, Lines: []string{"GET /brands/:id: missing field: name (string)"}},
 		Knowledge:    k,
 	}
 }
@@ -64,7 +64,7 @@ func TestGraphRules(t *testing.T) {
 				Endpoints: []store.EndpointFact{{Key: "GET /brands/:id", SeenPassing: true,
 					WithChanged: split(nil, []string{matchKey}), Without: split([]string{directKey}, nil)}},
 			}),
-			category: "test_bug", confidence: "high", mention: "schemas/brand.ts berubah (lewat import lain)",
+			category: "test_bug", confidence: "high", mention: "schemas/brand.ts changed (through another import)",
 		},
 		{
 			name: "K01 tapi tidak ada pemakai lain yang ikut gagal: kurang yakin",
@@ -113,7 +113,7 @@ func TestGraphRules(t *testing.T) {
 				Endpoints: []store.EndpointFact{{Key: "GET /brands/:id", SeenPassing: true,
 					WithChanged: split(nil, []string{matchKey}), Without: split([]string{directKey}, nil)}},
 			}),
-			category: "backend_bug", confidence: "high", mention: "bentuk response API berubah",
+			category: "backend_bug", confidence: "high", mention: "API response shape changed",
 		},
 		{
 			name: "endpoint campuran (ada yang lulus, ada yang gagal tanpa file berubah): tidak memutuskan",
@@ -170,18 +170,18 @@ func TestBuildFacts_GraphSection(t *testing.T) {
 	})
 	text := BuildFacts(f)
 	for _, want := range []string{
-		"Pengetahuan graph",
-		"- File kag-specs/schemas/brand.ts (lewat import lain, BERUBAH sejak lulus terakhir)",
-		"test lain yang memakainya: lulus 1 (products.spec.ts › product detail); gagal 2",
-		"- Endpoint GET /brands/:id (pernah lulus sebelumnya)",
-		"test lain tanpa file yang berubah: lulus 1 (direct.spec.ts › brand by id without helper); gagal 0",
+		"Graph knowledge",
+		"- File kag-specs/schemas/brand.ts (through another import, CHANGED since last pass)",
+		"other tests using it: passed 1 (products.spec.ts › product detail); failed 2",
+		"- Endpoint GET /brands/:id (passed before)",
+		"other tests without the changed file: passed 1 (direct.spec.ts › brand by id without helper); failed 0",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("fakta harus memuat %q:\n%s", want, text)
 		}
 	}
 	f.Knowledge = nil
-	if strings.Contains(BuildFacts(f), "Pengetahuan graph") {
+	if strings.Contains(BuildFacts(f), "Graph knowledge") {
 		t.Error("tanpa graph, bagian ini tidak ditulis")
 	}
 }

@@ -21,7 +21,7 @@ func (s *Server) handleGroupKnowledgeMarkdown(w http.ResponseWriter, r *http.Req
 	fingerprint := r.PathValue("fingerprint")
 	group, occurrences, err := s.Store.GetGroup(r.Context(), fingerprint)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	}
 	if err != nil {

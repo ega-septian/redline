@@ -41,7 +41,7 @@ func DiffCalls(before, after []report.HTTPCall) ResponseDiff {
 		}
 		endpoint := a.Method + " " + a.Path
 		if idx < 0 {
-			added = append(added, endpoint+": endpoint ini tidak dipanggil saat terakhir lulus")
+			added = append(added, endpoint+": this endpoint was not called in the last passing run")
 			continue
 		}
 		used[idx] = true
@@ -67,7 +67,7 @@ func DiffCalls(before, after []report.HTTPCall) ResponseDiff {
 
 	lines := append(append([]string{}, breaking...), added...)
 	if len(lines) > 20 {
-		lines = append(lines[:20], fmt.Sprintf("... dan %d perubahan lain", len(lines)-20))
+		lines = append(lines[:20], fmt.Sprintf("... and %d more changes", len(lines)-20))
 	}
 	switch {
 	case matched == 0 && len(breaking) == 0:
@@ -92,25 +92,25 @@ func diffShape(path string, before, after any, breaking, added *[]string) {
 	case map[string]any:
 		a, ok := after.(map[string]any)
 		if !ok {
-			*breaking = append(*breaking, fmt.Sprintf("tipe berubah di %s: object -> %s", where, kindOf(after)))
+			*breaking = append(*breaking, fmt.Sprintf("type changed at %s: object -> %s", where, kindOf(after)))
 			return
 		}
 		for _, k := range sortedKeys(b) {
 			if av, ok := a[k]; ok {
 				diffShape(join(path, k), b[k], av, breaking, added)
 			} else {
-				*breaking = append(*breaking, fmt.Sprintf("field hilang: %s (%s)", join(path, k), kindOf(b[k])))
+				*breaking = append(*breaking, fmt.Sprintf("missing field: %s (%s)", join(path, k), kindOf(b[k])))
 			}
 		}
 		for _, k := range sortedKeys(a) {
 			if _, ok := b[k]; !ok {
-				*added = append(*added, fmt.Sprintf("field baru: %s (%s)", join(path, k), kindOf(a[k])))
+				*added = append(*added, fmt.Sprintf("new field: %s (%s)", join(path, k), kindOf(a[k])))
 			}
 		}
 	case []any:
 		a, ok := after.([]any)
 		if !ok {
-			*breaking = append(*breaking, fmt.Sprintf("tipe berubah di %s: array -> %s", where, kindOf(after)))
+			*breaking = append(*breaking, fmt.Sprintf("type changed at %s: array -> %s", where, kindOf(after)))
 			return
 		}
 		if len(b) > 0 && len(a) > 0 { // array kosong: bentuk elemen tidak diketahui
@@ -118,7 +118,7 @@ func diffShape(path string, before, after any, breaking, added *[]string) {
 		}
 	case string:
 		if as, ok := after.(string); !ok || as != b {
-			*breaking = append(*breaking, fmt.Sprintf("tipe berubah di %s: %s -> %s", where, b, kindOf(after)))
+			*breaking = append(*breaking, fmt.Sprintf("type changed at %s: %s -> %s", where, b, kindOf(after)))
 		}
 	}
 }

@@ -209,7 +209,7 @@ func testIncidents(t *testing.T, b *store.Store) {
 		tests       int
 	}{
 		{"http", "POST /users/login → 500", 5},
-		{"connection", "Tidak bisa terhubung: ECONNREFUSED localhost:8091", 3},
+		{"connection", "Cannot connect: ECONNREFUSED localhost:8091", 3},
 		{"error", "expect(received).toBe(expected)", 1},
 	}
 	if len(r.Incidents) != len(want) {

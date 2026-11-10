@@ -80,18 +80,18 @@ func Load() (Config, error) {
 	}
 	maxMB, err := strconv.ParseInt(getenv("MAX_REPORT_MB", "50"), 10, 64)
 	if err != nil || maxMB <= 0 {
-		return Config{}, fmt.Errorf("MAX_REPORT_MB harus angka positif")
+		return Config{}, fmt.Errorf("MAX_REPORT_MB must be a positive number")
 	}
 	maxArtifactMB, err := strconv.ParseInt(getenv("MAX_ARTIFACT_MB", "25"), 10, 64)
 	if err != nil || maxArtifactMB <= 0 {
-		return Config{}, fmt.Errorf("MAX_ARTIFACT_MB harus angka positif")
+		return Config{}, fmt.Errorf("MAX_ARTIFACT_MB must be a positive number")
 	}
 	retention, err := strconv.Atoi(getenv("RETENTION_DAYS", "30"))
 	if err != nil || retention < 0 {
-		return Config{}, fmt.Errorf("RETENTION_DAYS harus angka 0 atau lebih")
+		return Config{}, fmt.Errorf("RETENTION_DAYS must be 0 or greater")
 	}
 	if os.Getenv("REPORTPORTAL_URL") != "" && os.Getenv("REPORTPORTAL_API_KEY") == "" {
-		return Config{}, fmt.Errorf("REPORTPORTAL_URL diisi tapi REPORTPORTAL_API_KEY kosong")
+		return Config{}, fmt.Errorf("REPORTPORTAL_URL is set but REPORTPORTAL_API_KEY is empty")
 	}
 	host := getenv("HOST", "127.0.0.1")
 	apiKey := os.Getenv("REDLINE_API_KEY")
@@ -100,7 +100,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if !loopbackHost(host) && apiKey == "" && len(users) == 0 {
-		return Config{}, fmt.Errorf("HOST %q bisa dijangkau dari jaringan, tetapi tidak ada key: isi REDLINE_API_KEY atau REDLINE_USERS, atau pakai HOST=127.0.0.1", host)
+		return Config{}, fmt.Errorf("HOST %q is reachable from the network but no key is configured: set REDLINE_API_KEY or REDLINE_USERS, or use HOST=127.0.0.1", host)
 	}
 	inputPrice, err := priceEnv("ANTHROPIC_INPUT_PRICE")
 	if err != nil {
@@ -111,7 +111,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if (inputPrice == 0) != (outputPrice == 0) {
-		return Config{}, fmt.Errorf("ANTHROPIC_INPUT_PRICE dan ANTHROPIC_OUTPUT_PRICE harus diisi berdua (USD per 1 juta token)")
+		return Config{}, fmt.Errorf("ANTHROPIC_INPUT_PRICE and ANTHROPIC_OUTPUT_PRICE must both be set (USD per 1M tokens)")
 	}
 	budget, err := priceEnv("AI_DAILY_BUDGET_USD")
 	if err != nil {
@@ -196,17 +196,17 @@ func parseUsers(raw string) (map[string]string, error) {
 		}
 		name, key, ok := strings.Cut(pair, ":")
 		if !ok {
-			return nil, fmt.Errorf("REDLINE_USERS: %q harus format nama:key", pair)
+			return nil, fmt.Errorf("REDLINE_USERS: %q must use name:key format", pair)
 		}
 		name, key = strings.TrimSpace(name), strings.TrimSpace(key)
 		if !userName.MatchString(name) {
-			return nil, fmt.Errorf("REDLINE_USERS: nama %q tidak valid (huruf, angka, titik, garis bawah, tanda hubung; maksimal 64)", name)
+			return nil, fmt.Errorf("REDLINE_USERS: name %q is invalid (letters, digits, dots, underscores, dashes; max 64)", name)
 		}
 		if key == "" {
-			return nil, fmt.Errorf("REDLINE_USERS: key untuk %q kosong", name)
+			return nil, fmt.Errorf("REDLINE_USERS: key for %q is empty", name)
 		}
 		if _, exists := users[name]; exists {
-			return nil, fmt.Errorf("REDLINE_USERS: nama %q dipakai dua kali", name)
+			return nil, fmt.Errorf("REDLINE_USERS: name %q is used twice", name)
 		}
 		users[name] = key
 	}
@@ -221,7 +221,7 @@ func priceEnv(key string) (float64, error) {
 	}
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0, fmt.Errorf("%s harus angka >= 0, dapat %q", key, raw)
+		return 0, fmt.Errorf("%s must be a number >= 0, got %q", key, raw)
 	}
 	return v, nil
 }

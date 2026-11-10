@@ -113,7 +113,7 @@ func (s *Server) handleValidateSource(w http.ResponseWriter, r *http.Request) {
 		URL string `json:"url"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"url\": \"https://...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"url\": \"https://...\"}")
 		return
 	}
 	writeJSON(w, http.StatusOK, s.checkSource(r, strings.TrimSpace(body.URL)))
@@ -127,17 +127,17 @@ func (s *Server) handleSaveContract(w http.ResponseWriter, r *http.Request) {
 		By      string `json:"by"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"project\": \"toolshop\", \"url\": \"https://...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"project\": \"toolshop\", \"url\": \"https://...\"}")
 		return
 	}
 	project := strings.TrimSpace(body.Project)
 	specURL := strings.TrimSpace(body.URL)
 	if project == "" || specURL == "" {
-		writeError(w, http.StatusBadRequest, "project dan url wajib diisi")
+		writeError(w, http.StatusBadRequest, "project and url are required")
 		return
 	}
 	if !projectName.MatchString(project) {
-		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		writeError(w, http.StatusBadRequest, "project may only contain letters, digits, dots, underscores or dashes (max 64)")
 		return
 	}
 	check := s.checkSource(r, specURL)
@@ -169,12 +169,12 @@ func (s *Server) handleSaveContract(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project == "" {
-		writeError(w, http.StatusBadRequest, "project wajib diisi")
+		writeError(w, http.StatusBadRequest, "project is required")
 		return
 	}
 	if err := s.Store.DeleteContractSource(r.Context(), project); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "contract source tidak ditemukan")
+			writeError(w, http.StatusNotFound, "contract source not found")
 			return
 		}
 		s.serverError(w, err)
@@ -190,11 +190,11 @@ func (s *Server) handleDeleteContract(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSourceHistory(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project == "" {
-		writeError(w, http.StatusBadRequest, "project wajib diisi")
+		writeError(w, http.StatusBadRequest, "project is required")
 		return
 	}
 	if !projectName.MatchString(project) {
-		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		writeError(w, http.StatusBadRequest, "project may only contain letters, digits, dots, underscores or dashes (max 64)")
 		return
 	}
 	limit, err := queryInt(r, "limit", 20, 1, 100)
@@ -217,12 +217,12 @@ func (s *Server) handleCheckContract(w http.ResponseWriter, r *http.Request) {
 		Project string `json:"project"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"project\": \"toolshop\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"project\": \"toolshop\"}")
 		return
 	}
 	project := strings.TrimSpace(body.Project)
 	if project == "" {
-		writeError(w, http.StatusBadRequest, "project wajib diisi")
+		writeError(w, http.StatusBadRequest, "project is required")
 		return
 	}
 	specURL := ""
@@ -230,7 +230,7 @@ func (s *Server) handleCheckContract(w http.ResponseWriter, r *http.Request) {
 		specURL, _ = s.Contracts.URL(project)
 	}
 	if specURL == "" {
-		writeError(w, http.StatusNotFound, "project ini tidak punya contract source")
+		writeError(w, http.StatusNotFound, "this project has no contract source")
 		return
 	}
 	check := s.checkSource(r, specURL)
@@ -263,15 +263,15 @@ func (s *Server) prepareNotification(body notificationInput, currentWebhook stri
 		webhook = currentWebhook
 	}
 	if len(webhook) > 2048 {
-		return "", nil, errors.New("webhook_url terlalu panjang (maks 2048 karakter)")
+		return "", nil, errors.New("webhook_url is too long (max 2048 characters)")
 	}
 	if webhook != "" {
 		parsed, err := url.Parse(webhook)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return "", nil, errors.New("webhook_url harus http(s)://host/path")
+			return "", nil, errors.New("webhook_url must be http(s)://host/path")
 		}
 		if blockedNotificationHost(parsed.Hostname()) {
-			return "", nil, errors.New("host webhook ini tidak diizinkan (alamat metadata cloud)")
+			return "", nil, errors.New("this webhook host is not allowed (cloud metadata address)")
 		}
 	}
 	events, err = normalizeEvents(body.Events)
@@ -279,10 +279,10 @@ func (s *Server) prepareNotification(body notificationInput, currentWebhook stri
 		return "", nil, err
 	}
 	if body.Enabled && webhook == "" {
-		return "", nil, errors.New("webhook_url wajib diisi kalau notifications diaktifkan")
+		return "", nil, errors.New("webhook_url is required when notifications are enabled")
 	}
 	if body.Enabled && len(events) == 0 {
-		return "", nil, errors.New("pilih minimal satu event kalau notifications diaktifkan")
+		return "", nil, errors.New("select at least one event when notifications are enabled")
 	}
 	return webhook, events, nil
 }
@@ -291,7 +291,7 @@ func (s *Server) prepareNotification(body notificationInput, currentWebhook stri
 func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request) {
 	var body notificationInput
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
 		return
 	}
 	current, err := s.Store.NotificationSettings(r.Context())
@@ -323,12 +323,12 @@ func (s *Server) handleSaveNotifications(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleSaveNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.PathValue("project"))
 	if !projectName.MatchString(project) {
-		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		writeError(w, http.StatusBadRequest, "project may only contain letters, digits, dots, underscores or dashes (max 64)")
 		return
 	}
 	var body notificationInput
 	if err := decodeJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"enabled\": true, \"webhook_url\": \"https://...\", \"events\": [...]}")
 		return
 	}
 	currentWebhook := ""
@@ -366,7 +366,7 @@ func (s *Server) handleDeleteNotificationChannel(w http.ResponseWriter, r *http.
 	project := strings.TrimSpace(r.PathValue("project"))
 	if err := s.Store.DeleteNotificationChannel(r.Context(), project); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "project channel tidak ditemukan")
+			writeError(w, http.StatusNotFound, "project channel not found")
 			return
 		}
 		s.serverError(w, err)
@@ -394,7 +394,7 @@ func (s *Server) handleNotificationDeliveries(w http.ResponseWriter, r *http.Req
 func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project != "" && !projectName.MatchString(project) {
-		writeError(w, http.StatusBadRequest, "project hanya boleh huruf, angka, titik, underscore atau strip (maks 64)")
+		writeError(w, http.StatusBadRequest, "project may only contain letters, digits, dots, underscores or dashes (max 64)")
 		return
 	}
 	settings, err := s.Store.NotificationSettingsFor(r.Context(), project)
@@ -403,11 +403,11 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if settings.WebhookURL == "" {
-		writeError(w, http.StatusBadRequest, "webhook_url belum diisi; simpan Discord webhook dulu")
+		writeError(w, http.StatusBadRequest, "webhook_url is empty; save a Discord webhook first")
 		return
 	}
 	if s.Notifier == nil {
-		writeError(w, http.StatusServiceUnavailable, "notifier belum dikonfigurasi di server")
+		writeError(w, http.StatusServiceUnavailable, "notifier is not configured on the server")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -429,11 +429,11 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		delivery.Error = sendErr.Error()
 	}
 	if err := s.Store.RecordNotificationDelivery(r.Context(), delivery); err != nil {
-		s.logWarn("delivery log gagal disimpan", "err", err)
+		s.logWarn("delivery log could not be stored", "err", err)
 	}
 	if sendErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"sent": false, "mock": false, "error": "Discord menolak webhook: " + sendErr.Error(),
+			"sent": false, "mock": false, "error": "Discord rejected the webhook: " + sendErr.Error(),
 		})
 		return
 	}
@@ -570,7 +570,7 @@ func normalizeEvents(events []string) ([]string, error) {
 			continue
 		}
 		if !known[event] {
-			return nil, errors.New("event tidak dikenal: " + event)
+			return nil, errors.New("unknown event: " + event)
 		}
 		seen[event] = true
 		out = append(out, event)

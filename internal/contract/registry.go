@@ -60,7 +60,7 @@ func (r *Registry) Fetch(ctx context.Context, project string) (url string, docum
 	}
 	resp, err := r.HTTP.Do(req)
 	if err != nil {
-		return url, nil, fmt.Errorf("ambil kontrak %s: %w", url, err)
+		return url, nil, fmt.Errorf("fetch contract %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxSpecBytes+1))
@@ -68,13 +68,13 @@ func (r *Registry) Fetch(ctx context.Context, project string) (url string, docum
 		return url, nil, err
 	}
 	if len(body) > MaxSpecBytes {
-		return url, nil, fmt.Errorf("kontrak %s: dokumen lebih dari %d MB", url, MaxSpecBytes>>20)
+		return url, nil, fmt.Errorf("contract %s: document is larger than %d MB", url, MaxSpecBytes>>20)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return url, nil, fmt.Errorf("ambil kontrak %s: HTTP %d", url, resp.StatusCode)
+		return url, nil, fmt.Errorf("fetch contract %s: HTTP %d", url, resp.StatusCode)
 	}
 	if _, err := Parse(body); err != nil {
-		return url, nil, fmt.Errorf("kontrak %s: %w", url, err)
+		return url, nil, fmt.Errorf("contract %s: %w", url, err)
 	}
 	return url, body, nil
 }
