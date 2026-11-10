@@ -11,6 +11,8 @@ import type {
   ApiCoverage,
   ApiConfig,
   ApiContractSource,
+  ApiCreatedKey,
+  ApiKey,
   ApiNotifications,
   ApiSourceCheck,
   ApiRule,
@@ -272,4 +274,16 @@ export const api = {
     ),
   notificationDeliveries: (limit = 20) =>
     request<ApiNotificationDelivery[]>(`/api/config/notifications/deliveries?limit=${limit}`),
+  keys: () => request<ApiKey[]>("/api/keys"),
+  createKey: (name: string) =>
+    request<ApiCreatedKey>("/api/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ name }),
+    }),
+  revokeKey: (id: string) =>
+    request<ApiKey>(`/api/keys/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "X-CSRF-Token": csrfToken() },
+    }),
 };

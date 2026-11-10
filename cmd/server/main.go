@@ -188,16 +188,40 @@ func run(log *slog.Logger) error {
 	// The UI always requires a login (first run redirects to registration); /api stays open on a
 	// laptop with no keys, matching the documented behaviour.
 	srv.AuthEnabled = cfg.APIKey != "" || len(cfg.Users) > 0
-	srv.ValidateKey = sessions.ValidKey
-	srv.User = sessions.User
+	srv.ResolveKey = func(ctx context.Context, token string) (string, bool) {
+		if name, ok := sessions.CheckKey(token); ok {
+			return name, true
+		}
+		if token == "" {
+			return "", false
+		}
+		name, err := db.APIKeyName(ctx, auth.HashToken(token))
+		return name, err == nil
+	}
+	srv.User = func(r *http.Request) string {
+		if user := sessions.User(r); user != "" {
+			return user
+		}
+		return api.KeyName(r)
+	}
 	srv.Session = sessions.Valid
 	srv.CSRF = sessions.CSRFValid
 	// /readyz memeriksa database; /healthz tetap liveness saja.
 	srv.Ready = db.Ping
-	if cfg.APIKey != "" {
-		log.Info("API key aktif: request /api/... wajib membawa REDLINE_API_KEY")
-	} else {
-		log.Info("API key mati (REDLINE_API_KEY kosong): aman untuk server di laptop sendiri, wajib diisi kalau server bisa dijangkau orang lain")
+	apiKeyCount, err := db.APIKeyCount(ctx)
+	if err != nil {
+		return fmt.Errorf("baca API key: %w", err)
+	}
+	if apiKeyCount > 0 {
+		srv.EnableKeyAuth()
+	}
+	switch {
+	case cfg.APIKey != "" || len(cfg.Users) > 0:
+		log.Info("API key dari environment aktif: request /api/... wajib membawa Bearer key")
+	case apiKeyCount > 0:
+		log.Info("API key dari Config aktif: request /api/... wajib membawa Bearer key", "keys", apiKeyCount)
+	default:
+		log.Info("API terbuka tanpa key; buat API key di Config untuk mengaktifkan Bearer auth")
 	}
 	adminCount, err := db.UserCount(ctx)
 	if err != nil {

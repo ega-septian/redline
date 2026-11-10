@@ -33,6 +33,7 @@ type Config struct {
 	// (cocok untuk server di laptop sendiri). Wajib diisi kalau server bisa dijangkau orang lain.
 	APIKey string
 	// Users: nama -> key untuk API dan audit label (REDLINE_USERS=ega:key,budi:key).
+	// Key per project sebaiknya dibuat dari halaman Config; variabel ini untuk bootstrap/legacy.
 	// Key lama (REDLINE_API_KEY) tetap diterima sebagai user "admin".
 	Users map[string]string
 

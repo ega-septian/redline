@@ -40,6 +40,8 @@ type fakeStore struct {
 	sourceChecks       []store.SourceCheck
 	notifications      store.NotificationSettings
 	channels           map[string]store.NotificationChannel
+	apiKeys            []store.APIKey
+	apiKeyErr          error
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
 	runErrors          []store.Run
@@ -449,6 +451,36 @@ func (f *fakeStore) DeleteNotificationChannel(_ context.Context, project string)
 	}
 	delete(f.channels, project)
 	return nil
+}
+func (f *fakeStore) CreateAPIKey(_ context.Context, key store.APIKey) (store.APIKey, error) {
+	if f.apiKeyErr != nil {
+		return store.APIKey{}, f.apiKeyErr
+	}
+	for _, existing := range f.apiKeys {
+		if existing.Name == key.Name {
+			return store.APIKey{}, store.ErrAPIKeyExists
+		}
+	}
+	key.ID = "key-" + strconv.Itoa(len(f.apiKeys)+1)
+	key.CreatedAt = time.Now()
+	f.apiKeys = append([]store.APIKey{key}, f.apiKeys...)
+	return key, nil
+}
+func (f *fakeStore) ListAPIKeys(context.Context) ([]store.APIKey, error) {
+	return f.apiKeys, f.apiKeyErr
+}
+func (f *fakeStore) RevokeAPIKey(_ context.Context, id string) (store.APIKey, error) {
+	for i := range f.apiKeys {
+		if f.apiKeys[i].ID != id {
+			continue
+		}
+		if f.apiKeys[i].RevokedAt == nil {
+			now := time.Now()
+			f.apiKeys[i].RevokedAt = &now
+		}
+		return f.apiKeys[i], nil
+	}
+	return store.APIKey{}, store.ErrNotFound
 }
 func (f *fakeStore) ListGroupsForProject(_ context.Context, statuses []string, limit int, project string) ([]store.Group, error) {
 	f.lastGroupProject = project

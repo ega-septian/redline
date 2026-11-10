@@ -521,3 +521,18 @@ export type ApiConfig = {
   notifications: ApiNotifications;
   notification_channels: ApiNotificationChannel[];
 };
+
+export type ApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  created_by?: string;
+  created_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
+export type ApiCreatedKey = {
+  key: string;
+  api_key: ApiKey;
+};

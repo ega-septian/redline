@@ -38,7 +38,7 @@ const pages = [
   { path: "/coverage", title: "Coverage", subtitle: "contract vs tests" },
   { path: "/rules", title: "Rules", subtitle: "learned from proven cases" },
   { path: "/scoreboard", title: "Scoreboard", subtitle: "accuracy" },
-  { path: "/config", title: "Config", subtitle: "contract sources and notifications" },
+  { path: "/config", title: "Config", subtitle: "contract sources, API keys and notifications" },
 ] as const;
 
 const nav = [
