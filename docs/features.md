@@ -59,15 +59,6 @@ Coverage compares the newest OpenAPI snapshot with the calls recorded by the Red
 
 The Impact page answers the reverse question: which tests import a file (including transitive imports) or call an endpoint. That is useful before changing a shared schema or an API route.
 
-## Rules and scoreboard
-
-Redline learns from confirmed diagnoses:
-
-- A human label or a successful `verify` becomes the answer key.
-- AI may propose a rule candidate, but candidates are never used at runtime until they are backtested and approved.
-- The Rules page lists active, proposed and rejected rules, plus AI candidates in draft, promoted, rejected or expired state.
-- The Scoreboard shows how often Redline's guesses matched the confirmed answer, by source and category.
-
 ## Config
 
 Config is the only place to manage runtime configuration:

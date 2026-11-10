@@ -130,7 +130,6 @@ Full deployment and GitHub Actions guides: [deploy](docs/deploy.md) and [PR comm
 - **Suite load errors** — failures before a test can run, classified by cause.
 - **Quarantine** — owner, reason, expiry calendar and evidence-based suggestions.
 - **Coverage and impact** — contract endpoints vs calls, affected tests.
-- **Rules and scoreboard** — learned rules and measured accuracy.
 - **Config** — contract sources, API keys and Discord notifications.
 
 [Feature details →](docs/features.md)
@@ -139,7 +138,7 @@ Full deployment and GitHub Actions guides: [deploy](docs/deploy.md) and [PR comm
 
 1. The reporter sends the Playwright JSON, response shapes and the import graph.
 2. Redline groups failures by cause, then checks the cheapest source: human diagnosis, proof, rules, AI.
-3. A human confirms the result; Redline uses it for the scoreboard and rule learning.
+3. A human confirms the result; Redline uses it to improve future analyses.
 
 More about the graph: [Knowledge graph](docs/kag.md).
 
