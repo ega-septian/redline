@@ -10,12 +10,14 @@ This is the cheapest no-card setup.
 2. Save the connection URI (`neo4j+s://…`), username (`neo4j`) and password.
 3. Open <https://render.com>, choose **New → Blueprint**, and point it at this repository. `render.yaml` defines the web service.
 4. Fill the secret environment variables:
-   - `REDLINE_API_KEY` — a long random key
+   - `REDLINE_API_KEY` — a long random bootstrap key (a public host refuses to start without one)
    - `REDLINE_USERS` — optional, `ega:key-ega,budi:key-budi`
    - `NEO4J_URI` — the AuraDB URI
    - `NEO4J_PASSWORD` — the AuraDB password
-5. Deploy. The URL is `https://<service>.onrender.com`; open `/ui/`.
-6. Put the same URL and key into the Playwright project:
+5. Deploy. The URL is `https://<service>.onrender.com`; open `/ui/`, register the admin, then create
+   a key per project from **Config → API keys**. Use that key in step 6; keep the bootstrap key for
+   recovery.
+6. Put the URL and the project key into the Playwright project:
    ```bash
    REDLINE_URL=https://<service>.onrender.com
    REDLINE_API_KEY=<key>
@@ -102,6 +104,7 @@ run detail after `RETENTION_DAYS` (default 30; `0` keeps them forever).
 ## Security checklist
 
 - [ ] `REDLINE_API_KEY` and `NEO4J_PASSWORD` are strong and not committed.
+- [ ] Unused keys are revoked from **Config → API keys**.
 - [ ] Neo4j is not publicly reachable.
 - [ ] The UI is behind HTTPS.
 - [ ] Artifact files are only served through `/api/artifacts/{id}` with authentication.

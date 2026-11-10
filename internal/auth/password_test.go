@@ -57,3 +57,16 @@ func TestSessionSecret(t *testing.T) {
 		t.Error("secret berbeda tidak boleh memvalidasi cookie")
 	}
 }
+
+func TestHashToken(t *testing.T) {
+	first := HashToken("rl_example")
+	if len(first) != 64 || first != HashToken("rl_example") {
+		t.Errorf("hash token harus SHA-256 hex yang stabil: %q", first)
+	}
+	if first == HashToken("rl_other") {
+		t.Error("token berbeda harus menghasilkan hash berbeda")
+	}
+	if first == "rl_example" {
+		t.Error("hash tidak boleh sama dengan token")
+	}
+}

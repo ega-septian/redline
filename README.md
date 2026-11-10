@@ -17,7 +17,7 @@ an optional proof.
 
 _The report is in Indonesian. 9 failures, 2 causes, each explained._
 
-The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-run trend, suite load errors, per-test timeline), a **load errors** page with owner/status triage, **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
+The UI (`/ui/`) covers an **overview dashboard**, a **project selector**, failures and triage (aging and ownership), a **first-run checklist**, runs and comparison, **test health** (pass/flake rate, flips, top flaky/failing tests, slowest tests, duration regressions, per-run trend, suite load errors, per-test timeline), a **load errors** page with owner/status triage, **quarantine** (active exceptions, expiry calendar, evidence-based suggestions), **coverage** (contract endpoints vs tests, per-run trend), **config** (contract sources with check history, generated API keys, default and per-project Discord channels, delivery history), impact, rules, the scoreboard and a Markdown knowledge page per failure.
 
 Install it in two steps: **run the server**, then **point your Playwright project at it**.
 
@@ -64,7 +64,8 @@ open http://localhost:8787/ui/        # first run: create the admin account
 ```
 
 `REDLINE_API_KEY` is the machine key for the reporter, fixture and CLI; the UI signs in with the
-admin username/password created on first run.
+admin username/password created on first run. On a new server, create a key from **Config → API keys**
+for each project instead of sharing the bootstrap key.
 
 `docker compose up -d` still starts only Neo4j for local `go run` development. The full profile binds
 the server to `127.0.0.1:8787`.
@@ -210,17 +211,23 @@ the first account exists. After that, `/ui/login` asks for the username/password
 the sidebar lets the admin change the password. Finish registration before exposing the server on a
 network.
 
-Additional `REDLINE_USERS` keys still work for API clients. To give another project access:
+The recommended way to give another project access is **Config → API keys**:
 
-1. Generate a key on the server with `openssl rand -hex 32`.
-2. Put it in the server `.env` as `REDLINE_API_KEY` (or as a named entry in `REDLINE_USERS`) and restart.
-3. Share the server URL and the key through a secret manager, never through Git.
-4. In the other project set `REDLINE_URL` and `REDLINE_API_KEY`, and add the key as a CI secret.
-5. Install `redline-playwright` at the same release as the server and add the reporter.
+1. Sign in to the UI as the admin.
+2. Choose **Create key**, name it after the project or team (`coba2-ci`).
+3. Copy the value immediately: it is shown once and only its hash is stored.
+4. Share the server URL and the key through a secret manager, never through Git.
+5. In the other project set `REDLINE_URL` and `REDLINE_API_KEY`, and add the key as a CI secret.
+6. Install `redline-playwright` at the same release as the server and add the reporter.
 
-Revoke a key by removing it from the environment and restarting; UI sessions stay valid because they
-are signed with a separate secret stored in Neo4j. Generating and revoking keys from the Config page
-is the next step; until then the admin provisions keys through the environment.
+Creating the first Config key turns on Bearer auth for `/api/...`; requests without a key are then
+rejected. Each key is attributed by name in labels and audit history, and **Revoke** stops it
+immediately. Revoked keys keep their name, so create a new name when rotating.
+
+`REDLINE_API_KEY` and named `REDLINE_USERS` entries remain supported as bootstrap/legacy keys. They
+also authenticate `/api/...` with `Authorization: Bearer <key>` and are attributed by their name.
+Remove an environment key and restart to revoke it; UI sessions stay valid because they use a separate
+secret stored in Neo4j.
 
 `REDLINE_API_KEY` and `REDLINE_USERS` remain the machine/CI credentials: API clients send
 `Authorization: Bearer <key>`. The UI session is a signed, HttpOnly cookie for 12 hours; API reads accept
@@ -404,6 +411,7 @@ Voyage AI.
 | `DELETE /api/config/notifications/projects/{project}`              | Remove an override and fall back to the default                |
 | `POST /api/config/notifications/test`                              | Send a real Discord test message (`?project=...` for an override) |
 | `GET /api/config/notifications/deliveries?limit=20`                | Newest deliveries with project, status, attempts and error      |
+| `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`         | List, create and revoke Bearer keys (UI session only)           |
 | `GET /api/groups`                                                  | Open failures (`?status=all` for every failure, `?project=...` scopes them) |
 | `GET /api/groups/{id}`                                             | One failure: occurrences, experiments, analysis                |
 | `POST /api/groups/{id}/analyze`                                    | Find the cause (`?force=1` to redo)                            |

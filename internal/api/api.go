@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"redline/internal/analysis"
@@ -73,6 +74,9 @@ type Store interface {
 	RecordNotificationDelivery(ctx context.Context, delivery store.NotificationDelivery) error
 	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
 	NotificationDeliveries(ctx context.Context, limit int) ([]store.NotificationDelivery, error)
+	CreateAPIKey(ctx context.Context, key store.APIKey) (store.APIKey, error)
+	ListAPIKeys(ctx context.Context) ([]store.APIKey, error)
+	RevokeAPIKey(ctx context.Context, id string) (store.APIKey, error)
 	SaveArtifact(ctx context.Context, a store.Artifact) (int64, error)
 	ListArtifacts(ctx context.Context, runID int64) ([]store.Artifact, error)
 	GetArtifact(ctx context.Context, id int64) (store.Artifact, error)
@@ -124,9 +128,12 @@ type Server struct {
 	APIKey          string // legacy single key; empty = no Bearer auth unless AuthEnabled
 	// AuthEnabled wraps /api with the key check even when APIKey is empty (REDLINE_USERS only).
 	AuthEnabled bool
-	// ValidateKey checks a Bearer token. nil falls back to APIKey.
+	// ValidateKey checks a Bearer token without a name. Kept for embedders and tests.
 	ValidateKey func(string) bool
-	// User returns the signed-in user for a session cookie (labels are attributed to it).
+	// ResolveKey checks a Bearer token and returns the name used for audit attribution. When set it
+	// takes precedence over ValidateKey; the token's name is available through KeyName.
+	ResolveKey func(context.Context, string) (string, bool)
+	// User returns the signed-in user for a session cookie, or the API key name for Bearer requests.
 	User func(*http.Request) string
 	// Version: versi build server, ditampilkan di /healthz dan header respons.
 	Version string
@@ -138,6 +145,9 @@ type Server struct {
 	CSRF    func(*http.Request) bool
 	// Contracts is the runtime OpenAPI registry: Config writes are applied without a restart.
 	Contracts *contract.Registry
+	// keyAuth is set when the first Config key is created, so the API starts rejecting anonymous
+	// requests without a restart. Revoked keys keep it on.
+	keyAuth atomic.Bool
 	// SourceCheck validates one spec URL; nil uses contract.ValidateSource (tests stub the network).
 	SourceCheck func(context.Context, string) contract.SourceCheck
 	// Notifier delivers failure summaries to the configured webhook; nil disables delivery.
@@ -160,7 +170,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok", "version": s.version(), "api": APIVersion,
-			"auth": s.AuthEnabled || s.APIKey != "" || s.Session != nil,
+			"auth": s.AuthEnabled || s.APIKey != "" || s.Session != nil || s.keyAuth.Load(),
 		})
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
@@ -188,6 +198,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/config/notifications/projects/{project}", s.handleDeleteNotificationChannel)
 	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
 	mux.HandleFunc("GET /api/config/notifications/deliveries", s.handleNotificationDeliveries)
+	mux.HandleFunc("GET /api/keys", s.handleListAPIKeys)
+	mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
+	mux.HandleFunc("DELETE /api/keys/{id}", s.handleRevokeAPIKey)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts", s.handleListArtifacts)
 	mux.HandleFunc("POST /api/runs/{id}/artifacts", s.handleUploadArtifact)
 	mux.HandleFunc("GET /api/artifacts/{id}", s.handleGetArtifact)
@@ -216,7 +229,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/impact", s.handleImpact)
 	mux.HandleFunc("POST /api/runs/{id}/reportportal", s.handleReportPortal)
 	var h http.Handler = mux
-	if s.AuthEnabled || s.APIKey != "" {
+	// The UI makes /api reachable with a session even when the server started with no keys. Keeping
+	// the wrapper installed lets the first Config key enable Bearer auth immediately.
+	if s.AuthEnabled || s.APIKey != "" || s.ResolveKey != nil || s.Session != nil {
 		h = s.requireAPIKey(mux)
 	}
 	return s.versionHeaders(h)
@@ -259,6 +274,10 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if !s.authRequired() {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if s.Session != nil && s.Session(r) {
 			if r.Method == http.MethodGet || r.Method == http.MethodHead ||
 				(s.CSRF != nil && s.CSRF(r)) {
@@ -269,7 +288,14 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			return
 		}
 		got := []byte(r.Header.Get("Authorization"))
-		if s.ValidateKey != nil {
+		if s.ResolveKey != nil {
+			if token, ok := strings.CutPrefix(string(got), "Bearer "); ok {
+				if name, ok := s.ResolveKey(r.Context(), token); ok {
+					next.ServeHTTP(w, r.WithContext(withKeyName(r.Context(), name)))
+					return
+				}
+			}
+		} else if s.ValidateKey != nil {
 			if token, ok := strings.CutPrefix(string(got), "Bearer "); ok && s.ValidateKey(token) {
 				next.ServeHTTP(w, r)
 				return
@@ -281,6 +307,26 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="redline"`)
 		writeError(w, http.StatusUnauthorized, "API key salah atau tidak ada: kirim header Authorization: Bearer <REDLINE_API_KEY>")
 	})
+}
+
+// EnableKeyAuth makes /api require a key. It is called when the first Config key is created and at
+// startup when the database already has keys.
+func (s *Server) EnableKeyAuth() { s.keyAuth.Store(true) }
+
+func (s *Server) authRequired() bool {
+	return s.AuthEnabled || s.APIKey != "" || s.keyAuth.Load()
+}
+
+type keyNameContextKey struct{}
+
+func withKeyName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, keyNameContextKey{}, name)
+}
+
+// KeyName returns the name of the API key that authenticated the request, or "" for a UI session.
+func KeyName(r *http.Request) string {
+	name, _ := r.Context().Value(keyNameContextKey{}).(string)
+	return name
 }
 
 // handleIngest menerima isi results.json di body (mentah, atau dibungkus reporter Redline

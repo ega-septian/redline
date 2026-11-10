@@ -3,7 +3,9 @@ import {
   AlertTriangle,
   Bell,
   CheckCircle2,
+  Copy,
   History,
+  KeyRound,
   Pencil,
   Plus,
   RefreshCw,
@@ -15,6 +17,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { api } from "@/api/client";
 import type {
   ApiContractSource,
+  ApiCreatedKey,
+  ApiKey,
   ApiNotificationChannel,
   ApiNotificationDelivery,
   ApiNotifications,
@@ -213,6 +217,8 @@ export function ConfigPage() {
           Neo4j volume to keep this configuration.
         </div>
       </Card>
+
+      <APIKeysCard />
 
       <NotificationsCard
         key={String(configQuery.data.notifications.updated_at ?? "default")}
@@ -580,6 +586,263 @@ function CheckPanel({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function APIKeysCard() {
+  const queryClient = useQueryClient();
+  const keysQuery = useQuery({ queryKey: ["api-keys"], queryFn: api.keys });
+  const [formOpen, setFormOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<ApiCreatedKey | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  const create = useMutation({
+    mutationFn: () => api.createKey(name.trim()),
+    onSuccess: async (result) => {
+      setCreated(result);
+      setName("");
+      setFormOpen(false);
+      setCopied(false);
+      setNotice(null);
+      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+    onError: (error) => setNotice({ tone: "error", text: messageOf(error) }),
+  });
+
+  const revoke = useMutation({
+    mutationFn: api.revokeKey,
+    onSuccess: async () => {
+      setNotice({ tone: "ok", text: "API key revoked. Requests using it now fail." });
+      await queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+    onError: (error) => setNotice({ tone: "error", text: messageOf(error) }),
+  });
+
+  const keys = keysQuery.data ?? [];
+  const active = keys.filter((key) => !key.revoked_at).length;
+
+  async function copyKey() {
+    if (!created) return;
+    try {
+      await navigator.clipboard.writeText(created.key);
+      setCopied(true);
+    } catch {
+      setNotice({ tone: "error", text: "Copy failed. Select the key and copy it manually." });
+    }
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <KeyRound className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12.5px] font-semibold">API keys</span>
+        <Badge tone={active > 0 ? "brand" : "neutral"}>
+          {active} active
+        </Badge>
+        <span className="hidden text-[10.5px] text-faint md:inline">
+          Bearer keys for CI, the CLI and other projects
+        </span>
+        <Button
+          className="ml-auto"
+          variant="default"
+          onClick={() => {
+            setFormOpen((value) => !value);
+            setNotice(null);
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Create key
+        </Button>
+      </div>
+
+      {notice && (
+        <div
+          className={cn(
+            "mx-3.5 mt-3 rounded-md border px-2.5 py-1.5 text-[10.5px]",
+            notice.tone === "ok"
+              ? "border-ok/40 bg-ok/10 text-[#9be9a8]"
+              : "border-danger/40 bg-danger/10 text-[#ffb3ad]",
+          )}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      {created && (
+        <div className="border-b border-line bg-ok/10 px-3.5 py-3">
+          <div className="text-[11.5px] font-semibold text-[#9be9a8]">
+            Copy this key now — it will not be shown again.
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-ok/30 bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-ink">
+              {created.key}
+            </code>
+            <Button variant="secondary" onClick={copyKey}>
+              {copied ? <CheckCircle2 className="h-3 w-3 text-ok" /> : <Copy className="h-3 w-3" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button variant="ghost" onClick={() => setCreated(null)}>
+              Dismiss
+            </Button>
+          </div>
+          <div className="mt-1 text-[10px] text-faint">
+            Use it as <span className="font-mono">REDLINE_API_KEY</span> in the other project or CI.
+            Redline stores only its hash.
+          </div>
+        </div>
+      )}
+
+      {formOpen && (
+        <form
+          className="border-b border-line bg-[#0f141a] px-3.5 py-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (name.trim() !== "" && !create.isPending) create.mutate();
+          }}
+        >
+          <div className="mb-2 text-[11.5px] font-semibold">Create an API key</div>
+          <div className="grid items-center gap-x-3 gap-y-2 sm:grid-cols-[110px_minmax(0,1fr)]">
+            <label className="text-[10.5px] text-faint" htmlFor="api-key-name">
+              Name
+            </label>
+            <Input
+              id="api-key-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="coba2-ci"
+              className="h-8 max-w-xs font-mono text-[11px]"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+            />
+          </div>
+          <div className="mt-1 text-[10px] text-faint sm:ml-[122px]">
+            Use a name you will recognize in labels and audit history, for example the project or team.
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={name.trim() === "" || create.isPending}>
+              {create.isPending ? "Creating…" : "Create key"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setFormOpen(false);
+                setName("");
+              }}
+              disabled={create.isPending}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {keysQuery.isPending ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-muted">Loading API keys…</div>
+      ) : keysQuery.isError ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-danger">
+          Cannot load API keys: {messageOf(keysQuery.error)}
+          <Button className="ml-2" variant="outline" onClick={() => keysQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : keys.length === 0 ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-muted">
+          No API keys yet. Create one for CI, the CLI or another project.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[820px]">
+            <div className="grid grid-cols-[minmax(0,1fr)_130px_100px_100px_90px_80px] gap-3 border-b border-line bg-[#12171e] px-3.5 py-2 text-[9.5px] uppercase tracking-[0.7px] text-faint">
+              <span>Name</span>
+              <span>Prefix</span>
+              <span>Created</span>
+              <span>Last used</span>
+              <span>Status</span>
+              <span className="text-right">Actions</span>
+            </div>
+            {keys.map((key) => (
+              <APIKeyRow
+                key={key.id}
+                apiKey={key}
+                revoking={revoke.isPending}
+                onRevoke={() => {
+                  if (
+                    window.confirm(
+                      `Revoke “${key.name}”? Requests using this key will fail immediately.`,
+                    )
+                  ) {
+                    revoke.mutate(key.id);
+                  }
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-line px-3.5 py-2.5 text-[11px] leading-relaxed text-faint">
+        Keys authenticate <span className="font-mono">/api/...</span> with{" "}
+        <span className="font-mono">Authorization: Bearer &lt;key&gt;</span>. Creating the first key
+        turns on Bearer auth and requests without a key are rejected; revoking every key does not
+        reopen the API. The server environment keys <span className="font-mono">REDLINE_API_KEY</span>{" "}
+        and <span className="font-mono">REDLINE_USERS</span> keep working.
+      </div>
+    </Card>
+  );
+}
+
+function APIKeyRow({
+  apiKey,
+  revoking,
+  onRevoke,
+}: {
+  apiKey: ApiKey;
+  revoking: boolean;
+  onRevoke: () => void;
+}) {
+  const revoked = Boolean(apiKey.revoked_at);
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[minmax(0,1fr)_130px_100px_100px_90px_80px] items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-[11px] last:border-b-0 hover:bg-[#1b222b]",
+        revoked && "opacity-60",
+      )}
+    >
+      <div className="min-w-0">
+        <div className="truncate font-mono font-semibold text-[#cdd9e5]">{apiKey.name}</div>
+        <div className="truncate text-[10px] text-faint">
+          {apiKey.created_by ? `by ${apiKey.created_by}` : "Config"}
+        </div>
+      </div>
+      <span className="truncate font-mono text-[10.5px] text-muted" title={apiKey.prefix}>
+        {apiKey.prefix}…
+      </span>
+      <span className="text-[10.5px] text-faint" title={apiKey.created_at}>
+        {ago(apiKey.created_at)}
+      </span>
+      <span className="text-[10.5px] text-faint" title={apiKey.last_used_at ?? undefined}>
+        {apiKey.last_used_at ? ago(apiKey.last_used_at) : "never"}
+      </span>
+      <Badge tone={revoked ? "neutral" : "flaky"}>{revoked ? "revoked" : "active"}</Badge>
+      <div className="flex justify-end">
+        {!revoked && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onRevoke}
+            disabled={revoking}
+            aria-label={`Revoke ${apiKey.name}`}
+            title="Revoke this key"
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
