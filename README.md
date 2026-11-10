@@ -361,7 +361,7 @@ Voyage AI.
 | `GET /api/runs/errors?limit=20`                                    | Workspace-level runs whose spec or setup failed before tests   |
 | `GET /api/load-errors?limit=50`                                    | Grouped report-level load errors with owner/status/note       |
 | `PUT /api/load-errors/{id}/triage`                                 | Triage a load error: `{"status": "...", "owner": "...", "note": "...", "by": "..."}` |
-| `POST /api/load-errors/{id}/analyze`                               | Re-run deterministic rules for an older load-error group       |
+| `POST /api/load-errors/{id}/analyze?ai=1`                          | Re-run rules, or ask AI for an unclear load-error group        |
 | `GET /api/projects`                                                | Projects with tests, runs and open-failure counts              |
 | `GET /api/runs/{id}`, `GET /api/runs/{id}/compare`                 | Run detail, and comparison with the previous run               |
 | `POST /api/runs/{id}/artifacts`                                    | Upload a trace/screenshot artifact (multipart)                 |
@@ -418,8 +418,9 @@ failed) appear in a workspace-level **Suite load errors** card; the Runs page st
 that contain report errors. The dedicated **Load errors** page groups these messages across runs and
 supports owner, status and note. Deterministic rules classify the message (broken local import,
 missing package, syntax/config, global setup, network, permissions) and add a summary and next step;
-older groups can be re-analyzed from the page. Resolving is manual; a resolved error reopens if it
-appears again.
+older groups can be re-analyzed from the page. If the rules return `unclear`, the page offers
+**Analyze with AI**; AI is opt-in, budget-capped and falls back to `unclear` when disabled. Resolving
+is manual; a resolved error reopens if it appears again.
 
 ### Quarantine page
 
@@ -601,7 +602,7 @@ failing in a confusing way.
 ## What's next
 
 - **ReportPortal, the other way**: labels corrected by the team in ReportPortal flow back into Redline as proven cases.
-- AI analysis for load errors that the deterministic rules leave as unclear.
+- Roles: admin, operator and viewer, with write permissions enforced by the API.
 - An inferred contract for APIs without documentation.
 
 ## License

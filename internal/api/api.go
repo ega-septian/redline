@@ -99,6 +99,7 @@ type Store interface {
 type Analyzer interface {
 	Analyze(ctx context.Context, fingerprint string, force bool) (*store.Analysis, bool, error)
 	AnalyzeLocal(ctx context.Context, fingerprint string, force bool) (*store.Analysis, error)
+	AnalyzeLoadError(ctx context.Context, message string) (triage.LoadErrorAnalysis, error)
 	PromoteCandidates(ctx context.Context, fingerprint string) (*analysis.PromotionResult, error)
 	ProposeFix(ctx context.Context, fingerprint string, files []analysis.SourceFile, attempts []analysis.Attempt) (*analysis.Fix, error)
 	ProposeRules(ctx context.Context) (*analysis.LearnResult, error)
