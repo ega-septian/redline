@@ -185,7 +185,9 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("session secret: %w", err)
 	}
 	sessions := auth.NewWithSecret(cfg.APIKey, cfg.Users, authSecret)
-	srv.AuthEnabled = sessions.Enabled()
+	// The UI always requires a login (first run redirects to registration); /api stays open on a
+	// laptop with no keys, matching the documented behaviour.
+	srv.AuthEnabled = cfg.APIKey != "" || len(cfg.Users) > 0
 	srv.ValidateKey = sessions.ValidKey
 	srv.User = sessions.User
 	srv.Session = sessions.Valid
@@ -201,17 +203,8 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("baca admin UI: %w", err)
 	}
-	setupToken := cfg.SetupToken
 	if adminCount == 0 {
-		if setupToken == "" {
-			setupToken, err = auth.NewToken(32)
-			if err != nil {
-				return fmt.Errorf("buat setup token: %w", err)
-			}
-			log.Warn("belum ada admin UI; buka /ui/setup dan masukkan token ini sekali", "setup_token", setupToken)
-		} else {
-			log.Info("setup admin UI memakai REDLINE_SETUP_TOKEN")
-		}
+		log.Warn("belum ada admin UI; buka /ui/register untuk membuat akun admin pertama")
 	} else {
 		log.Info("admin UI sudah ada", "users", adminCount)
 	}
@@ -226,7 +219,7 @@ func run(log *slog.Logger) error {
 	}
 	root := http.NewServeMux()
 	root.Handle("/ui", http.RedirectHandler("/ui/", http.StatusMovedPermanently))
-	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log, sessions, ui.WithAccounts(db, setupToken))))
+	root.Handle("/ui/", http.StripPrefix("/ui", ui.New(web.Dist(), log, sessions, ui.WithAccounts(db))))
 	root.Handle("/", srv.Routes())
 
 	httpSrv := &http.Server{

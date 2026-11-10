@@ -35,7 +35,7 @@ func New(files fs.FS, log *slog.Logger, sessions *auth.Sessions, options ...Opti
 	return h
 }
 
-// Accounts is the UI account store used by first-run setup and password login.
+// Accounts is the UI account store used by first-run registration and password login.
 type Accounts interface {
 	UserCount(ctx context.Context) (int, error)
 	User(ctx context.Context, username string) (store.User, error)
@@ -43,23 +43,21 @@ type Accounts interface {
 	UpdatePassword(ctx context.Context, username, passwordHash string) error
 }
 
-// Option adds password accounts or a first-run setup token to the UI handler.
+// Option configures the UI handler; WithAccounts adds password login.
 type Option func(*handler)
 
-// WithAccounts enables password login and first-run admin setup.
-func WithAccounts(accounts Accounts, setupToken string) Option {
+// WithAccounts enables password login and first-run registration.
+func WithAccounts(accounts Accounts) Option {
 	return func(h *handler) {
 		h.accounts = accounts
-		h.setupToken = setupToken
 	}
 }
 
 type handler struct {
-	files      fs.FS
-	log        *slog.Logger
-	sessions   *auth.Sessions
-	accounts   Accounts
-	setupToken string
+	files    fs.FS
+	log      *slog.Logger
+	sessions *auth.Sessions
+	accounts Accounts
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +73,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case name == "login":
 		h.handleLogin(w, r)
 		return
-	case name == "setup":
-		h.handleSetup(w, r)
+	case name == "register":
+		h.handleRegister(w, r)
 		return
 	case name == "account":
 		h.handleAccount(w, r)
@@ -138,43 +136,33 @@ func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 		return
 	}
-	adminExists := h.adminExists(r)
-	keyMode := r.URL.Query().Get("key") == "1"
-	passwordMode := adminExists && !keyMode
+	if h.accounts == nil {
+		http.Error(w, "password accounts are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if !h.adminExists(r) {
+		http.Redirect(w, r, "/ui/register", http.StatusFound)
+		return
+	}
 	if r.Method == http.MethodGet {
 		h.loginPage(w, http.StatusOK, auth.NextPath(r.URL.Query().Get("next")), "",
-			adminExists, keyMode, !adminExists && h.accounts != nil,
-			r.URL.Query().Get("changed") == "1")
+			"", r.URL.Query().Get("changed") == "1")
 		return
 	}
-
 	_ = r.ParseForm()
 	next := auth.NextPath(r.PostFormValue("next"))
-	if passwordMode {
-		username := strings.TrimSpace(r.PostFormValue("username"))
-		password := r.PostFormValue("password")
-		user, err := h.accounts.User(r.Context(), username)
-		if err != nil || !auth.VerifyPassword(user.PasswordHash, password) {
-			h.loginPage(w, http.StatusUnauthorized, next, "Username atau password salah.",
-				adminExists, keyMode, false, false)
-			return
-		}
-		h.sessions.SetCookie(w, r, user.Username)
-		http.Redirect(w, r, next, http.StatusSeeOther)
+	username := strings.TrimSpace(r.PostFormValue("username"))
+	password := r.PostFormValue("password")
+	user, err := h.accounts.User(r.Context(), username)
+	if err != nil || !auth.VerifyPassword(user.PasswordHash, password) {
+		h.loginPage(w, http.StatusUnauthorized, next, username, "Wrong username or password.", false)
 		return
 	}
-
-	user, ok := h.sessions.CheckKey(r.PostFormValue("key"))
-	if !ok {
-		h.loginPage(w, http.StatusUnauthorized, next, "That key does not match this server.",
-			adminExists, keyMode, !adminExists && h.accounts != nil, false)
-		return
-	}
-	h.sessions.SetCookie(w, r, user)
+	h.sessions.SetCookie(w, r, user.Username)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func (h *handler) handleSetup(w http.ResponseWriter, r *http.Request) {
+func (h *handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if h.accounts == nil {
 		http.NotFound(w, r)
 		return
@@ -188,12 +176,8 @@ func (h *handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/login", http.StatusFound)
 		return
 	}
-	if h.setupToken == "" {
-		h.setupPage(w, http.StatusServiceUnavailable, "admin", "", "Setup token is not configured. Set REDLINE_SETUP_TOKEN and restart the server.")
-		return
-	}
 	if r.Method == http.MethodGet {
-		h.setupPage(w, http.StatusOK, "admin", "", "")
+		h.registerPage(w, http.StatusOK, "admin", "")
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -202,30 +186,29 @@ func (h *handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
-	token := strings.TrimSpace(r.PostFormValue("token"))
 	username := strings.TrimSpace(r.PostFormValue("username"))
 	password := r.PostFormValue("password")
 	confirm := r.PostFormValue("confirm")
-	if !auth.TokenEqual(token, h.setupToken) {
-		h.setupPage(w, http.StatusUnauthorized, username, "", "Setup token salah.")
-		return
-	}
 	if !auth.ValidUsername(username) {
-		h.setupPage(w, http.StatusBadRequest, username, "", "Username hanya boleh huruf, angka, titik, underscore atau strip (maks 64).")
+		h.registerPage(w, http.StatusBadRequest, username, "Use letters, digits, dots, underscores or dashes (max 64).")
 		return
 	}
 	if password != confirm {
-		h.setupPage(w, http.StatusBadRequest, username, "", "Password dan konfirmasi tidak sama.")
+		h.registerPage(w, http.StatusBadRequest, username, "Passwords do not match.")
 		return
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		h.setupPage(w, http.StatusBadRequest, username, "", err.Error())
+		h.registerPage(w, http.StatusBadRequest, username, err.Error())
 		return
 	}
 	user, err := h.accounts.CreateAdmin(r.Context(), username, hash)
+	if errors.Is(err, store.ErrAdminExists) {
+		http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
+		return
+	}
 	if err != nil {
-		h.setupPage(w, http.StatusInternalServerError, username, "", "Tidak bisa membuat admin: "+err.Error())
+		h.registerPage(w, http.StatusInternalServerError, username, "Could not create the admin: "+err.Error())
 		return
 	}
 	h.sessions.SetCookie(w, r, user.Username)
@@ -244,7 +227,7 @@ func (h *handler) handleAccount(w http.ResponseWriter, r *http.Request) {
 	username := h.sessions.User(r)
 	user, err := h.accounts.User(r.Context(), username)
 	if errors.Is(err, store.ErrNotFound) {
-		h.accountPage(w, http.StatusBadRequest, username, "This session uses a legacy API key, not a password account.")
+		h.accountPage(w, http.StatusBadRequest, username, "This session is not linked to a password account.")
 		return
 	}
 	if err != nil {
@@ -295,7 +278,7 @@ func (h *handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/ui/login", http.StatusSeeOther)
 }
 
-func (h *handler) loginPage(w http.ResponseWriter, status int, next, errMsg string, adminExists, keyMode, allowSetup, changed bool) {
+func (h *handler) loginPage(w http.ResponseWriter, status int, next, username, errMsg string, changed bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -305,29 +288,6 @@ func (h *handler) loginPage(w http.ResponseWriter, status int, next, errMsg stri
 	}
 	if changed {
 		errorBlock = `<p class="ok">Password changed. Sign in with the new password.</p>`
-	}
-	fields := `<label for="key">API key</label>
-<input id="key" name="key" type="password" autocomplete="current-password" autofocus required>
-<div class="note">The key stays on the server as a signed, HttpOnly cookie. It is never stored in JavaScript.</div>`
-	formAction := "/ui/login"
-	if keyMode {
-		formAction = "/ui/login?key=1"
-	}
-	subtitle := `Use the server's <code>REDLINE_API_KEY</code>.`
-	switchLink := ""
-	if adminExists && !keyMode {
-		fields = `<label for="username">Username</label>
-<input id="username" name="username" type="text" autocomplete="username" autofocus required>
-<label for="password">Password</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
-<div class="note">Use the admin account created during first-run setup.</div>`
-		subtitle = "Sign in with your admin password."
-		switchLink = `<a class="switch" href="/ui/login?key=1">Sign in with an API key instead</a>`
-	} else if adminExists && keyMode {
-		switchLink = `<a class="switch" href="/ui/login">Sign in with the admin password instead</a>`
-	}
-	if allowSetup {
-		switchLink += `<a class="switch" href="/ui/setup">First run? Set up the admin account</a>`
 	}
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -353,23 +313,22 @@ button:hover{background:#388bfd}
 .error{margin-top:14px;color:#ff7b72;font-size:12px}
 .ok{margin-top:14px;color:#3fb950;font-size:12px}
 .note{margin-top:18px;padding-top:14px;border-top:1px solid #21262d;font-size:11px;color:#6e7681}
-.switch{display:block;margin-top:10px;color:#58a6ff;font-size:11.5px;text-decoration:none}
-code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117;border:1px solid #30363d;
-padding:1px 4px;border-radius:4px}
 </style></head>
-<body><form class="card" method="post" action="%s">
+<body><form class="card" method="post" action="/ui/login">
 <div class="brand"><div class="logo"></div><div><strong>Redline</strong><br><span style="font-size:11px;color:#6e7681">failure triage</span></div></div>
 <h1>Sign in</h1>
-<p>%s</p>
+<p>Use your admin username and password.</p>
 %s
-%s
+<label for="username">Username</label>
+<input id="username" name="username" type="text" value="%s" autocomplete="username" autofocus required>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
 <input type="hidden" name="next" value="%s">
 <button type="submit">Continue</button>
-%s
-</form></body></html>`, formAction, subtitle, errorBlock, fields, html.EscapeString(next), switchLink)
+</form></body></html>`, errorBlock, html.EscapeString(username), html.EscapeString(next))
 }
 
-func (h *handler) setupPage(w http.ResponseWriter, status int, username, token, errMsg string) {
+func (h *handler) registerPage(w http.ResponseWriter, status int, username, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
@@ -379,7 +338,7 @@ func (h *handler) setupPage(w http.ResponseWriter, status int, username, token, 
 	}
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Set up Redline</title>
+<title>Create admin · Redline</title>
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -401,22 +360,20 @@ button:hover{background:#388bfd}
 .error{margin-top:14px;color:#ff7b72;font-size:12px}
 .note{margin-top:18px;padding-top:14px;border-top:1px solid #21262d;font-size:11px;color:#6e7681}
 </style></head>
-<body><form class="card" method="post" action="/ui/setup">
+<body><form class="card" method="post" action="/ui/register">
 <div class="brand"><div class="logo"></div><div><strong>Redline</strong><br><span style="font-size:11px;color:#6e7681">first run</span></div></div>
-<h1>Set up the admin account</h1>
-<p>Use the one-time setup token printed by the server, then choose the admin password.</p>
+<h1>Create the admin account</h1>
+<p>This page is only available until the first account is created.</p>
 %s
-<label for="token">Setup token</label>
-<input id="token" name="token" type="password" value="%s" autocomplete="off" required>
 <label for="username">Username</label>
-<input id="username" name="username" type="text" value="%s" autocomplete="username" required>
+<input id="username" name="username" type="text" value="%s" autocomplete="username" autofocus required>
 <label for="password">Password (min. 12 characters)</label>
 <input id="password" name="password" type="password" autocomplete="new-password" required>
 <label for="confirm">Confirm password</label>
 <input id="confirm" name="confirm" type="password" autocomplete="new-password" required>
 <button type="submit">Create admin</button>
-<div class="note">The token is only needed once. After setup, sign in with your username and password.</div>
-</form></body></html>`, errorBlock, html.EscapeString(token), html.EscapeString(username))
+<div class="note">After registration, sign in with the username and password.</div>
+</form></body></html>`, errorBlock, html.EscapeString(username))
 }
 
 func (h *handler) accountPage(w http.ResponseWriter, status int, username, errMsg string) {

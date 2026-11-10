@@ -2,11 +2,15 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
+
+// ErrAdminExists is returned when first-run registration runs after an account already exists.
+var ErrAdminExists = errors.New("admin account already exists")
 
 // User is a UI account. Passwords are stored as bcrypt hashes; API keys are not stored here.
 type User struct {
@@ -30,14 +34,25 @@ func (s *Store) UserCount(ctx context.Context) (int, error) {
 }
 
 // CreateAdmin creates the first UI account. Passwords must already be hashed.
+// The lock node serialises concurrent registrations, so only one admin can be created.
 func (s *Store) CreateAdmin(ctx context.Context, username, passwordHash string) (User, error) {
 	res, err := s.query(ctx, `
+		MERGE (lock:ServerSetting {id: 'users'})
+		ON CREATE SET lock.createdAt = datetime()
+		SET lock.updatedAt = datetime()
+		WITH lock
+		OPTIONAL MATCH (u:User)
+		WITH lock, count(u) AS n
+		WHERE n = 0
 		CREATE (u:User {username: $username, passwordHash: $hash, role: 'admin',
 			createdAt: datetime(), updatedAt: datetime()})
 		RETURN u`,
 		map[string]any{"username": username, "hash": passwordHash})
 	if err != nil {
 		return User{}, err
+	}
+	if len(res.Records) == 0 {
+		return User{}, ErrAdminExists
 	}
 	node, _ := res.Records[0].Get("u")
 	return toUser(node.(neo4j.Node).Props), nil
