@@ -88,7 +88,7 @@ docker compose --profile full up -d
 Install the package, pinned to a release (use the same tag as your server):
 
 ```bash
-npm i -D github:ega-septian/redline#v1.12.0
+npm i -D github:ega-septian/redline#v1.13.0
 ```
 
 Add the reporter **after** the JSON reporter in `playwright.config.ts`:
@@ -601,6 +601,7 @@ failing in a confusing way.
 
 | Version  | Highlights                                                              |
 | -------- | ----------------------------------------------------------------------- |
+| `v1.13.0` | Admin registration and password login, Config-generated API keys with revocation, AI fallback for unclear load errors |
 | `v1.12.0` | Rule-based analysis for suite load errors: category, confidence, summary and next step |
 | `v1.11.0` | Grouped and triaged suite load errors, with a dedicated Load errors page |
 | `v1.10.0` | Workspace-level suite load errors on Health, including runs with no test results |
