@@ -39,15 +39,24 @@ type Sessions struct {
 // legacy single REDLINE_API_KEY is accepted as user "admin". An empty key and
 // no users means the server is open (loopback only, by config).
 func New(apiKey string, users map[string]string) *Sessions {
+	return NewWithSecret(apiKey, users, "")
+}
+
+// NewWithSecret builds the session signer with a stable server secret (usually stored in Neo4j).
+// The secret keeps sessions valid across restarts even when no REDLINE_API_KEY is configured.
+func NewWithSecret(apiKey string, users map[string]string, secret string) *Sessions {
 	s := &Sessions{apiKey: apiKey, users: users, now: time.Now}
-	material := apiKey
-	names := make([]string, 0, len(users))
-	for name := range users {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		material += "|" + name + "=" + users[name]
+	material := secret
+	if material == "" {
+		material = apiKey
+		names := make([]string, 0, len(users))
+		for name := range users {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			material += "|" + name + "=" + users[name]
+		}
 	}
 	if material != "" {
 		sum := sha256.Sum256([]byte("redline-ui-session|" + material))

@@ -158,6 +158,7 @@ Everything has a default that works on a laptop. The settings you are most likel
 | `HOST`            | `127.0.0.1`    | Interface to bind. A non-loopback host requires `REDLINE_API_KEY` |
 | `PORT`            | `8787`         | HTTP port                                                        |
 | `REDLINE_API_KEY` | empty          | Key for `/api/...`; empty is only allowed on a loopback host     |
+| `REDLINE_SETUP_TOKEN` | empty      | One-time token for `/ui/setup`; empty = generated and logged when no admin exists |
 | `STATUS_FROM`     | `ci`           | Which runs may open or close a failure: `ci`, `local`, `all`     |
 | `RETENTION_DAYS`  | `30`           | Old test details and artifacts are cleaned up (`0` = never)      |
 | `TIMEZONE`        | `Asia/Jakarta` | Time zone for the API and logs                                   |
@@ -201,13 +202,16 @@ REDLINE_URL=http://your-server:8787
 REDLINE_API_KEY=<the same key>
 ```
 
-A user key logs in at `/ui/login` and labels are attributed to that name. The legacy `REDLINE_API_KEY`
-is accepted as user `admin`. API clients can use any of those keys as `Authorization: Bearer`.
+A user key still works for API clients and as a legacy UI login, but the recommended UI path is now
+the admin account. On a fresh install with no admin, the server prints a one-time setup token at
+startup (or use `REDLINE_SETUP_TOKEN`). Open `/ui/setup`, enter the token and create the admin
+username/password. After that, `/ui/login` asks for the username/password, and **Account** in the
+sidebar lets the admin change the password.
 
-`/healthz` and `/readyz` stay open; every other `/api/...` request must send
-`Authorization: Bearer <key>`. The UI asks for the same key at `/ui/login` and keeps a signed,
-HttpOnly cookie for 12 hours. API reads accept that cookie; cookie writes also need the
-`X-CSRF-Token` header that matches the `redline_csrf` cookie.
+`REDLINE_API_KEY` and `REDLINE_USERS` remain the machine/CI credentials: API clients send
+`Authorization: Bearer <key>`. The UI session is a signed, HttpOnly cookie for 12 hours; API reads accept
+that cookie and cookie writes also need the `X-CSRF-Token` header that matches the `redline_csrf`
+cookie. The Playwright reporter in `coba2` keeps using `REDLINE_API_KEY`; no workflow change is needed.
 
 ## Commands
 

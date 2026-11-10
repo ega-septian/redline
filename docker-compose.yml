@@ -33,6 +33,7 @@ services:
       # Ganti untuk server yang bisa dijangkau orang lain.
       REDLINE_API_KEY: ${REDLINE_API_KEY:-local-dev-only}
       REDLINE_USERS: ${REDLINE_USERS:-}
+      REDLINE_SETUP_TOKEN: ${REDLINE_SETUP_TOKEN:-}
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: redline-local
