@@ -34,6 +34,8 @@ evidence — backend bug, test bug, environment or flaky — before you open the
 
 [See all screenshots →](docs/screenshots/README.md)
 
+All screenshots use demo data; no production data is included.
+
 ## Quick start
 
 ### 1. Run the server
