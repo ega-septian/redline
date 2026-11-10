@@ -15,7 +15,7 @@ func TestStore(ctx context.Context, t testing.TB, name string) *Store {
 	t.Helper()
 	uri := os.Getenv("REDLINE_TEST_NEO4J_URI")
 	if uri == "" {
-		t.Skip("REDLINE_TEST_NEO4J_URI tidak diset; test Neo4j dilewati")
+		t.Skip("REDLINE_TEST_NEO4J_URI is not set; Neo4j tests skipped")
 	}
 	password := os.Getenv("REDLINE_TEST_NEO4J_PASSWORD")
 	if password == "" {

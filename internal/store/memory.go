@@ -83,7 +83,7 @@ func (s *Store) PendingEmbeddings(ctx context.Context, model string, limit int) 
 // SaveEmbeddings menyimpan embedding pesan error per kelompok, beserta model yang membuatnya.
 func (s *Store) SaveEmbeddings(ctx context.Context, model string, ids []string, vectors [][]float32) error {
 	if len(ids) != len(vectors) {
-		return fmt.Errorf("jumlah id (%d) dan embedding (%d) berbeda", len(ids), len(vectors))
+		return fmt.Errorf("id count (%d) and embedding count (%d) differ", len(ids), len(vectors))
 	}
 	rows := make([]map[string]any, len(ids))
 	for i, v := range vectors {
@@ -145,18 +145,18 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 		count := func(what, cypher string, params map[string]any) (int64, error) {
 			res, err := tx.Run(ctx, cypher, params)
 			if err != nil {
-				return 0, fmt.Errorf("hapus %s: %w", what, err)
+				return 0, fmt.Errorf("delete %s: %w", what, err)
 			}
 			rec, err := res.Single(ctx)
 			if err != nil {
-				return 0, fmt.Errorf("hapus %s: %w", what, err)
+				return 0, fmt.Errorf("delete %s: %w", what, err)
 			}
 			n, _ := rec.Get("n")
 			return n.(int64), nil
 		}
 		var err error
 		// before dikirim dalam UTC: Neo4j tidak mengenal zona waktu "Local" milik Go.
-		if out.TestResults, err = count("hasil test lama", `
+		if out.TestResults, err = count("old test results", `
 			CALL {
 				MATCH (r:Result {status: 'passed'}) WITH r ORDER BY r.runId DESC
 				WITH r.testKey AS k, collect(r)[0] AS keep RETURN keep
@@ -173,11 +173,11 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			RETURN count(*) AS n`, map[string]any{"before": before.UTC()}); err != nil {
 			return nil, err
 		}
-		if out.Shapes, err = count("bentuk response yatim", `
+		if out.Shapes, err = count("orphan response shapes", `
 			MATCH (x:Shape) WHERE NOT ()-[:RETURNED]->(x) DETACH DELETE x RETURN count(*) AS n`, nil); err != nil {
 			return nil, err
 		}
-		if out.Sources, err = count("kode test yatim", `
+		if out.Sources, err = count("orphan test code", `
 			MATCH (x:SourceFile) WHERE NOT EXISTS { MATCH (r:Result) WHERE x.id IN r.sourceIds }
 			DELETE x RETURN count(*) AS n`, nil); err != nil {
 			return nil, err
@@ -187,11 +187,11 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			MATCH (run:Run)-[:HAS_ARTIFACT]->(a:Artifact) WHERE run.createdAt < $before
 			RETURN count(a) AS n, collect(a.path) AS paths`, map[string]any{"before": before.UTC()})
 		if err != nil {
-			return nil, fmt.Errorf("hitung artifact lama: %w", err)
+			return nil, fmt.Errorf("count old artifacts: %w", err)
 		}
 		rec, err := res.Single(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("hitung artifact lama: %w", err)
+			return nil, fmt.Errorf("count old artifacts: %w", err)
 		}
 		n, _ := rec.Get("n")
 		out.Artifacts = n.(int64)
@@ -201,10 +201,10 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 				MATCH (run:Run)-[:HAS_ARTIFACT]->(a:Artifact) WHERE run.createdAt < $before
 				DETACH DELETE a`, map[string]any{"before": before.UTC()})
 			if err != nil {
-				return nil, fmt.Errorf("hapus artifact lama: %w", err)
+				return nil, fmt.Errorf("delete old artifacts: %w", err)
 			}
 			if _, err := del.Consume(ctx); err != nil {
-				return nil, fmt.Errorf("hapus artifact lama: %w", err)
+				return nil, fmt.Errorf("delete old artifacts: %w", err)
 			}
 			for _, path := range paths.([]any) {
 				if p, ok := path.(string); ok && p != "" {
@@ -213,10 +213,10 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (PruneResult, error
 			}
 		}
 		for what, cypher := range map[string]string{
-			"kontrak yatim": `MATCH (x:Contract) WHERE NOT ()-[:UNDER]->(x) DELETE x RETURN count(*) AS n`,
+			"orphan contracts": `MATCH (x:Contract) WHERE NOT ()-[:UNDER]->(x) DELETE x RETURN count(*) AS n`,
 			// File yang masih ada di graph import (IMPORTS, VERSION) tetap disimpan: itu pengetahuan, bukan sisa.
-			"endpoint yatim": `MATCH (x:Endpoint) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
-			"file yatim":     `MATCH (x:File) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
+			"orphan endpoints": `MATCH (x:Endpoint) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
+			"orphan files":     `MATCH (x:File) WHERE NOT (x)--() DELETE x RETURN count(*) AS n`,
 		} {
 			if _, err := count(what, cypher, nil); err != nil {
 				return nil, err

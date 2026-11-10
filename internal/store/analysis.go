@@ -31,7 +31,7 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 		OPTIONAL MATCH (r)-[:RETURNED]->(shape:Shape)
 		RETURN r, shape.shape AS shape`, map[string]any{"id": fingerprint})
 	if err != nil {
-		return nil, fmt.Errorf("kemunculan terakhir: %w", err)
+		return nil, fmt.Errorf("latest occurrence: %w", err)
 	}
 	var curHash string
 	var sourceIDs []string
@@ -67,7 +67,7 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 		RETURN run, r.testCodeHash AS hash, shape.shape AS shape`,
 		map[string]any{"key": g.TestKey, "before": g.LastSeenRun})
 	if err != nil {
-		return nil, fmt.Errorf("lulus terakhir: %w", err)
+		return nil, fmt.Errorf("last pass: %w", err)
 	}
 	var passHash string
 	passCalls := []report.HTTPCall{}
@@ -91,10 +91,10 @@ func (s *Store) Facts(ctx context.Context, fingerprint string) (*Facts, error) {
 		WITH r ORDER BY r.runId ASC LIMIT 1
 		MATCH (run:Run {id: r.runId}) RETURN run`, map[string]any{"id": fingerprint, "after": after})
 	if err != nil {
-		return nil, fmt.Errorf("gagal pertama: %w", err)
+		return nil, fmt.Errorf("first failure: %w", err)
 	}
 	if len(res.Records) == 0 {
-		return nil, fmt.Errorf("gagal pertama: tidak ada kemunculan gagal untuk %s", fingerprint)
+		return nil, fmt.Errorf("first failure: no failed occurrence for %s", fingerprint)
 	}
 	f.FirstFail = runRef(res.Records[0])
 
@@ -244,7 +244,7 @@ func (s *Store) GetAnalysis(ctx context.Context, fingerprint, promptVersion stri
 // SetTriage menyimpan status kerja, owner, dan catatan triage. Status test (open/resolved) tidak berubah.
 func (s *Store) SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error {
 	if !ValidTriageStatus(status) {
-		return fmt.Errorf("status triage %q tidak valid", status)
+		return fmt.Errorf("invalid triage status %q", status)
 	}
 	res, err := s.query(ctx, `
 		MATCH (f:Failure {id: $id})
@@ -264,7 +264,7 @@ func (s *Store) SetTriage(ctx context.Context, fingerprint, status, owner, note,
 // SetTriageStatusBulk mengubah status triage beberapa kelompok sekaligus.
 func (s *Store) SetTriageStatusBulk(ctx context.Context, ids []string, status, by string) (int, error) {
 	if !ValidTriageStatus(status) {
-		return 0, fmt.Errorf("status triage %q tidak valid", status)
+		return 0, fmt.Errorf("invalid triage status %q", status)
 	}
 	if len(ids) == 0 {
 		return 0, nil

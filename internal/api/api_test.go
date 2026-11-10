@@ -756,7 +756,7 @@ func TestDecideRule(t *testing.T) {
 
 func TestProposeRules_NothingToLearn(t *testing.T) {
 	rec := do(newServer(&fakeStore{}, 0), "POST", "/api/rules/propose", nil)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "belum ada kasus terbukti") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "no new proven cases") {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
 }
@@ -1638,6 +1638,10 @@ func TestIngestSendsDiscordNotification(t *testing.T) {
 		!strings.Contains(notifier.message.Title, "run #7") ||
 		!strings.Contains(notifier.message.Description, "TC-BRD-002") {
 		t.Errorf("message salah: %+v", notifier.message)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(fs.deliveries) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 	}
 	if len(fs.deliveries) != 1 || !fs.deliveries[0].OK || fs.deliveries[0].RunID != 7 ||
 		fs.deliveries[0].Event != "new_failure" {

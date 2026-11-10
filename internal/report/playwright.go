@@ -147,7 +147,7 @@ const attachmentHTTP = "redline-http"
 type Outcome struct {
 	Project string
 	File    string
-	Title   string // judul lengkap: "describe › nama test"
+	Title   string // judul lengkap: "describe › test name"
 	Line    int
 	// TestCaseID: ID test case dari tag @TC-... (kosong kalau tidak ada). Identitas test tetap Key(), karena
 	// tag bisa tidak ada, dobel, atau diganti; ID dipakai untuk menyambung riwayat test yang di-rename.
@@ -210,10 +210,10 @@ func Parse(r io.Reader) (*Report, error) {
 	var rep Report
 	dec := json.NewDecoder(r)
 	if err := dec.Decode(&rep); err != nil {
-		return nil, fmt.Errorf("results.json tidak valid: %w", err)
+		return nil, fmt.Errorf("invalid results.json: %w", err)
 	}
 	if rep.Suites == nil && rep.Stats.StartTime.IsZero() {
-		return nil, fmt.Errorf("ini bukan laporan JSON Playwright (tidak ada suites/stats)")
+		return nil, fmt.Errorf("this is not a Playwright JSON report (no suites/stats)")
 	}
 	return &rep, nil
 }

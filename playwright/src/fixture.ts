@@ -76,7 +76,7 @@ export const test = base.extend<{ reportPortalCaseId: void }>({
             if (curls.length < MAX_CALLS) {
               const url = requestURL(urlOrRequest, options, baseURL);
               curls.push(
-                toCurl(method, url, headers, options, `tidak ada response: ${firstLine(err)}`),
+                toCurl(method, url, headers, options, `no response: ${firstLine(err)}`),
               );
             }
             throw err;

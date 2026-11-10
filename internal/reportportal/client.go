@@ -93,7 +93,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("ReportPortal %s %s: jawaban tidak valid: %w", method, path, err)
+			return fmt.Errorf("ReportPortal %s %s: invalid response: %w", method, path, err)
 		}
 	}
 	return nil

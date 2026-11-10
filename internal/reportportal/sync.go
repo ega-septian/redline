@@ -69,7 +69,7 @@ type Syncer struct {
 }
 
 // ErrLaunchNotFound: launch dengan token run itu tidak muncul atau tidak selesai dalam waktu tunggu.
-var ErrLaunchNotFound = errors.New("launch ReportPortal tidak ditemukan atau belum selesai")
+var ErrLaunchNotFound = errors.New("ReportPortal launch not found or not finished")
 
 // Sync mengisi ReportPortal untuk run Redline runID, yang launch-nya membawa atribut redline_run=token.
 func (s *Syncer) Sync(ctx context.Context, runID int64, token string) (Result, error) {
@@ -113,7 +113,7 @@ func (s *Syncer) Sync(ctx context.Context, runID int64, token string) (Result, e
 			continue
 		}
 		if err != nil {
-			s.logger().Warn("analisis untuk ReportPortal gagal", "test", f.TestKey, "err", err)
+			s.logger().Warn("ReportPortal analysis failed", "test", f.TestKey, "err", err)
 			res.Unmatched++
 			continue
 		}

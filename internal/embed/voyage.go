@@ -96,12 +96,12 @@ func (v *Voyage) Embed(ctx context.Context, texts []string) (*Result, error) {
 			return nil, fmt.Errorf("decode response voyage: %w", err)
 		}
 		if len(out.Data) != len(texts) {
-			return nil, fmt.Errorf("voyage mengembalikan %d embedding untuk %d teks", len(out.Data), len(texts))
+			return nil, fmt.Errorf("Voyage returned %d embeddings for %d texts", len(out.Data), len(texts))
 		}
 		res := &Result{Vectors: make([][]float32, len(texts)), Tokens: out.Usage.TotalTokens}
 		for _, d := range out.Data {
 			if d.Index < 0 || d.Index >= len(texts) {
-				return nil, fmt.Errorf("index embedding %d di luar jangkauan", d.Index)
+				return nil, fmt.Errorf("embedding index %d is out of range", d.Index)
 			}
 			res.Vectors[d.Index] = d.Embedding
 		}

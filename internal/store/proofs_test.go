@@ -118,7 +118,7 @@ func testScoreboard(t *testing.T, b *store.Store) {
 	for _, e := range board.Entries {
 		byKey[e.GroupID+" "+e.Source] = e
 	}
-	if e := byKey[order+" rule"]; !e.Correct || e.TruthBy != "eksperimen" || e.ProvenAt == nil || !strings.Contains(e.Test, "order dibayar") {
+	if e := byKey[order+" rule"]; !e.Correct || e.TruthBy != "experiment" || e.ProvenAt == nil || !strings.Contains(e.Test, "order dibayar") {
 		t.Errorf("order: %+v", e)
 	}
 	if e := byKey[brands+" rule"]; e.Correct || e.Predicted != "backend_bug" || e.Truth != "test_bug" || e.TruthBy != "label" {

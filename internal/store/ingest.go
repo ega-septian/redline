@@ -57,7 +57,7 @@ func (s *Store) IngestReport(ctx context.Context, rep *report.Report, meta RunMe
 				"triggeredBy": meta.TriggeredBy, "ciURL": meta.CIURL, "branch": meta.Branch, "commit": meta.CommitSHA,
 				"appVersion": meta.AppVersion, "playwrightVersion": rep.Config.Version, "reportErrors": reportErrors,
 			}); err != nil {
-			return nil, fmt.Errorf("simpan run: %w", err)
+			return nil, fmt.Errorf("store run: %w", err)
 		}
 
 		if err := saveLoadErrors(ctx, tx, runID, reportErrors); err != nil {
@@ -166,7 +166,7 @@ func saveSources(ctx context.Context, tx neo4j.ManagedTransaction, sources map[s
 	if _, err := tx.Run(ctx, `UNWIND $rows AS row
 		MERGE (f:SourceFile {id: row.id}) ON CREATE SET f.path = row.path, f.content = row.content`,
 		map[string]any{"rows": rows}); err != nil {
-		return nil, fmt.Errorf("simpan kode test: %w", err)
+		return nil, fmt.Errorf("store test code: %w", err)
 	}
 	return ids, nil
 }
@@ -200,7 +200,7 @@ func saveFiles(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, fi
 		FOREACH (p IN row.imports | MERGE (g:File {path: p}) MERGE (f)-[:IMPORTS]->(g))`,
 		map[string]any{"runId": runID, "rows": rows})
 	if err != nil {
-		return fmt.Errorf("simpan graph import: %w", err)
+		return fmt.Errorf("store import graph: %w", err)
 	}
 	return nil
 }
@@ -237,7 +237,7 @@ func saveLoadErrors(ctx context.Context, tx neo4j.ManagedTransaction, runID int6
 				"category": analysis.Category, "confidence": analysis.Confidence, "source": analysis.Source,
 				"summary": analysis.Summary, "nextStep": analysis.NextStep,
 			}); err != nil {
-			return fmt.Errorf("simpan load error: %w", err)
+			return fmt.Errorf("store load error: %w", err)
 		}
 	}
 	return nil
@@ -300,7 +300,7 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 			"groupId": fingerprint, "causeId": incidentKey, "testCodeHash": o.SourceHash, "shapeId": shapeID,
 			"tracePath": o.TracePath, "screenshots": screenshots, "codeFiles": codeFiles, "sourceIds": sources,
 		}); err != nil {
-		return fmt.Errorf("simpan hasil %q: %w", o.Key(), err)
+		return fmt.Errorf("store result %q: %w", o.Key(), err)
 	}
 	// Peta kode: endpoint yang dipanggil dan file yang dipakai test ini, sebagai hubungan graph.
 	endpoints := []string{}
@@ -318,7 +318,7 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 			FOREACH (path IN $files | MERGE (f:File {path: path}) MERGE (r)-[:USED]->(f))
 			FOREACH (path IN $deps | MERGE (f:File {path: path}) MERGE (r)-[:DEPENDS_ON]->(f))`,
 			map[string]any{"id": id, "endpoints": endpoints, "files": codeFiles, "deps": deps}); err != nil {
-			return fmt.Errorf("simpan peta kode: %w", err)
+			return fmt.Errorf("store code map: %w", err)
 		}
 	}
 	if shapeID != "" {
@@ -326,7 +326,7 @@ func saveResult(ctx context.Context, tx neo4j.ManagedTransaction, runID int64, o
 			MERGE (s:Shape {id: $shapeId}) ON CREATE SET s.shape = $calls
 			WITH s MATCH (r:Result {id: $id}) CREATE (r)-[:RETURNED]->(s)`,
 			map[string]any{"shapeId": shapeID, "calls": calls, "id": id}); err != nil {
-			return fmt.Errorf("simpan bentuk response: %w", err)
+			return fmt.Errorf("store response shape: %w", err)
 		}
 	}
 	return nil
@@ -361,7 +361,7 @@ func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 			map[string]any{"key": o.Key(), "project": o.Project, "file": o.File, "title": o.Title, "id": fingerprint,
 				"lastError": cleanMsg, "runId": runID, "causeId": incidentKey, "cause": incidentLabel,
 				"localOnly": !shared, "caseId": o.TestCaseID}); err != nil {
-			return change, "", fmt.Errorf("buat kelompok %s: %w", fingerprint, err)
+			return change, "", fmt.Errorf("create group %s: %w", fingerprint, err)
 		}
 		change.Occurrences = 1
 		return change, "new", nil
@@ -387,7 +387,7 @@ func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 			SET f.localOnly = false, f.status = 'open', f.occurrences = 1, f.regressions = 0,
 				f.firstSeenRun = $runId, f.lastSeenRun = $runId, f.lastError = $lastError, f.resolvedRun = null,
 				f.causeId = $causeId, f.cause = $cause, f.caseId = $caseId`, params); err != nil {
-			return change, "", fmt.Errorf("jadikan kelompok bersama %s: %w", fingerprint, err)
+			return change, "", fmt.Errorf("make shared group %s: %w", fingerprint, err)
 		}
 		change.Occurrences = 1
 		return change, "new", nil
@@ -400,11 +400,11 @@ func upsertFailure(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 			f.resolvedRun = null, f.causeId = $causeId, f.cause = $cause, f.caseId = $caseId
 		RETURN f.occurrences AS occurrences`, params)
 	if err != nil {
-		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
+		return change, "", fmt.Errorf("update group %s: %w", fingerprint, err)
 	}
 	r, err := upd.Single(ctx)
 	if err != nil {
-		return change, "", fmt.Errorf("perbarui kelompok %s: %w", fingerprint, err)
+		return change, "", fmt.Errorf("update group %s: %w", fingerprint, err)
 	}
 	n, _ := r.Get("occurrences")
 	change.Occurrences = int(n.(int64))
@@ -429,7 +429,7 @@ func resolvePassed(ctx context.Context, tx neo4j.ManagedTransaction, runID int64
 		RETURN f.id AS id, key, f.lastError AS lastError, f.occurrences AS occurrences, f.project AS project`,
 		map[string]any{"keys": keys, "runId": runID})
 	if err != nil {
-		return nil, fmt.Errorf("tutup kelompok yang sudah lulus: %w", err)
+		return nil, fmt.Errorf("close groups that passed again: %w", err)
 	}
 	for cur.Next(ctx) {
 		rec := cur.Record()

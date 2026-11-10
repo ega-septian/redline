@@ -203,7 +203,7 @@ export default class RedlineReporter implements Reporter {
     );
     const dir = path.resolve(options.resultsDir ?? "allure-results");
     const changed = enrichAllureResults(dir, failed);
-    if (changed > 0) log(`penyebab kegagalan ditambahkan ke laporan Allure (${changed} test)`);
+    if (changed > 0) log(`failure causes added to the Allure report (${changed} tests)`);
   }
 
   /** Graph import semua spec yang dijalankan, dengan path relatif seperti test_files. */
@@ -238,14 +238,14 @@ export default class RedlineReporter implements Reporter {
     if (this.testsRun === 0) return;
     // Ctrl+C: hasil tidak lengkap.
     if (result.status === "interrupted") {
-      log("run dihentikan di tengah jalan, hasil tidak dikirim.");
+      log("run interrupted; results were not sent.");
       return;
     }
 
     const file = this.reportFile();
     if (!file || !existsSync(file)) {
       log(
-        `results.json tidak ditemukan${file ? ` di ${file}` : ""}. Pastikan reporter "json" dipasang sebelum reporter Redline.`,
+        `results.json not found${file ? ` at ${file}` : ""}. Make sure the "json" reporter is listed before the Redline reporter.`,
       );
       return;
     }
@@ -280,19 +280,19 @@ export default class RedlineReporter implements Reporter {
       const timedOut = (e as Error).name === "TimeoutError";
       log(
         timedOut
-          ? `server di ${baseURL} tidak membalas dalam 15 detik, hasil mungkin tidak tersimpan. Cek log server Redline.`
-          : `server tidak bisa dihubungi di ${baseURL}, hasil tidak dikirim. (Matikan dengan REDLINE=0)`,
+          ? `server at ${baseURL} did not respond within 15 seconds; results may not be stored. Check the Redline server logs.`
+          : `server cannot be reached at ${baseURL}; results were not sent. (Disable with REDLINE=0)`,
       );
       return;
     }
     if (res.status === 401) {
       log(
-        "server Redline menolak API key (kosong atau salah): isi REDLINE_API_KEY di .env dengan key yang sama seperti di server.",
+        "Redline server rejected the API key (empty or invalid): set REDLINE_API_KEY in .env to the same key as the server.",
       );
       return;
     }
     if (!res.ok) {
-      log(`server menolak laporan (${res.status}): ${(await res.text()).slice(0, 300)}`);
+      log(`server rejected the report (${res.status}): ${(await res.text()).slice(0, 300)}`);
       return;
     }
     const servedApi = res.headers.get("x-redline-api-version");
@@ -344,11 +344,11 @@ export default class RedlineReporter implements Reporter {
       const needs = incidents.filter((v) => v.analysis?.source === "none").length;
       if (needs > 0) {
         log(
-          `${needs} penyebab belum punya rule. Jalankan REDLINE_AI=1 npx playwright test, ` +
-            `atau analisis run ini dengan: npx redline analyze --run ${summary.run_id}`,
+          `${needs} cause${needs === 1 ? "" : "s"} ${needs === 1 ? "has" : "have"} no rule yet. Run REDLINE_AI=1 npx playwright test, ` +
+            `or analyze this run with: npx redline analyze --run ${summary.run_id}`,
         );
       } else {
-        log("semua penyebab sudah ditangani rule; tidak perlu AI untuk run ini.");
+        log("all causes were handled by rules; AI is not needed for this run.");
       }
     }
     if (rows.length > 0) {
@@ -357,7 +357,7 @@ export default class RedlineReporter implements Reporter {
       if (process.env.REDLINE_VERIFY === "1") this.verify();
       else
         log(
-          "buktikan penyebabnya dengan eksperimen: npx redline verify (atau jalankan dengan REDLINE_VERIFY=1)",
+          "prove the cause with an experiment: npx redline verify (or run with REDLINE_VERIFY=1)",
         );
     }
   }
@@ -393,11 +393,11 @@ export default class RedlineReporter implements Reporter {
         }
       } catch (e) {
         failed++;
-        log(`artifact ${artifact.name} gagal diupload: ${e instanceof Error ? e.message : e}`);
+        log(`artifact ${artifact.name} failed to upload: ${e instanceof Error ? e.message : e}`);
       }
     }
     if (uploaded > 0) log(`${uploaded} trace/screenshot diupload ke Redline.`);
-    if (failed > 0) log(`${failed} artifact gagal diupload.`);
+    if (failed > 0) log(`${failed} artifacts failed to upload.`);
   }
 
   /**
@@ -406,7 +406,7 @@ export default class RedlineReporter implements Reporter {
    */
   private verify() {
     if (process.env.CI) {
-      log("REDLINE_VERIFY diabaikan di CI: eksperimen menjalankan ulang test dan kode buatan AI.");
+      log("REDLINE_VERIFY is ignored in CI: experiments rerun tests and execute AI-generated code.");
       return;
     }
     const root = this.config?.configFile ? path.dirname(this.config.configFile) : process.cwd();
@@ -416,7 +416,7 @@ export default class RedlineReporter implements Reporter {
       log(`REDLINE_VERIFY butuh ${cli} (CLI Redline). Pasang ulang paket redline-playwright.`);
       return;
     }
-    log("membuktikan penyebab kegagalan dengan eksperimen…");
+    log("proving the failure cause with experiments…");
     spawnSync(process.execPath, [cli, "verify"], {
       cwd: root,
       stdio: "inherit",
@@ -473,14 +473,14 @@ async function requestReportPortal(baseURL: string, runId: number) {
       { method: "POST", headers: authHeaders(), signal: AbortSignal.timeout(5000) },
     );
     if (res.status === 202) {
-      log("ReportPortal akan diisi penyebab kegagalan dari Redline setelah launch selesai");
+      log("ReportPortal will be filled with causes from Redline after the launch finishes");
     } else if (res.status === 404) {
-      log("integrasi ReportPortal belum diatur di server Redline (REPORTPORTAL_URL)");
+      log("ReportPortal integration is not configured on the Redline server (REPORTPORTAL_URL)");
     } else {
-      log(`ReportPortal tidak diisi (${res.status}): ${(await res.text()).slice(0, 200)}`);
+      log(`ReportPortal not filled (${res.status}): ${(await res.text()).slice(0, 200)}`);
     }
   } catch {
-    log("ReportPortal tidak diisi: server Redline tidak menjawab");
+    log("ReportPortal not filled: the Redline server did not respond");
   }
 }
 
@@ -558,25 +558,30 @@ function log(msg: string) {
 }
 
 const categoryLabel: Record<string, string> = {
-  backend_bug: "BUG BACKEND",
-  test_bug: "BUG DI TEST",
+  backend_bug: "BACKEND BUG",
+  test_bug: "TEST BUG",
   environment: "ENVIRONMENT",
   flaky: "FLAKY",
-  unknown: "BELUM JELAS",
+  unknown: "UNCLEAR",
 };
 const sourceLabel: Record<string, string> = {
-  rule: "aturan",
+  rule: "rule",
   ai: "AI",
-  human: "label manual",
-  experiment: "eksperimen (terbukti)",
-  none: "belum dianalisis",
+  human: "manual label",
+  experiment: "experiment (proven)",
+  none: "not analyzed",
 };
 const statusIcon: Record<Status, string> = {
-  BARU: "🆕 Baru",
+  BARU: "🆕 New",
   REGRESSED: "🔁 Regressed",
-  "MASIH GAGAL": "⏳ Masih gagal",
+  "MASIH GAGAL": "⏳ Still failing",
 };
 
+const statusLabel: Record<Status, string> = {
+  BARU: "NEW",
+  REGRESSED: "REGRESSED",
+  "MASIH GAGAL": "STILL FAILING",
+};
 const statusRank: Record<Status, number> = { REGRESSED: 3, BARU: 2, "MASIH GAGAL": 1 };
 
 /** Gabungkan kelompok kegagalan per insiden. Tanpa data insiden (server lama), tiap kelompok berdiri sendiri. */
@@ -635,7 +640,7 @@ async function analyze(incidents: IncidentView[], baseURL: string, ai: boolean):
         },
       );
     } catch {
-      v.note = "gagal menghubungi server";
+      v.note = "could not reach the server";
       continue;
     }
     const body = (await res.json()) as {
@@ -645,14 +650,14 @@ async function analyze(incidents: IncidentView[], baseURL: string, ai: boolean):
       error?: string;
     };
     if (!res.ok || !body.analysis) {
-      v.note = body.error ?? `analisis gagal (${res.status})`;
+      v.note = body.error ?? `analysis failed (${res.status})`;
       continue;
     }
     v.analysis = body.analysis;
     v.cached = body.cached;
     if (!body.cached && body.analysis.source === "ai") cost += body.analysis.cost_usd;
   }
-  for (const v of incidents.slice(max)) v.note = ai ? "dilewati, atur REDLINE_AI_MAX" : "";
+  for (const v of incidents.slice(max)) v.note = ai ? "skipped, set REDLINE_AI_MAX" : "";
   return cost;
 }
 
@@ -681,7 +686,7 @@ const TERMINAL_MAX = 15;
 
 /** Waktu dalam WIB, apa pun zona waktu mesin yang menjalankan test. */
 function jakartaTime(d: Date): string {
-  const f = new Intl.DateTimeFormat("id-ID", {
+  const f = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Jakarta",
     day: "numeric",
     month: "short",
@@ -690,11 +695,11 @@ function jakartaTime(d: Date): string {
     minute: "2-digit",
     hour12: false,
   });
-  return `${f.format(d)} WIB`;
+  return `${f.format(d)} UTC+7`;
 }
 
 const PREVIEW_NOTE =
-  "Run lokal: hanya pratinjau, status bersama tim tidak diubah (hanya run CI yang mengubahnya).";
+  "Local run: preview only; shared team status is not changed (only CI runs change it).";
 
 function isPreview(r: IngestResult): boolean {
   return r.shared_status === false;
@@ -709,21 +714,21 @@ function terminalReport(
   when: string,
 ): string {
   const out = [
-    `\n[redline] run #${r.run_id} · ${when}: ${r.passed} lulus, ${r.failed} gagal, ${r.flaky} flaky, ${r.skipped} skip`,
+    `\n[redline] run #${r.run_id} · ${when}: ${r.passed} passed, ${r.failed} failed, ${r.flaky} flaky, ${r.skipped} skipped`,
   ];
   if (isPreview(r)) out.push(`  ${PREVIEW_NOTE}`);
   if (incidents.length > 0) {
     const failedTests = incidents.reduce((n, v) => n + v.rows.length, 0);
     if (incidents.length < failedTests)
-      out.push(`  ${failedTests} kegagalan dari ${incidents.length} penyebab`);
+      out.push(`  ${failedTests} failure${failedTests === 1 ? "" : "s"} from ${incidents.length} cause${incidents.length === 1 ? "" : "s"}`);
     const shown = incidents.slice(0, TERMINAL_MAX);
     const table = [
-      ["#", "INSIDEN", "TEST", "STATUS", "KATEGORI", "PENYEBAB"],
+      ["#", "INCIDENT", "TEST", "STATUS", "CATEGORY", "CAUSE"],
       ...shown.map((v, i) => [
         String(i + 1),
         truncate(incidentName(v), 50),
         String(v.rows.length),
-        v.status,
+        statusLabel[v.status],
         category(v),
         truncate(cause(v), 70),
       ]),
@@ -746,14 +751,14 @@ function terminalReport(
       );
     }
     if (incidents.length > TERMINAL_MAX)
-      out.push(`  + ${incidents.length - TERMINAL_MAX} penyebab lain, lihat laporan lengkap`);
+      out.push(`  + ${incidents.length - TERMINAL_MAX} more causes, see the full report`);
   }
   if (resolved.length > 0) {
     const names = resolved.map((x) => (x.id !== "-" ? x.id : shortTitle(x.test)));
-    out.push("", `  Sudah beres (${names.length}): ${truncate(names.join(", "), 200)}`);
+    out.push("", `  Resolved (${names.length}): ${truncate(names.join(", "), 200)}`);
   }
-  if (cost > 0) out.push(`  Biaya AI: $${cost.toFixed(5)}`);
-  out.push("", `  Laporan lengkap: ${mdFile}`);
+  if (cost > 0) out.push(`  AI cost: $${cost.toFixed(5)}`);
+  out.push("", `  Full report: ${mdFile}`);
   return out.join("\n");
 }
 
@@ -775,17 +780,17 @@ function markdownReport(
   const md = [
     `# Redline: run #${r.run_id}`,
     "",
-    `${when} · **${r.passed}** lulus · **${r.failed}** gagal · **${r.flaky}** flaky · **${r.skipped}** skip`,
+    `${when} · **${r.passed}** passed · **${r.failed}** failed · **${r.flaky}** flaky · **${r.skipped}** skipped`,
     "",
   ];
   if (isPreview(r)) md.push(`> ℹ️ ${PREVIEW_NOTE}`, "");
   if (incidents.length === 0) {
-    md.push("✅ Tidak ada kegagalan.", "");
+    md.push("✅ No failures.", "");
   } else {
     const failedTests = incidents.reduce((n, v) => n + v.rows.length, 0);
-    md.push(`${failedTests} kegagalan dari **${incidents.length}** penyebab.`, "");
+    md.push(`${failedTests} failure${failedTests === 1 ? "" : "s"} from **${incidents.length}** cause${incidents.length === 1 ? "" : "s"}.`, "");
     md.push(
-      "| # | Insiden | Test | Status | Kategori | Keyakinan | Ringkasan |",
+      "| # | Incident | Test | Status | Category | Confidence | Summary |",
       "|---|---|---|---|---|---|---|",
     );
     incidents.forEach((v, i) => {
@@ -797,34 +802,34 @@ function markdownReport(
     incidents.forEach((v, i) => {
       const a = v.analysis;
       md.push(`## ${i + 1}. ${incidentName(v)}`, "");
-      const meta = [`**Test terdampak:** ${v.rows.length}`, `**Status:** ${statusIcon[v.status]}`];
+      const meta = [`**Affected tests:** ${v.rows.length}`, `**Status:** ${statusIcon[v.status]}`];
       if (a) {
-        meta.push(`**Kategori:** ${category(v)}`, `**Keyakinan:** ${a.confidence}`);
-        meta.push(`**Sumber:** ${sourceLabel[a.source] ?? a.source}${v.cached ? " (cache)" : ""}`);
+        meta.push(`**Category:** ${category(v)}`, `**Confidence:** ${a.confidence}`);
+        meta.push(`**Source:** ${sourceLabel[a.source] ?? a.source}${v.cached ? " (cache)" : ""}`);
       }
       md.push(meta.join(" · "), "");
       if (a) {
         md.push(a.summary, "");
         if (a.evidence?.length)
-          md.push("**Bukti**", ...a.evidence.map((e) => `- ${oneLine(e)}`), "");
-        if (a.next_step) md.push(`**Langkah berikutnya:** ${a.next_step}`, "");
-        if (a.patch) md.push("**Patch yang terbukti**", "```diff", a.patch, "```", "");
+          md.push("**Evidence**", ...a.evidence.map((e) => `- ${oneLine(e)}`), "");
+        if (a.next_step) md.push(`**Next step:** ${a.next_step}`, "");
+        if (a.patch) md.push("**Proven patch**", "```diff", a.patch, "```", "");
         if (a.similar?.length)
           md.push(
-            "**Kasus mirip yang sudah terbukti** (referensi, bukan bukti)",
+            "**Proven similar cases** (reference, not evidence)",
             ...a.similar.map(
               (c) =>
-                `- ${categoryLabel[c.category] ?? c.category} · kemiripan ${c.similarity.toFixed(2)} · ${shortTitle(c.test)}`,
+                `- ${categoryLabel[c.category] ?? c.category} · similarity ${c.similarity.toFixed(2)} · ${shortTitle(c.test)}`,
             ),
             "",
           );
       } else if (v.note) {
-        md.push(`_Analisis: ${v.note}_`, "");
+        md.push(`_Analysis: ${v.note}_`, "");
       }
       if (v.representative.group.error)
-        md.push("**Contoh error**", "```", v.representative.group.error, "```", "");
+        md.push("**Example error**", "```", v.representative.group.error, "```", "");
       const curl = curls[v.representative.group.test];
-      if (curl) md.push("**Reproduksi dengan curl**", "```bash", curl, "```", "");
+      if (curl) md.push("**Reproduce with curl**", "```bash", curl, "```", "");
 
       const list = ["| ID | Test | Status |", "|---|---|---|"];
       for (const row of v.rows) {
@@ -835,7 +840,7 @@ function markdownReport(
       }
       if (v.rows.length >= DETAILS_FROM) {
         md.push(
-          `<details><summary>${v.rows.length} test terdampak</summary>`,
+          `<details><summary>${v.rows.length} affected tests</summary>`,
           "",
           ...list,
           "",
@@ -846,19 +851,19 @@ function markdownReport(
         md.push(...list, "");
       }
       md.push(
-        `[Detail di Redline](${baseURL}/api/groups/${v.representative.group.fingerprint})`,
+        `[Details in Redline](${baseURL}/api/groups/${v.representative.group.fingerprint})`,
         "",
       );
     });
   }
   if (resolved.length > 0) {
     md.push(
-      "## Sudah beres",
+      "## Resolved",
       "",
       ...resolved.map((x) => `- ${x.id !== "-" ? `**${x.id}** ` : ""}${shortTitle(x.test)}`),
       "",
     );
   }
-  if (cost > 0) md.push(`_Biaya AI run ini: $${cost.toFixed(5)}_`, "");
+  if (cost > 0) md.push(`_AI cost for this run: $${cost.toFixed(5)}_`, "");
   return md.join("\n");
 }

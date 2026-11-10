@@ -98,12 +98,12 @@ func TestFacts_ChangeSignals(t *testing.T) {
 	}
 	text := BuildFacts(f)
 	for _, want := range []string{
-		"Kode test berubah: tidak",
-		"Response API: berubah",
-		"GET /brands: field hilang: [].slug (string)",
+		"Test code changed: no",
+		"API response: changed",
+		"GET /brands: missing field: [].slug (string)",
 		"GET /brands -> 200 [{\"id\":\"string\",\"name\":\"string\"}]",
-		"Versi aplikasi: v1 -> v2 (berubah: ya)",
-		"Status test ini di run terakhir (lama ke baru): passed, failed",
+		"App version: v1 -> v2 (changed: yes)",
+		"This test in recent runs (oldest to newest): passed, failed",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("fakta harus memuat %q:\n%s", want, text)
@@ -123,7 +123,7 @@ func TestAnalyze_MatrixRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	if brand.Source != "rule" || brand.Category != "backend_bug" || brand.Confidence != "high" ||
-		!strings.Contains(brand.Summary, "field hilang: [].slug") {
+		!strings.Contains(brand.Summary, "missing field: [].slug") {
 		t.Errorf("test tetap + response berubah harus backend_bug dari aturan: %+v", brand)
 	}
 
@@ -133,7 +133,7 @@ func TestAnalyze_MatrixRules(t *testing.T) {
 
 	// "Kode test berubah" hanya medium: AI tetap dipanggil supaya bisa membaca kodenya.
 	fake.verdict = verdict{Deviates: "test", Category: "test_bug", Confidence: "high",
-		Summary: "Assertion status diubah ke PAID.", Evidence: []string{"Kode test berubah: ya"}}
+		Summary: "Assertion status diubah ke PAID.", Evidence: []string{"Test code changed: yes"}}
 	order, _, err := a.Analyze(ctx, fps["order dibayar"], false)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestAnalyze_Candidate(t *testing.T) {
 	ctx := context.Background()
 	fake := &fakeLLM{verdict: verdict{
 		Deviates: "api", Category: "backend_bug", Confidence: "high",
-		Summary: "Response berubah.", Evidence: []string{"Kode test berubah: tidak"},
+		Summary: "Response berubah.", Evidence: []string{"Test code changed: no"},
 		NextStep: "Laporkan ke backend.",
 		RuleCandidate: &ruleCandidate{
 			Pattern: `Received: 500`, Summary: "Server membalas 5xx.",
@@ -201,7 +201,7 @@ func TestAnalyze_Flow(t *testing.T) {
 		Category:   "backend_bug",
 		Confidence: "high",
 		Summary:    "Nilai status order berubah dari PAID menjadi PENDING padahal kode test tidak berubah.",
-		Evidence:   []string{"Kode test berubah: tidak", "kolom status diubah di migration 2024_10_01"}, // yang kedua karangan
+		Evidence:   []string{"Test code changed: no", "kolom status diubah di migration 2024_10_01"}, // yang kedua karangan
 		NextStep:   "Laporkan ke backend.",
 	}}
 	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5", Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}}
@@ -223,7 +223,7 @@ func TestAnalyze_Flow(t *testing.T) {
 	if cached || res.Source != "ai" || fake.calls != 1 || res.Category != "backend_bug" {
 		t.Fatalf("order harus lewat AI: %+v", res)
 	}
-	if len(res.Evidence) != 1 || res.Evidence[0] != "Kode test berubah: tidak" {
+	if len(res.Evidence) != 1 || res.Evidence[0] != "Test code changed: no" {
 		t.Errorf("hanya bukti yang ada di fakta yang boleh disimpan: %v", res.Evidence)
 	}
 	if math.Abs(res.CostUSD-0.000195) > 1e-12 || res.InputTokens != 1200 {
@@ -233,7 +233,7 @@ func TestAnalyze_Flow(t *testing.T) {
 	if req.ToolChoice == nil || req.ToolChoice.Name != toolName || len(req.Tools) != 1 {
 		t.Errorf("model harus dipaksa menjawab lewat tool: %+v", req.ToolChoice)
 	}
-	for _, want := range []string{"Response API: tidak berubah", "PENDING", "GET /orders -> 200"} {
+	for _, want := range []string{"API response: unchanged", "PENDING", "GET /orders -> 200"} {
 		if !strings.Contains(req.Messages[0].Content, want) {
 			t.Errorf("fakta untuk AI harus memuat %q:\n%s", want, req.Messages[0].Content)
 		}
@@ -351,7 +351,7 @@ func TestListGroupsIncludesLatestAnalysis(t *testing.T) {
 	ctx := context.Background()
 	fake := &fakeLLM{verdict: verdict{
 		Category: "backend_bug", Confidence: "high", Summary: "x",
-		Evidence: []string{"Kode test berubah: tidak"},
+		Evidence: []string{"Test code changed: no"},
 	}}
 	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5",
 		Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}}

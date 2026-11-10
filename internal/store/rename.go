@@ -53,7 +53,7 @@ func followRenames(ctx context.Context, tx neo4j.ManagedTransaction, outcomes []
 			WITH row, collect(old.key) AS olds WHERE size(olds) = 1
 			RETURN row.key AS new, olds[0] AS old`, map[string]any{"rows": rows, "keys": keys})
 		if err != nil {
-			return nil, fmt.Errorf("cari test yang di-rename: %w", err)
+			return nil, fmt.Errorf("find renamed test: %w", err)
 		}
 		renames, err := res.Collect(ctx)
 		if err != nil {
@@ -74,7 +74,7 @@ func followRenames(ctx context.Context, tx neo4j.ManagedTransaction, outcomes []
 				SET f.project = $project, f.file = $file, f.title = $title`,
 				map[string]any{"old": str(p, "old"), "new": o.Key(), "project": o.Project, "file": o.File,
 					"title": o.Title}); err != nil {
-				return nil, fmt.Errorf("pindahkan riwayat %q ke %q: %w", str(p, "old"), o.Key(), err)
+				return nil, fmt.Errorf("move history %q to %q: %w", str(p, "old"), o.Key(), err)
 			}
 		}
 	}
@@ -85,7 +85,7 @@ func followRenames(ctx context.Context, tx neo4j.ManagedTransaction, outcomes []
 		MATCH (t:Test {key: k}) WHERE size(coalesce(t.previousKeys, [])) > 0
 		RETURN k AS key, t.previousKeys AS previous`, map[string]any{"keys": keys})
 	if err != nil {
-		return nil, fmt.Errorf("kunci lama test: %w", err)
+		return nil, fmt.Errorf("old test key: %w", err)
 	}
 	recs, err := res.Collect(ctx)
 	if err != nil {
@@ -113,7 +113,7 @@ func aliasFingerprint(ctx context.Context, tx neo4j.ManagedTransaction, key stri
 		MATCH (f:Failure {id: $ids[i]})
 		RETURN f.id AS id ORDER BY i LIMIT 1`, map[string]any{"ids": candidates})
 	if err != nil {
-		return "", fmt.Errorf("kelompok lama test yang di-rename: %w", err)
+		return "", fmt.Errorf("old failure group for renamed test: %w", err)
 	}
 	rec, err := res.Single(ctx)
 	if err != nil {

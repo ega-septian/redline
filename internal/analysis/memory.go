@@ -25,8 +25,8 @@ const (
 	maxEmbedRunes = 4000
 )
 
-// EmbedPending membuat embedding untuk kelompok yang belum punya, dalam satu request.
-// Dipanggil setelah ingest supaya analisis berikutnya tidak perlu menunggu. Mengembalikan jumlah kelompok.
+// EmbedPending membuat embedding untuk groups yang belum punya, dalam satu request.
+// Dipanggil setelah ingest supaya analisis berikutnya tidak perlu menunggu. Mengembalikan jumlah groups.
 func (a *Analyzer) EmbedPending(ctx context.Context) (int, error) {
 	if a.Embed == nil {
 		return 0, nil
@@ -50,7 +50,7 @@ func (a *Analyzer) EmbedPending(ctx context.Context) (int, error) {
 	if err := a.Store.SaveEmbeddings(ctx, a.EmbedModel, ids, res.Vectors); err != nil {
 		return 0, err
 	}
-	a.logger().Info("embedding dibuat", "kelompok", len(ids), "token", res.Tokens, "model", a.EmbedModel)
+	a.logger().Info("embeddings created", "groups", len(ids), "token", res.Tokens, "model", a.EmbedModel)
 	return len(ids), nil
 }
 
@@ -93,14 +93,14 @@ func (a *Analyzer) SnapshotContracts(ctx context.Context, runID int64, projects 
 			}
 		}
 		if err := a.Store.RecordSourceCheck(ctx, project, record); err != nil && !errors.Is(err, store.ErrNotFound) {
-			a.logger().Warn("hasil cek kontrak tidak tersimpan", "project", project, "err", err)
+			a.logger().Warn("contract check result could not be stored", "project", project, "err", err)
 		}
 		if fetchErr != nil {
-			a.logger().Warn("potret kontrak gagal; run ini dianalisis tanpa kontrak", "run", runID, "project", project, "err", fetchErr)
+			a.logger().Warn("contract snapshot failed; this run is analyzed without a contract", "run", runID, "project", project, "err", fetchErr)
 			continue
 		}
 		if _, err := a.Store.SaveRunContract(ctx, runID, project, url, string(doc)); err != nil {
-			a.logger().Warn("potret kontrak gagal; run ini dianalisis tanpa kontrak", "run", runID, "project", project, "err", err)
+			a.logger().Warn("contract snapshot failed; this run is analyzed without a contract", "run", runID, "project", project, "err", err)
 		}
 	}
 }
@@ -113,24 +113,24 @@ func (a *Analyzer) facts(ctx context.Context, fingerprint string) (*store.Facts,
 		return f, err
 	}
 	if err := a.addContract(ctx, f); err != nil {
-		a.logger().Warn("kontrak API tidak bisa dibaca, analisis tanpa kontrak", "project", f.Group.Project, "err", err)
+		a.logger().Warn("API contract could not be read; analyzing without a contract", "project", f.Group.Project, "err", err)
 	}
 	// Pengetahuan graph (KAG): file yang dipakai test sampai import terdalam, dan test lain di run yang sama.
 	if k, err := a.Store.Knowledge(ctx, fingerprint); err == nil {
 		f.Knowledge = k
 	} else if !errors.Is(err, store.ErrNotFound) {
-		a.logger().Warn("pengetahuan graph tidak bisa dibaca, analisis tanpa graph", "err", err)
+		a.logger().Warn("graph knowledge could not be read; analyzing without graph", "err", err)
 	}
 	if a.Embed == nil {
 		return f, nil
 	}
 	if _, err := a.EmbedPending(ctx); err != nil {
-		a.logger().Warn("embedding gagal, analisis tanpa kasus mirip", "err", err)
+		a.logger().Warn("embedding failed; analyzing without similar cases", "err", err)
 		return f, nil
 	}
 	similar, err := a.Store.SimilarCases(ctx, fingerprint, a.EmbedModel, minSimilarity, maxSimilar)
 	if err != nil {
-		a.logger().Warn("cari kasus mirip gagal", "err", err)
+		a.logger().Warn("similar-case search failed", "err", err)
 		return f, nil
 	}
 	f.Similar = similar

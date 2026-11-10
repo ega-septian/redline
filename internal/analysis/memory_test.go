@@ -38,7 +38,7 @@ func TestFacts_CodeMapAndSimilar(t *testing.T) {
 	if shared == nil || shared.Passed != 2 || shared.Failed != 2 {
 		t.Fatalf("peta kode salah: %+v", f.CodeMap)
 	}
-	if text := BuildFacts(f); !strings.Contains(text, "file tests/shared.schema.ts: 2 test lain lulus, 2 gagal") {
+	if text := BuildFacts(f); !strings.Contains(text, "file tests/shared.schema.ts: 2 other tests passed, 2 failed") {
 		t.Errorf("peta kode harus masuk fakta:\n%s", text)
 	}
 
@@ -87,7 +87,7 @@ func TestSimilarCases_Embedding(t *testing.T) {
 	if len(f.Similar) != 1 || f.Similar[0].GroupID != fps["order dibayar"] || f.Similar[0].Similarity < 0.99 {
 		t.Fatalf("kasus mirip salah: %+v", f.Similar)
 	}
-	if ref := References(f); !strings.Contains(ref, "referensi, bukan bukti") || !strings.Contains(ref, "status PAID sudah usang") {
+	if ref := References(f); !strings.Contains(ref, "reference, not evidence") || !strings.Contains(ref, "status PAID sudah usang") {
 		t.Errorf("referensi salah:\n%s", ref)
 	}
 
@@ -162,7 +162,7 @@ func TestScoreboard(t *testing.T) {
 	for _, e := range board.Entries {
 		byGroup[e.GroupID] = e
 	}
-	if e := byGroup[fps["order dibayar"]]; !e.Correct || e.TruthBy != "eksperimen" {
+	if e := byGroup[fps["order dibayar"]]; !e.Correct || e.TruthBy != "experiment" {
 		t.Errorf("order: %+v", e)
 	}
 	if e := byGroup[fps["brands punya slug"]]; e.Correct || e.Predicted != "backend_bug" || e.TruthBy != "label" {
@@ -201,16 +201,16 @@ func TestFacts_SourceCode(t *testing.T) {
 		t.Errorf("token di kode test harus disamarkan sebelum disimpan: %s", f.Sources[1].Content)
 	}
 	text := BuildFacts(f)
-	for _, want := range []string{"Kode test (file spec", "=== tests/shared.schema.ts ===", "   2 | export const Brand"} {
+	for _, want := range []string{"Test code (spec files", "=== tests/shared.schema.ts ===", "   2 | export const Brand"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("fakta harus memuat %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "Potongan kode test di sekitar error") {
+	if strings.Contains(text, "Test code around the error") {
 		t.Errorf("kalau kode lengkap ada, potongan tidak perlu dikirim lagi")
 	}
 	// Prompt patch memakai file terbaru dari CLI, jadi kode dari fakta tidak ikut (tidak dobel).
-	if p := fixPrompt(f, []SourceFile{{Path: "x.ts", Content: "baru"}}, nil); strings.Contains(p, "Kode test (file spec") {
+	if p := fixPrompt(f, []SourceFile{{Path: "x.ts", Content: "baru"}}, nil); strings.Contains(p, "Test code (spec files") {
 		t.Errorf("prompt patch tidak boleh memuat kode dari fakta")
 	}
 }
@@ -237,7 +237,7 @@ func TestAnalyze_ContractAndDeviates(t *testing.T) {
 	contracts := &fakeContracts{}
 	// AI bilang test yang menyimpang, tapi memilih backend_bug: kategori dikoreksi dan keyakinan diturunkan.
 	fake := &fakeLLM{verdict: verdict{Deviates: "test", Category: "backend_bug", Confidence: "high",
-		Summary: "Test mengharapkan PAID.", Evidence: []string{"Kode test berubah: tidak"}}}
+		Summary: "Test mengharapkan PAID.", Evidence: []string{"Test code changed: no"}}}
 	a := &Analyzer{Store: s, LLM: fake, Contracts: contracts}
 	f, err := s.Facts(ctx, fps["order dibayar"])
 	if err != nil {
@@ -253,7 +253,7 @@ func TestAnalyze_ContractAndDeviates(t *testing.T) {
 		t.Errorf("kategori harus mengikuti pihak yang menyimpang: %+v", res)
 	}
 	prompt := fake.lastReq.Messages[0].Content
-	for _, want := range []string{"Kontrak API (OpenAPI) saat test gagal", "enum(PAID, PENDING)", "- sesuai kontrak"} {
+	for _, want := range []string{"API contract (OpenAPI) at failure", "enum(PAID, PENDING)", "- matches the contract"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("fakta harus memuat %q:\n%s", want, prompt)
 		}
@@ -264,7 +264,7 @@ func TestAnalyze_ContractAndDeviates(t *testing.T) {
 
 	// Sejalan: tidak diubah.
 	fake.verdict = verdict{Deviates: "api", Category: "backend_bug", Confidence: "medium", Summary: "API salah.",
-		Evidence: []string{"Kode test berubah: tidak"}}
+		Evidence: []string{"Test code changed: no"}}
 	if res, _, _ = a.Analyze(ctx, fps["order dibayar"], true); res.Category != "backend_bug" || res.Confidence != "medium" {
 		t.Errorf("kategori yang sejalan tidak boleh diubah: %+v", res)
 	}

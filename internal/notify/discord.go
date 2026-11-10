@@ -58,10 +58,10 @@ func NewDiscord() *Discord {
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
-				return fmt.Errorf("terlalu banyak redirect")
+				return fmt.Errorf("too many redirects")
 			}
 			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-				return fmt.Errorf("redirect ke scheme %q tidak diizinkan", req.URL.Scheme)
+				return fmt.Errorf("redirect to scheme %q is not allowed", req.URL.Scheme)
 			}
 			return nil
 		},
@@ -89,7 +89,7 @@ type discordFooter struct {
 
 func (d *Discord) Send(ctx context.Context, webhookURL string, message Message) error {
 	if !strings.HasPrefix(webhookURL, "http://") && !strings.HasPrefix(webhookURL, "https://") {
-		return fmt.Errorf("webhook harus http(s)://")
+		return fmt.Errorf("webhook must be http(s)://")
 	}
 	embed := discordEmbed{
 		Title:       clip(message.Title, 256),
@@ -130,9 +130,9 @@ func (d *Discord) Send(ctx context.Context, webhookURL string, message Message) 
 		// url.Error includes the full URL, and a Discord webhook URL carries the secret token.
 		var urlErr *url.Error
 		if errors.As(err, &urlErr) {
-			return fmt.Errorf("discord request gagal: %v", urlErr.Err)
+			return fmt.Errorf("Discord request failed: %v", urlErr.Err)
 		}
-		return fmt.Errorf("discord request gagal: %v", err)
+		return fmt.Errorf("Discord request failed: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

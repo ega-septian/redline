@@ -35,7 +35,7 @@ func (d *Document) Describe(calls []report.HTTPCall) string {
 		if text := d.Operation(c.Method, c.Path); text != "" {
 			b.WriteString(text)
 		} else {
-			fmt.Fprintf(&b, "- %s %s: tidak ada di kontrak (endpoint tidak terdokumentasi)\n", strings.ToUpper(c.Method), c.Path)
+			fmt.Fprintf(&b, "- %s %s: not in the contract (undocumented endpoint)\n", strings.ToUpper(c.Method), c.Path)
 		}
 	}
 	return b.String()
@@ -70,10 +70,10 @@ func (d *Document) Version() string {
 func Parse(data []byte) (*Document, error) {
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("bukan JSON OpenAPI yang valid: %w", err)
+		return nil, fmt.Errorf("not a valid OpenAPI JSON document: %w", err)
 	}
 	if _, ok := root["openapi"]; !ok {
-		return nil, fmt.Errorf("field \"openapi\" tidak ada (hanya OpenAPI 3 dalam JSON yang didukung)")
+		return nil, fmt.Errorf("missing \"openapi\" field (only OpenAPI 3 in JSON is supported)")
 	}
 	doc := &Document{paths: map[string]map[string]any{}, root: root}
 	if paths, ok := root["paths"].(map[string]any); ok {
@@ -108,10 +108,10 @@ func (d *Document) Operation(method, path string) string {
 	}
 	op, ok := d.paths[tmpl][strings.ToLower(method)].(map[string]any)
 	if !ok {
-		return fmt.Sprintf("- %s %s: method ini tidak ada di kontrak untuk %s\n", strings.ToUpper(method), path, tmpl)
+		return fmt.Sprintf("- %s %s: this method is not in the contract for %s\n", strings.ToUpper(method), path, tmpl)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "- %s %s (kontrak: %s)\n", strings.ToUpper(method), path, tmpl)
+	fmt.Fprintf(&b, "- %s %s (contract: %s)\n", strings.ToUpper(method), path, tmpl)
 	if rb, ok := d.resolve(op["requestBody"], 0).(map[string]any); ok {
 		if s := d.bodySchema(rb); s != "" {
 			fmt.Fprintf(&b, "  request body: %s\n", s)

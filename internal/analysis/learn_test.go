@@ -23,13 +23,13 @@ func TestBacktest(t *testing.T) {
 	}
 
 	rejected := map[string]ruleCandidate{
-		"cocok dengan kasus c": {Pattern: `(?i)error|received`, Category: "test_bug", Summary: "x"},
-		"tidak cocok":          {Pattern: `socket hang up`, Category: "environment", Summary: "x"},
-		"teks kosong":          {Pattern: `(TypeError)?`, Category: "test_bug", Summary: "x"},
-		"regex tidak valid":    {Pattern: `(?=lookahead)abc`, Category: "test_bug", Summary: "x"},
-		"bukan unknown":        {Pattern: `Cannot read properties`, Category: "unknown", Summary: "x"},
-		"summary kosong":       {Pattern: `Cannot read properties`, Category: "test_bug"},
-		"pola terlalu pendek":  {Pattern: `Type`, Category: "test_bug", Summary: "x"},
+		"matches proven case c":               {Pattern: `(?i)error|received`, Category: "test_bug", Summary: "x"},
+		"does not match any proven case":      {Pattern: `socket hang up`, Category: "environment", Summary: "x"},
+		"pattern matches empty text":          {Pattern: `(TypeError)?`, Category: "test_bug", Summary: "x"},
+		"invalid regex":                       {Pattern: `(?=lookahead)abc`, Category: "test_bug", Summary: "x"},
+		"category must be clear, not unknown": {Pattern: `Cannot read properties`, Category: "unknown", Summary: "x"},
+		"summary is empty":                    {Pattern: `Cannot read properties`, Category: "test_bug"},
+		"pattern is too short":                {Pattern: `Type`, Category: "test_bug", Summary: "x"},
 	}
 	for want, c := range rejected {
 		if _, reason := Backtest(c, cases, all); !strings.Contains(reason, want) {
@@ -44,16 +44,16 @@ func TestBacktest_TooGeneric(t *testing.T) {
 	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
 		all = append(all, store.GroupError{GroupID: id, Error: "Error: boom " + id})
 	}
-	if _, reason := Backtest(ruleCandidate{Pattern: `Error: boom`, Category: "test_bug", Summary: "x"}, cases, all); !strings.Contains(reason, "terlalu umum") {
+	if _, reason := Backtest(ruleCandidate{Pattern: `Error: boom`, Category: "test_bug", Summary: "x"}, cases, all); !strings.Contains(reason, "too general") {
 		t.Fatalf("mau ditolak karena terlalu umum, dapat %q", reason)
 	}
 }
 
 func TestApplyRules_Learned(t *testing.T) {
 	learned := []store.LearnedRule{{ID: 4, Pattern: `Cannot read properties of undefined`, Category: "test_bug",
-		Summary: "Objek belum ada saat diakses.", LearnedFrom: []string{"a", "b"}}}
+		Summary: "The object was not available when accessed.", LearnedFrom: []string{"a", "b"}}}
 	got := ApplyRules(&store.Facts{ErrorMessage: "TypeError: Cannot read properties of undefined (reading 'id')\n at x"}, learned...)
-	if got == nil || got.Category != "test_bug" || got.Confidence != "high" || !strings.Contains(got.Evidence[1], "Aturan #4") {
+	if got == nil || got.Category != "test_bug" || got.Confidence != "high" || !strings.Contains(got.Evidence[1], "Rule #4") {
 		t.Fatalf("aturan dipelajari tidak dipakai: %+v", got)
 	}
 	// Aturan bawaan tetap didahulukan.
@@ -73,7 +73,7 @@ func TestApplyRules_LearnedDoesNotBeatAPIChange(t *testing.T) {
 		ErrorMessage: "TypeError: Cannot read properties of undefined (reading 'length')",
 		LastPass:     &store.RunRef{RunID: 3},
 		TestChanged:  "tidak",
-		Response:     triage.ResponseDiff{Verdict: triage.ResponseChanged, Lines: []string{"GET /brands: field hilang: data"}},
+		Response:     triage.ResponseDiff{Verdict: triage.ResponseChanged, Lines: []string{"GET /brands: missing field: data"}},
 	}
 	if got := ApplyRules(f, learned...); got == nil || got.Category != "backend_bug" {
 		t.Fatalf("test tetap + API berubah harus menang atas aturan yang dipelajari: %+v", got)
@@ -85,7 +85,7 @@ func TestApplyRules_LearnedDoesNotBeatAPIChange(t *testing.T) {
 }
 
 func TestApplyRules_Contract(t *testing.T) {
-	changed := triage.ResponseDiff{Verdict: triage.ResponseChanged, Lines: []string{"GET /brands: field hilang: [].slug (string)"}}
+	changed := triage.ResponseDiff{Verdict: triage.ResponseChanged, Lines: []string{"GET /brands: missing field: [].slug (string)"}}
 	base := func() *store.Facts {
 		return &store.Facts{ErrorMessage: "ZodError", LastPass: &store.RunRef{RunID: 3}, TestChanged: "tidak", Response: changed}
 	}
@@ -97,7 +97,7 @@ func TestApplyRules_Contract(t *testing.T) {
 		t.Errorf("kontrak berubah + response sesuai: mau test_bug (test usang), dapat %+v", got)
 	}
 	// Kontrak berubah tapi response tidak mengikutinya: tetap salah API.
-	f.ContractViolations = []string{"GET /brands: field [].handle ada di kontrak tapi tidak ada di response"}
+	f.ContractViolations = []string{"GET /brands: field [].handle is in the contract but missing from the response"}
 	if got := ApplyRules(f); got == nil || got.Category != "backend_bug" {
 		t.Errorf("kontrak berubah + response melanggar: mau backend_bug, dapat %+v", got)
 	}
@@ -110,7 +110,7 @@ func TestApplyRules_Contract(t *testing.T) {
 
 	// Test baru (tanpa riwayat) dan response melanggar kontrak: salah API, tanpa AI.
 	cold := &store.Facts{ErrorMessage: "ZodError", TestChanged: "tidak diketahui",
-		ContractViolations: []string{"POST /brands: status 200 tidak ada di kontrak (yang terdokumentasi: 201, 422)"}}
+		ContractViolations: []string{"POST /brands: status 200 is not in the contract (documented: 201, 422)"}}
 	if got := ApplyRules(cold); got == nil || got.Category != "backend_bug" || !strings.Contains(got.Summary, "status 200") {
 		t.Errorf("pelanggaran kontrak: mau backend_bug, dapat %+v", got)
 	}

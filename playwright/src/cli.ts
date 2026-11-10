@@ -129,7 +129,7 @@ async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
       signal: AbortSignal.timeout(180_000),
     });
   } catch {
-    throw new Error(`server Redline tidak bisa dihubungi di ${baseURL()}`);
+    throw new Error(`Redline server cannot be reached at ${baseURL()}`);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -152,14 +152,14 @@ async function verify(args: string[]) {
   } else {
     targets = lastRun().failures;
     if (targets.length === 0) {
-      console.log("Tidak ada kegagalan di run terakhir. Jalankan test dulu (npx playwright test).");
+      console.log("No failures in the last run. Run tests first (npx playwright test).");
       return;
     }
   }
   const max = env("REDLINE_VERIFY_MAX", 3);
   if (targets.length > max) {
     console.log(
-      `${targets.length} kegagalan, yang diuji ${max} pertama (atur REDLINE_VERIFY_MAX).`,
+      `${targets.length} failures; testing the first ${max} (set REDLINE_VERIFY_MAX).`,
     );
     targets = targets.slice(0, max);
   }
@@ -171,10 +171,10 @@ async function verify(args: string[]) {
     try {
       cost += await verifyOne(f, force);
     } catch (e) {
-      console.log(`  ✗ eksperimen gagal dijalankan: ${(e as Error).message}`);
+      console.log(`  ✗ experiment failed to run: ${(e as Error).message}`);
     }
   }
-  if (cost > 0) console.log(`\nBiaya AI: $${cost.toFixed(5)}`);
+  if (cost > 0) console.log(`\nAI cost: $${cost.toFixed(5)}`);
 }
 
 async function groupAsFailure(fp: string): Promise<Failure> {
@@ -186,7 +186,7 @@ async function groupAsFailure(fp: string): Promise<Failure> {
 function parseTestKey(key: string) {
   const [project, file, ...title] = key.split(" › ");
   if (!project || !file || title.length === 0)
-    throw new Error(`format nama test tidak dikenal: ${key}`);
+    throw new Error(`unknown test name format: ${key}`);
   return { project, file, title: title.join(" ") };
 }
 
@@ -202,7 +202,7 @@ function specPath(file: string): string {
     const abs = path.join(dir, file);
     if (existsSync(abs)) return path.relative(ROOT, abs).split(path.sep).join("/");
   }
-  throw new Error(`file ${file} tidak ada di project ini`);
+  throw new Error(`file ${file} does not exist in this project`);
 }
 
 async function verifyOne(f: Failure, force: boolean): Promise<number> {
@@ -215,8 +215,8 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
   if (guess?.analysis) {
     const a = guess.analysis;
     if (a.source === "experiment" && !force) {
-      console.log(`  sudah terbukti sebelumnya: ${categoryName(a.category)}. ${a.summary}`);
-      console.log(`  (ulangi eksperimen dengan: npx redline verify --force)`);
+      console.log(`  already proven: ${categoryName(a.category)}. ${a.summary}`);
+      console.log(`  (repeat the experiment with: npx redline verify --force)`);
       return 0;
     }
     if (!guess.cached && a.source === "ai") cost += a.cost_usd;
@@ -227,11 +227,11 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
     for (const c of a.similar ?? []) {
       const title = c.test.split(" › ").slice(2).join(" › ");
       console.log(
-        `      mirip (${c.similarity.toFixed(2)}): ${title} → terbukti ${categoryName(c.category)}`,
+        `      similar (${c.similarity.toFixed(2)}): ${title} → proven ${categoryName(c.category)}`,
       );
     }
   } else if (guess?.error) {
-    console.log(`  0. tebakan Redline: - (${guess.error})`);
+    console.log(`  0. Redline guess: - (${guess.error})`);
   }
 
   const sandbox = makeSandbox(ROOT);
@@ -240,24 +240,24 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
 
     // 1. Rerun apa adanya.
     const reruns = env("REDLINE_RERUNS", 2);
-    process.stdout.write(`  1. rerun ${reruns}x tanpa perubahan… `);
+    process.stdout.write(`  1. rerun ${reruns}x without changes… `);
     const rerun = run(reruns);
     const flaky = rerun.passes > 0;
     console.log(
-      flaky ? `lulus ${rerun.passes}/${rerun.runs}` : `gagal ${rerun.runs}/${rerun.runs}`,
+      flaky ? `passed ${rerun.passes}/${rerun.runs}` : `failed ${rerun.runs}/${rerun.runs}`,
     );
     const rerunSaved = await saveExperiment(f.fingerprint, {
       kind: "rerun",
       outcome: flaky ? "passed" : "failed",
       category: flaky ? "flaky" : "unknown",
-      hypothesis: "Kegagalan bisa direproduksi tanpa perubahan apa pun.",
+      hypothesis: "The failure can be reproduced without any changes.",
       detail: rerun.error,
       runs: rerun.runs,
       passes: rerun.passes,
     });
     if (flaky) {
       console.log(
-        `  ⚠ TIDAK KONSISTEN: test lulus saat diulang. Kemungkinan flaky atau kondisi sesaat.`,
+        `  ⚠ INCONSISTENT: the test passed when rerun. Likely flaky or a transient condition.`,
       );
       printVerdicts(rerunSaved.verdicts);
       return cost;
@@ -268,7 +268,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
     const attempts: Attempt[] = [];
     const maxAttempts = env("REDLINE_VERIFY_ATTEMPTS", 2);
     for (let n = 1; n <= maxAttempts; n++) {
-      process.stdout.write(`  2.${n} AI membuat hipotesis… `);
+      process.stdout.write(`  2.${n} AI is making a hypothesis… `);
       const fix = await api<Fix>("POST", `/api/groups/${f.fingerprint}/fix`, { files, attempts });
       cost += fix.cost_usd;
       console.log(`${fix.category} (${fix.confidence})`);
@@ -276,7 +276,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
 
       if (fix.edits.length === 0) {
         console.log(
-          `  ○ AI menilai ini bukan salah test, jadi tidak bisa dibuktikan dengan patch test.`,
+          `  ○ AI decided this is not a test bug, so it cannot be proven with a test patch.`,
         );
         await saveExperiment(f.fingerprint, {
           kind: "patch",
@@ -313,10 +313,10 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
       }
 
       const patch = git(sandbox, ["diff", "--no-color"]);
-      process.stdout.write(`      menjalankan test dengan patch… `);
+      process.stdout.write(`      running the test with the patch… `);
       const result = run(1);
       const passed = result.passes === result.runs && result.runs > 0;
-      console.log(passed ? "LULUS" : "masih gagal");
+      console.log(passed ? "PASSED" : "still failing");
       const saved = await saveExperiment(f.fingerprint, {
         kind: "patch",
         outcome: passed ? "passed" : "failed",
@@ -332,7 +332,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
         const out = path.join(RESULTS_DIR, "redline", `${f.fingerprint}.patch`);
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(out, patch);
-        console.log(`  ✓ TERBUKTI: test lulus setelah patch.\n`);
+        console.log(`  ✓ PROVEN: test passed after the patch.\n`);
         console.log(indent(patch, "      "));
         console.log(`\n      Terapkan: git apply ${path.relative(ROOT, out)}`);
         printVerdicts(saved.verdicts);
@@ -342,11 +342,11 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
       resetSandbox(sandbox);
     }
     console.log(
-      `  ✗ Belum terbukti setelah ${maxAttempts} percobaan. Hipotesis yang gagal tersimpan di Redline.`,
+      `  ✗ Not proven after ${maxAttempts} attempts. The failed hypothesis is stored in Redline.`,
     );
     return cost;
   } finally {
-    if (process.env.REDLINE_KEEP_SANDBOX === "1") console.log(`  (salinan disimpan di ${sandbox})`);
+    if (process.env.REDLINE_KEEP_SANDBOX === "1") console.log(`  (copy saved at ${sandbox})`);
     else rmSync(sandbox, { recursive: true, force: true });
   }
 }
@@ -389,13 +389,13 @@ async function guessFirst(
 /** Hasil nyata: tebakan sebelum eksperimen dibanding bukti. */
 function printVerdicts(verdicts: Verdict[]) {
   if (verdicts.length === 0) return;
-  console.log(`\n  Tebakan sebelumnya vs bukti:`);
+  console.log(`\n  Previous guesses vs evidence:`);
   for (const v of verdicts) {
     const mark = v.correct
-      ? "✅ benar"
+      ? "✅ correct"
       : v.predicted === "unknown"
-        ? "➖ tidak menebak"
-        : `❌ salah (terbukti ${categoryName(v.truth)})`;
+        ? "➖ no guess"
+        : `❌ wrong (proven ${categoryName(v.truth)})`;
     console.log(
       `    ${sourceName(v.source)}: ${categoryName(v.predicted)} (${v.confidence}) → ${mark}`,
     );
@@ -403,18 +403,18 @@ function printVerdicts(verdicts: Verdict[]) {
 }
 
 const categoryNames: Record<string, string> = {
-  backend_bug: "BUG BACKEND",
-  test_bug: "BUG DI TEST",
+  backend_bug: "BACKEND BUG",
+  test_bug: "TEST BUG",
   environment: "ENVIRONMENT",
   flaky: "FLAKY",
-  unknown: "BELUM JELAS",
+  unknown: "UNCLEAR",
 };
 const categoryName = (c: string) => categoryNames[c] ?? c;
 const sourceNames: Record<string, string> = {
-  rule: "aturan",
+  rule: "rule",
   ai: "AI",
-  human: "label manual",
-  experiment: "eksperimen",
+  human: "manual label",
+  experiment: "experiment",
 };
 const sourceName = (s: string) => sourceNames[s] ?? s;
 
@@ -454,7 +454,7 @@ function runTest(
   );
   if (!existsSync(out))
     throw new Error(
-      `playwright tidak menghasilkan laporan: ${(r.stderr || r.stdout).slice(0, 500)}`,
+      `playwright produced no report: ${(r.stderr || r.stdout).slice(0, 500)}`,
     );
   const report = JSON.parse(readFileSync(out, "utf8"));
   let runs = 0;
@@ -476,7 +476,7 @@ function runTest(
     }
   };
   for (const s of report.suites ?? []) walk(s);
-  if (runs === 0) throw new Error(`test tidak ditemukan: ${title}`);
+  if (runs === 0) throw new Error(`test not found: ${title}`);
   return { runs, passes, error: error.slice(0, 3000) };
 }
 
@@ -523,19 +523,19 @@ function guard(before: string, after: string): string {
   const mustNotDecrease: [string, RegExp][] = [
     ["expect", /\bexpect(?:\.soft)?\s*\(/g],
     ["matcher (toBe, toEqual, ...)", /\.(?:not\.)?to[A-Z]\w*\s*\(/g],
-    ["validasi schema (.parse)", /\.(?:safeParse|parse)\s*\(/g],
+    ["schema validation (.parse)", /\.(?:safeParse|parse)\s*\(/g],
   ];
   for (const [name, re] of mustNotDecrease) {
-    if (count(after, re) < count(before, re)) return `jumlah ${name} berkurang`;
+    if (count(after, re) < count(before, re)) return `number of ${name} decreased`;
   }
   const mustNotIncrease: [string, RegExp][] = [
     ["skip/fixme/only/fail", /\.(?:skip|fixme|only|fail)\s*\(/g],
     ["try/catch", /\btry\s*\{/g],
     ["retry/timeout", /\b(?:retries|retry|setTimeout|timeout)\b/gi],
-    ["teks yang disamarkan", /\[(?:REDACTED|JWT|NIK\/16-DIGIT)\]/g],
+    ["redaction marker", /\[(?:REDACTED|JWT|NIK\/16-DIGIT)\]/g],
   ];
   for (const [name, re] of mustNotIncrease) {
-    if (count(after, re) > count(before, re)) return `menambah ${name}`;
+    if (count(after, re) > count(before, re)) return `added ${name}`;
   }
   return "";
 }
@@ -546,9 +546,9 @@ function applyEdits(dir: string, files: SourceFile[], edits: Edit[]): true | str
   const changed = new Map<string, string>();
   for (const e of edits) {
     const current = changed.get(e.path) ?? byPath.get(e.path);
-    if (current === undefined) return `file ${e.path} tidak termasuk file test yang dikirim`;
+    if (current === undefined) return `file ${e.path} is not one of the test files sent`;
     const hits = current.split(e.find).length - 1;
-    if (hits !== 1) return `teks yang dicari muncul ${hits}x di ${e.path} (harus tepat 1)`;
+    if (hits !== 1) return `the search text appears ${hits}x in ${e.path} (must be exactly 1)`;
     changed.set(
       e.path,
       current.replace(e.find, () => e.replace),
@@ -573,7 +573,7 @@ function indent(s: string, pad: string): string {
 // ---------- aturan ----------
 
 async function learn() {
-  console.log("Memproses rule candidate yang sudah punya bukti…\n");
+  console.log("Processing rule candidates that have evidence…\n");
   let promotion: Promotion | undefined;
   try {
     promotion = await api<Promotion>("POST", "/api/rules/candidates/promote");
@@ -589,7 +589,7 @@ async function learn() {
     for (const r of promotion.rejected) console.log(`  ✗ candidate #${r.id} /${r.pattern}/\n      ${r.reason}\n`);
   }
 
-  console.log("AI mempelajari kasus yang sudah terbukti (label manual + eksperimen yang lulus)…\n");
+  console.log("AI is learning from proven cases (manual labels + passing experiments)…\n");
   const res = await api<{
     cases: number;
     proposed: Rule[];
@@ -601,19 +601,19 @@ async function learn() {
     console.log(res.message);
     return;
   }
-  console.log(`${res.cases} kasus belum ditangani aturan.\n`);
+  console.log(`${res.cases} cases are not covered by rules.\n`);
   for (const r of res.proposed) printRule(r);
   for (const r of res.rejected)
     console.log(`  ✗ ditolak  /${r.pattern}/ → ${r.category}\n             ${r.reason}\n`);
   if (res.proposed.length > 0)
-    console.log(`Review usulan di atas, lalu: npx redline approve <id>  (atau reject <id>)`);
-  if (res.cost_usd) console.log(`Biaya AI: $${res.cost_usd.toFixed(5)}`);
+    console.log(`Review the proposals above, then: npx redline approve <id>  (or reject <id>)`);
+  if (res.cost_usd) console.log(`AI cost: $${res.cost_usd.toFixed(5)}`);
 }
 
 async function candidates() {
   const list = await api<Candidate[]>("GET", "/api/rules/candidates");
   if (list.length === 0) {
-    console.log("Belum ada rule candidate. Jalankan dengan REDLINE_AI=1, lalu beri label/eksperimen.");
+    console.log("No rule candidates yet. Run with REDLINE_AI=1, then add a label/experiment.");
     return;
   }
   for (const c of list) {
@@ -647,10 +647,10 @@ async function analyzeRun(args: string[]) {
     }
   }
   if (failed.length === 0) {
-    console.log(`Run #${runID} tidak punya failure ber-fingerprint.`);
+    console.log(`Run #${runID} has no failures with a fingerprint.`);
     return;
   }
-  console.log(`Menganalisis ${failed.length} kegagalan di run #${runID}…\n`);
+  console.log(`Analyzing ${failed.length} failures in run #${runID}…\n`);
   let needsAI = 0;
   for (const test of failed) {
     const fp = test.fingerprint as string;
@@ -660,7 +660,7 @@ async function analyzeRun(args: string[]) {
         error?: string;
       }>("POST", `/api/groups/${encodeURIComponent(fp)}/analyze${rulesOnly ? "?ai=0" : ""}`);
       if (!res.analysis) {
-        console.log(`  ✗ ${test.test}\n      ${res.error ?? "tidak ada hasil"}\n`);
+        console.log(`  ✗ ${test.test}\n      ${res.error ?? "no result"}\n`);
         needsAI++;
         continue;
       }
@@ -678,10 +678,10 @@ async function analyzeRun(args: string[]) {
   }
   if (needsAI > 0) {
     console.log(
-      `${needsAI} kegagalan masih butuh AI. Isi ANTHROPIC_API_KEY di server, lalu jalankan ulang perintah ini.`,
+      `${needsAI} failures still need AI. Set ANTHROPIC_API_KEY on the server, then rerun this command.`,
     );
   } else {
-    console.log("Semua kegagalan sudah punya analisis. Beri label/eksperimen, lalu: npx redline learn");
+    console.log("All failures already have an analysis. Add a label/experiment, then: npx redline learn");
   }
 }
 
@@ -690,7 +690,7 @@ function printRule(r: Rule) {
   console.log(`  ${mark} #${r.id} [${r.status}] /${r.pattern}/ → ${r.category}`);
   console.log(`      ${r.summary}`);
   console.log(
-    `      uji ke data lama: cocok ${r.hits} kasus terbukti, ikut cocok ${r.also_matches} kelompok lain\n`,
+    `      backtest: matched ${r.hits} proven cases, also matched ${r.also_matches} other groups\n`,
   );
 }
 
@@ -705,42 +705,42 @@ async function score() {
     }[];
     entries: (Verdict & { test: string; truth_by: string })[];
   }>("GET", "/api/scoreboard?limit=15");
-  console.log("Rapor tebakan Redline (dibanding bukti eksperimen atau label manual)\n");
+  console.log("Redline prediction scoreboard (compared with experiments or manual labels)\n");
   for (const s of board.sources) {
     const pct = s.graded > 0 ? `${Math.round(s.accuracy * 100)}%` : "-";
-    const unknown = s.unknown > 0 ? `, ${s.unknown} tidak menebak` : "";
+    const unknown = s.unknown > 0 ? `, ${s.unknown} no guess` : "";
     console.log(
-      `  ${sourceName(s.source).padEnd(7)} ${s.correct}/${s.graded} benar (${pct})${unknown}`,
+      `  ${sourceName(s.source).padEnd(7)} ${s.correct}/${s.graded} correct (${pct})${unknown}`,
     );
   }
   if (board.entries.length === 0) {
-    console.log("\nBelum ada tebakan yang bisa dinilai. Jalankan: npx redline verify");
+    console.log("\nNo predictions to grade yet. Run: npx redline verify");
     return;
   }
-  console.log("\nTerbaru:");
+  console.log("\nLatest:");
   for (const e of board.entries) {
     const mark = e.correct ? "✅" : e.predicted === "unknown" ? "➖" : "❌";
     const title = e.test.split(" › ").slice(2).join(" › ");
     console.log(
-      `  ${mark} ${sourceName(e.source).padEnd(7)} ${categoryName(e.predicted).padEnd(12)} terbukti ${categoryName(e.truth).padEnd(12)} (${e.truth_by})  ${title}`,
+      `  ${mark} ${sourceName(e.source).padEnd(7)} ${categoryName(e.predicted).padEnd(12)} proven ${categoryName(e.truth).padEnd(12)} (${e.truth_by})  ${title}`,
     );
   }
-  console.log("\nCatatan: angka baru bermakna setelah ada puluhan kasus terbukti.");
+  console.log("\nNote: the numbers become meaningful after dozens of proven cases.");
 }
 
 async function rules() {
   const list = await api<Rule[]>("GET", "/api/rules");
-  if (list.length === 0) console.log("Belum ada aturan. Jalankan: npx redline learn");
+  if (list.length === 0) console.log("No rules yet. Run: npx redline learn");
   for (const r of list) printRule(r);
 }
 
 async function decide(id: string | undefined, status: "active" | "rejected") {
   if (!id || !/^\d+$/.test(id))
-    throw new Error("tulis id aturan, misalnya: npx redline approve 3");
+    throw new Error("write a rule id, for example: npx redline approve 3");
   const r = await api<Rule>("PUT", `/api/rules/${id}`, { status, by: who() });
   printRule(r);
   if (status === "active")
-    console.log("Aturan aktif: kegagalan dengan pola ini sekarang diputuskan tanpa AI.");
+    console.log("Rule active: failures matching this pattern are now decided without AI.");
 }
 
 /** Test yang terdampak kalau file atau endpoint berubah, dari graph Redline (run lulus terakhir tiap test). */
@@ -748,7 +748,7 @@ async function impact(args: string[]) {
   const q = args.join(" ").trim();
   if (!q)
     throw new Error(
-      "tulis file atau endpoint, misalnya: npx redline impact schemas/brand.ts",
+      "write a file or endpoint, for example: npx redline impact schemas/brand.ts",
     );
   const isEndpoint = q.startsWith("/") || /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s/i.test(q);
   const res = await api<{ tests: { test: string; test_case_id?: string; run_id: number }[] }>(
@@ -757,17 +757,17 @@ async function impact(args: string[]) {
   );
   if (res.tests.length === 0) {
     console.log(
-      `Tidak ada test yang ${isEndpoint ? "memanggil" : "memakai"} ${q} (menurut run yang sudah dikirim ke Redline).`,
+      `No test ${isEndpoint ? "calls" : "uses"} ${q} (according to runs already sent to Redline).`,
     );
     return;
   }
-  console.log(`${res.tests.length} test ${isEndpoint ? "memanggil" : "bergantung pada"} ${q}:\n`);
+  console.log(`${res.tests.length} tests ${isEndpoint ? "call" : "depend on"} ${q}:\n`);
   for (const t of res.tests) {
     console.log(`  ${(t.test_case_id ?? "").padEnd(14)} ${t.test}`);
   }
   const ids = res.tests.map((t) => t.test_case_id).filter(Boolean);
   if (ids.length > 0)
-    console.log(`\nJalankan hanya test ini: npx playwright test --grep "${ids.join("|")}"`);
+    console.log(`\nRun only these tests: npx playwright test --grep "${ids.join("|")}"`);
 }
 
 // ---------- comment ----------
@@ -788,20 +788,20 @@ function pullRequestNumber(): number {
     if (number) return number;
   }
   throw new Error(
-    "nomor PR tidak ditemukan: jalankan di GitHub Actions pull_request atau set REDLINE_PR_NUMBER",
+    "PR number not found: run in a GitHub Actions pull_request event or set REDLINE_PR_NUMBER",
   );
 }
 
 async function comment(args: string[]) {
   const file = args[0] ? path.resolve(args[0]) : path.join(RESULTS_DIR, "redline-report.md");
   if (!existsSync(file)) {
-    throw new Error(`${file} belum ada; jalankan npx playwright test dulu`);
+    throw new Error(`${file} does not exist yet; run npx playwright test first`);
   }
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   if (!token || !repo) {
-    throw new Error("GITHUB_TOKEN dan GITHUB_REPOSITORY harus diisi (otomatis di GitHub Actions)");
+    throw new Error("GITHUB_TOKEN and GITHUB_REPOSITORY are required (automatic in GitHub Actions)");
   }
   const pr = pullRequestNumber();
   const api = process.env.GITHUB_API_URL || "https://api.github.com";
@@ -835,7 +835,7 @@ async function comment(args: string[]) {
   if (!response.ok) {
     throw new Error(`GitHub menolak komentar (${response.status}): ${(await response.text()).slice(0, 200)}`);
   }
-  console.log(`[redline] komentar PR ${existing ? "diperbarui" : "dibuat"}: ${repo}#${pr}`);
+  console.log(`[redline] PR comment ${existing ? "updated" : "created"}: ${repo}#${pr}`);
 }
 
 // ---------- main ----------

@@ -16,10 +16,10 @@ import (
 )
 
 // ErrAIDisabled: aturan tidak cocok dan ANTHROPIC_API_KEY belum diisi.
-var ErrAIDisabled = errors.New("analisis AI belum aktif: isi ANTHROPIC_API_KEY di .env lalu restart server")
+var ErrAIDisabled = errors.New("AI analysis is not enabled: set ANTHROPIC_API_KEY in .env and restart the server")
 
 // ErrBudgetExceeded: biaya AI hari ini sudah mencapai AI_DAILY_BUDGET_USD.
-var ErrBudgetExceeded = errors.New("batas biaya AI harian tercapai")
+var ErrBudgetExceeded = errors.New("daily AI budget reached")
 
 type Store interface {
 	Facts(ctx context.Context, fingerprint string) (*store.Facts, error)
@@ -140,9 +140,9 @@ func needsAIAnalysis(fingerprint string) *store.Analysis {
 	return &store.Analysis{
 		Fingerprint: fingerprint, PromptVersion: PromptVersion, Source: "none",
 		Category: "unknown", Confidence: "none",
-		Summary:  "Belum ada rule yang cocok dan AI belum menganalisis kegagalan ini.",
+		Summary:  "No rule matched and AI has not analyzed this failure yet.",
 		Evidence: []string{},
-		NextStep: "Jalankan REDLINE_AI=1 npx playwright test, atau npx redline analyze --run <id> setelah ANTHROPIC_API_KEY diisi.",
+		NextStep: "Run REDLINE_AI=1 npx playwright test, or npx redline analyze --run <id> after setting ANTHROPIC_API_KEY.",
 	}
 }
 
@@ -202,13 +202,13 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 			if fallback == nil {
 				return nil, false, err
 			}
-			a.logger().Warn("batas biaya AI tercapai, memakai hasil aturan", "fingerprint", fingerprint, "err", err)
+			a.logger().Warn("AI budget reached; using rule result", "fingerprint", fingerprint, "err", err)
 			res = fallback
 		} else if res, err = a.ask(ctx, facts); err != nil {
 			if fallback == nil {
 				return nil, false, err
 			}
-			a.logger().Warn("AI gagal, memakai hasil aturan", "fingerprint", fingerprint, "err", err)
+			a.logger().Warn("AI failed; using rule result", "fingerprint", fingerprint, "err", err)
 			res = fallback
 		}
 	}
@@ -219,20 +219,20 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	// ulang (?force=1) tetap harus terhitung di batas harian.
 	if res.Source == "ai" && res.CostUSD > 0 {
 		if err := a.Store.RecordSpend(ctx, res.CostUSD); err != nil {
-			a.logger().Warn("gagal mencatat biaya AI", "err", err)
+			a.logger().Warn("failed to record AI cost", "err", err)
 		}
 	}
 	if err := a.Store.SaveAnalysis(ctx, *res); err != nil {
-		return nil, false, fmt.Errorf("simpan analisis: %w", err)
+		return nil, false, fmt.Errorf("store analysis: %w", err)
 	}
 	// Rapor: tebakan dicatat supaya nanti bisa dibandingkan dengan bukti. Gagal mencatat tidak menggagalkan analisis.
 	if err := a.Store.SavePrediction(ctx, *res); err != nil {
-		a.logger().Warn("gagal mencatat tebakan", "fingerprint", fingerprint, "err", err)
+		a.logger().Warn("failed to record prediction", "fingerprint", fingerprint, "err", err)
 	}
 	// Candidate hanya draft; tidak dipakai runtime sampai terbukti dan lolos backtest.
 	if res.Source == "ai" && res.RuleCandidate != nil {
 		if _, err := a.Store.SaveRuleCandidate(ctx, *res.RuleCandidate); err != nil {
-			a.logger().Warn("gagal menyimpan rule candidate", "fingerprint", fingerprint, "err", err)
+			a.logger().Warn("failed to store rule candidate", "fingerprint", fingerprint, "err", err)
 		}
 	}
 	return res, false, nil
@@ -248,11 +248,11 @@ func (a *Analyzer) checkBudget(ctx context.Context) error {
 	since := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	spent, err := a.Store.SpendSince(ctx, since)
 	if err != nil {
-		a.logger().Warn("gagal menghitung biaya AI hari ini; batas dilewati", "err", err)
+		a.logger().Warn("failed to calculate today's AI cost; budget check skipped", "err", err)
 		return nil
 	}
 	if spent >= a.DailyBudgetUSD {
-		return fmt.Errorf("%w: $%.4f dari $%.2f", ErrBudgetExceeded, spent, a.DailyBudgetUSD)
+		return fmt.Errorf("%w: $%.4f of $%.2f", ErrBudgetExceeded, spent, a.DailyBudgetUSD)
 	}
 	return nil
 }
@@ -263,10 +263,10 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 		Model:     a.Model,
 		MaxTokens: 1024,
 		System:    systemPrompt,
-		Messages:  []llm.Message{{Role: "user", Content: "FAKTA:\n\n" + factsText + References(f)}},
+		Messages:  []llm.Message{{Role: "user", Content: "FACTS:\n\n" + factsText + References(f)}},
 		Tools: []llm.Tool{{
 			Name:        toolName,
-			Description: "Laporkan kesimpulan penyebab kegagalan test.",
+			Description: "Report the conclusion for the test failure.",
 			InputSchema: verdictTool,
 		}},
 		ToolChoice: &llm.ToolChoice{Type: "tool", Name: toolName},
@@ -276,11 +276,11 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 	}
 	raw, ok := resp.ToolInput(toolName)
 	if !ok {
-		return nil, fmt.Errorf("AI tidak memanggil %s (stop_reason=%s)", toolName, resp.StopReason)
+		return nil, fmt.Errorf("AI did not call %s (stop_reason=%s)", toolName, resp.StopReason)
 	}
 	var v verdict
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, fmt.Errorf("jawaban AI tidak valid: %w", err)
+		return nil, fmt.Errorf("invalid AI response: %w", err)
 	}
 	if !store.ValidCategory(v.Category) {
 		v.Category = "unknown"
@@ -289,7 +289,7 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 	// (AI menilainya sebelum memilih kategori) dan keyakinan diturunkan.
 	if want, ok := map[string]string{"test": "test_bug", "api": "backend_bug", "environment": "environment"}[v.Deviates]; ok &&
 		v.Category != want && v.Category != "flaky" {
-		a.logger().Warn("kategori AI bertentangan dengan pihak yang menyimpang, dikoreksi",
+		a.logger().Warn("AI category contradicted the deviating side; corrected",
 			"fingerprint", f.Group.Fingerprint, "deviates", v.Deviates, "category", v.Category)
 		v.Category, v.Confidence = want, "low"
 	}
@@ -297,14 +297,14 @@ func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, er
 		v.Confidence = "low"
 	}
 	if strings.TrimSpace(v.Summary) == "" {
-		return nil, fmt.Errorf("AI tidak memberi summary")
+		return nil, fmt.Errorf("AI did not provide a summary")
 	}
 
 	// Anti-halusinasi: bukti harus benar-benar ada di fakta. Bukti karangan dibuang,
 	// dan kalau tidak tersisa satu pun, tingkat keyakinan diturunkan.
 	evidence := grounded(v.Evidence, factsText)
 	if len(evidence) == 0 && v.Confidence != "low" {
-		a.logger().Warn("bukti AI tidak ditemukan di fakta, confidence diturunkan", "fingerprint", f.Group.Fingerprint, "evidence", v.Evidence)
+		a.logger().Warn("AI evidence was not found in the facts; confidence lowered", "fingerprint", f.Group.Fingerprint, "evidence", v.Evidence)
 		v.Confidence = "low"
 	}
 
@@ -367,19 +367,19 @@ func fromProof(e store.Experiment) *store.Analysis {
 	}
 	if e.Kind == "patch" {
 		res.Confidence = "high"
-		res.Summary = "Terbukti lewat eksperimen: " + strings.TrimSpace(e.Hypothesis) +
-			" Test lulus setelah patch diterapkan di salinan project."
-		res.Evidence = []string{fmt.Sprintf("Eksperimen #%d: test lulus %d dari %d kali setelah patch", e.ID, e.Passes, e.Runs)}
-		res.NextStep = "Review patch-nya, terapkan dengan `git apply`, lalu commit. Kalau patch ini justru menutupi bug, beri label manual."
+		res.Summary = "Proven by experiment: " + strings.TrimSpace(e.Hypothesis) +
+			" The test passed after applying the patch to a copy of the project."
+		res.Evidence = []string{fmt.Sprintf("Experiment #%d: test passed %d of %d times after the patch", e.ID, e.Passes, e.Runs)}
+		res.NextStep = "Review the patch, apply it with `git apply`, then commit. If the patch hides a bug instead, label it manually."
 		res.Patch = e.Patch
 		return res
 	}
 	res.Category = "flaky"
 	res.Confidence = "medium"
-	res.Summary = fmt.Sprintf("Test lulus %d dari %d kali saat dijalankan ulang tanpa perubahan apa pun. "+
-		"Kegagalannya tidak konsisten: kemungkinan flaky, atau kondisi sesaat seperti data, timing, atau service yang sempat bermasalah.", e.Passes, e.Runs)
-	res.Evidence = []string{fmt.Sprintf("Eksperimen #%d: lulus %d dari %d kali tanpa perubahan", e.ID, e.Passes, e.Runs)}
-	res.NextStep = "Cari ketergantungan pada data bersama, urutan test, atau waktu. Jalankan dengan --repeat-each=10 untuk melihat seberapa sering gagal."
+	res.Summary = fmt.Sprintf("The test passed %d of %d times when rerun without any changes. "+
+		"The failure is inconsistent: likely flaky, or a transient condition such as data, timing, or a service that was briefly unavailable.", e.Passes, e.Runs)
+	res.Evidence = []string{fmt.Sprintf("Experiment #%d: passed %d of %d times without changes", e.ID, e.Passes, e.Runs)}
+	res.NextStep = "Look for shared data, test order, or timing dependencies. Run with --repeat-each=10 to see how often it fails."
 	return res
 }
 

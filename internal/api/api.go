@@ -250,16 +250,16 @@ func (s *Server) versionHeaders(next http.Handler) http.Handler {
 // handleReady memeriksa dependensi (database). Berbeda dari /healthz yang hanya menandakan proses hidup.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if s.Ready == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "readiness check belum dikonfigurasi"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "readiness check is not configured"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.Ready(ctx); err != nil {
 		if s.Log != nil {
-			s.Log.Warn("readiness gagal", "err", err)
+			s.Log.Warn("readiness check failed", "err", err)
 		}
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "database tidak bisa dihubungi"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": "database cannot be reached"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
@@ -284,7 +284,7 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			writeError(w, http.StatusForbidden, "CSRF token salah atau tidak ada: kirim header X-CSRF-Token")
+			writeError(w, http.StatusForbidden, "missing or invalid CSRF token: send the X-CSRF-Token header")
 			return
 		}
 		got := []byte(r.Header.Get("Authorization"))
@@ -305,7 +305,7 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="redline"`)
-		writeError(w, http.StatusUnauthorized, "API key salah atau tidak ada: kirim header Authorization: Bearer <REDLINE_API_KEY>")
+		writeError(w, http.StatusUnauthorized, "missing or invalid API key: send Authorization: Bearer <REDLINE_API_KEY>")
 	})
 }
 
@@ -342,10 +342,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			writeError(w, http.StatusRequestEntityTooLarge, "results.json terlalu besar (atur MAX_REPORT_MB)")
+			writeError(w, http.StatusRequestEntityTooLarge, "results.json is too large (increase MAX_REPORT_MB)")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "gagal membaca body: "+err.Error())
+		writeError(w, http.StatusBadRequest, "failed to read request body: "+err.Error())
 		return
 	}
 	// Bisa results.json mentah (curl) atau bungkus dari reporter Redline (dengan sidik jari kode test).
@@ -357,7 +357,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	source := q.Get("source")
 	if source != "" && source != "local" && source != "ci" {
-		writeError(w, http.StatusBadRequest, "source harus 'local' atau 'ci'")
+		writeError(w, http.StatusBadRequest, "source must be 'local' or 'ci'")
 		return
 	}
 	meta := store.RunMeta{
@@ -370,11 +370,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.Store.IngestReport(r.Context(), rep, meta)
 	if err != nil {
-		s.Log.Error("ingest gagal", "err", err)
-		writeError(w, http.StatusInternalServerError, "gagal menyimpan laporan, cek log server")
+		s.Log.Error("ingest failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to store the report; check the server logs")
 		return
 	}
-	s.Log.Info("run tersimpan", "run", res.RunID, "total", res.Total, "failed", res.Failed,
+	s.Log.Info("run stored", "run", res.RunID, "total", res.Total, "failed", res.Failed,
 		"new", len(res.New), "regressed", len(res.Regressed), "resolved", len(res.Resolved))
 	// Notifikasi berjalan di background: webhook lambat atau mati tidak boleh menahan reporter.
 	// Quarantine expiry ikut dicek di setiap ingest, jadi tidak perlu scheduler terpisah.
@@ -399,7 +399,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if _, err := s.Analyzer.EmbedPending(ctx); err != nil {
-				s.Log.Warn("embedding setelah ingest gagal; dicoba lagi saat analisis", "err", err)
+				s.Log.Warn("embedding after ingest failed; will retry during analysis", "err", err)
 			}
 		}()
 	}
@@ -459,7 +459,7 @@ func (s *Server) handleTestTrend(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTestHistory(w http.ResponseWriter, r *http.Request) {
 	test := strings.TrimSpace(r.URL.Query().Get("test"))
 	if test == "" {
-		writeError(w, http.StatusBadRequest, "test wajib diisi")
+		writeError(w, http.StatusBadRequest, "test is required")
 		return
 	}
 	days, err := queryInt(r, "days", 30, 1, 365)
@@ -474,7 +474,7 @@ func (s *Server) handleTestHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	summary, runs, err := s.Store.TestHistory(r.Context(), test, days, limit)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "test tidak ditemukan pada rentang waktu ini")
+		writeError(w, http.StatusNotFound, "test not found in this time range")
 		return
 	}
 	if err != nil {
@@ -491,7 +491,7 @@ func queryInt(r *http.Request, name string, fallback, minValue, maxValue int) (i
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < minValue || value > maxValue {
-		return 0, fmt.Errorf("%s harus angka antara %d dan %d", name, minValue, maxValue)
+		return 0, fmt.Errorf("%s must be a number between %d and %d", name, minValue, maxValue)
 	}
 	return value, nil
 }
@@ -524,21 +524,21 @@ func (s *Server) handleSetQuarantine(w http.ResponseWriter, r *http.Request) {
 		Days   int    `json:"days"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"test\": \"...\", \"owner\": \"...\", \"reason\": \"...\", \"days\": 7}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"test\": \"...\", \"owner\": \"...\", \"reason\": \"...\", \"days\": 7}")
 		return
 	}
 	body.Test = strings.TrimSpace(body.Test)
 	body.Owner = strings.TrimSpace(body.Owner)
 	body.Reason = strings.TrimSpace(body.Reason)
 	if body.Test == "" || body.Owner == "" || body.Reason == "" {
-		writeError(w, http.StatusBadRequest, "test, owner dan reason wajib diisi")
+		writeError(w, http.StatusBadRequest, "test, owner and reason are required")
 		return
 	}
 	if body.Days == 0 {
 		body.Days = 7
 	}
 	if body.Days < 1 || body.Days > 90 {
-		writeError(w, http.StatusBadRequest, "days harus antara 1 dan 90")
+		writeError(w, http.StatusBadRequest, "days must be between 1 and 90")
 		return
 	}
 	by := strings.TrimSpace(body.By)
@@ -552,7 +552,7 @@ func (s *Server) handleSetQuarantine(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.Store.FindTest(r.Context(), body.Test)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "test tidak ditemukan")
+		writeError(w, http.StatusNotFound, "test not found")
 		return
 	}
 	if err != nil {
@@ -574,7 +574,7 @@ func (s *Server) handleSetQuarantine(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReleaseQuarantine(w http.ResponseWriter, r *http.Request) {
 	test := strings.TrimSpace(r.URL.Query().Get("test"))
 	if test == "" {
-		writeError(w, http.StatusBadRequest, "test wajib diisi")
+		writeError(w, http.StatusBadRequest, "test is required")
 		return
 	}
 	by := strings.TrimSpace(r.URL.Query().Get("by"))
@@ -588,7 +588,7 @@ func (s *Server) handleReleaseQuarantine(w http.ResponseWriter, r *http.Request)
 	}
 	identity, err := s.Store.FindTest(r.Context(), test)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "test tidak ditemukan")
+		writeError(w, http.StatusNotFound, "test not found")
 		return
 	}
 	if err != nil {
@@ -597,7 +597,7 @@ func (s *Server) handleReleaseQuarantine(w http.ResponseWriter, r *http.Request)
 	}
 	q, err := s.Store.ReleaseQuarantine(r.Context(), identity.Key, by)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "quarantine aktif tidak ditemukan")
+		writeError(w, http.StatusNotFound, "active quarantine not found")
 		return
 	}
 	if err != nil {
@@ -647,12 +647,12 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCompareRun(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
 	current, err := s.Store.GetRun(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		writeError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if err != nil {
@@ -776,12 +776,12 @@ func compareRuns(current, previous store.Run, currentResults, previousResults []
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
 	run, err := s.Store.GetRun(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		writeError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if err != nil {
@@ -812,11 +812,11 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
 	if _, err := s.Store.GetRun(r.Context(), id); errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		writeError(w, http.StatusNotFound, "run not found")
 		return
 	} else if err != nil {
 		s.serverError(w, err)
@@ -834,11 +834,11 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 	runID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || runID <= 0 {
-		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
 	if _, err := s.Store.GetRun(r.Context(), runID); errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "run tidak ditemukan")
+		writeError(w, http.StatusNotFound, "run not found")
 		return
 	} else if err != nil {
 		s.serverError(w, err)
@@ -850,7 +850,7 @@ func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, max+(1<<20))
 	if err := r.ParseMultipartForm(max); err != nil {
-		writeError(w, http.StatusBadRequest, "upload artifact tidak valid atau terlalu besar")
+		writeError(w, http.StatusBadRequest, "invalid or too large artifact upload")
 		return
 	}
 	if r.MultipartForm != nil {
@@ -859,17 +859,17 @@ func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 	test := r.FormValue("test")
 	kind := strings.TrimSpace(r.FormValue("kind"))
 	if strings.TrimSpace(test) == "" || (kind != "trace" && kind != "screenshot") {
-		writeError(w, http.StatusBadRequest, "test wajib diisi dan kind harus trace atau screenshot")
+		writeError(w, http.StatusBadRequest, "test is required and kind must be trace or screenshot")
 		return
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "file artifact wajib diisi")
+		writeError(w, http.StatusBadRequest, "artifact file is required")
 		return
 	}
 	defer file.Close()
 	if header.Size > max {
-		writeError(w, http.StatusRequestEntityTooLarge, "artifact terlalu besar")
+		writeError(w, http.StatusRequestEntityTooLarge, "artifact is too large")
 		return
 	}
 	dir := filepath.Join(s.artifactDir(), strconv.FormatInt(runID, 10), testHash(test))
@@ -888,7 +888,7 @@ func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 	closeErr := out.Close()
 	if copyErr != nil || closeErr != nil || written > max {
 		_ = os.Remove(path)
-		writeError(w, http.StatusRequestEntityTooLarge, "artifact terlalu besar atau gagal ditulis")
+		writeError(w, http.StatusRequestEntityTooLarge, "artifact is too large or could not be written")
 		return
 	}
 	contentType := header.Header.Get("Content-Type")
@@ -911,12 +911,12 @@ func (s *Server) handleUploadArtifact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id artifact tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid artifact id")
 		return
 	}
 	artifact, err := s.Store.GetArtifact(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "artifact tidak ditemukan")
+		writeError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
 	if err != nil {
@@ -930,12 +930,12 @@ func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	root, err := filepath.Abs(s.artifactDir())
 	if err != nil || !strings.HasPrefix(path, root+string(os.PathSeparator)) {
-		writeError(w, http.StatusNotFound, "artifact tidak ditemukan")
+		writeError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "file artifact tidak ditemukan")
+		writeError(w, http.StatusNotFound, "file artifact not found")
 		return
 	}
 	defer file.Close()
@@ -987,7 +987,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		for _, st := range strings.Split(raw, ",") {
 			st = strings.TrimSpace(st)
 			if st != "open" && st != "regressed" && st != "resolved" {
-				writeError(w, http.StatusBadRequest, "status harus open, regressed, resolved, atau all")
+				writeError(w, http.StatusBadRequest, "status must be open, regressed, resolved or all")
 				return
 			}
 			statuses = append(statuses, st)
@@ -1006,7 +1006,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	g, occ, err := s.Store.GetGroup(r.Context(), r.PathValue("fingerprint"))
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	}
 	if err != nil {
@@ -1041,10 +1041,10 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		res, err := s.Analyzer.AnalyzeLocal(r.Context(), fingerprint, force)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
-			writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+			writeError(w, http.StatusNotFound, "failure group not found")
 		case err != nil:
-			s.Log.Error("analisis lokal gagal", "fingerprint", fingerprint, "err", err)
-			writeError(w, http.StatusBadGateway, "analisis gagal, cek log server")
+			s.Log.Error("local analysis failed", "fingerprint", fingerprint, "err", err)
+			writeError(w, http.StatusBadGateway, "analysis failed; check the server logs")
 		default:
 			writeJSON(w, http.StatusOK, map[string]any{
 				"analysis": res, "cached": false, "needs_ai": res.Source == "none",
@@ -1056,18 +1056,18 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	res, cached, err := s.Analyzer.Analyze(r.Context(), fingerprint, force)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	case errors.Is(err, analysis.ErrAIDisabled):
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	case err != nil:
-		s.Log.Error("analisis gagal", "fingerprint", fingerprint, "err", err)
-		writeError(w, http.StatusBadGateway, "analisis gagal, cek log server")
+		s.Log.Error("analysis failed", "fingerprint", fingerprint, "err", err)
+		writeError(w, http.StatusBadGateway, "analysis failed; check the server logs")
 		return
 	}
 	if !cached && res.Source == "ai" {
-		s.Log.Info("analisis AI", "fingerprint", res.Fingerprint, "category", res.Category,
+		s.Log.Info("AI analysis", "fingerprint", res.Fingerprint, "category", res.Category,
 			"input_tokens", res.InputTokens, "output_tokens", res.OutputTokens, "cost_usd", res.CostUSD)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"analysis": res, "cached": cached})
@@ -1082,7 +1082,7 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 		By    string `json:"by"` // siapa yang memberi label; wajib kalau label diisi
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"label\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"label\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	// A UI session has an identity; do not trust the client's "by".
@@ -1092,17 +1092,17 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Label != "" && !store.ValidCategory(body.Label) {
-		writeError(w, http.StatusBadRequest, "label harus salah satu dari: "+strings.Join(store.Categories, ", "))
+		writeError(w, http.StatusBadRequest, "label must be one of: "+strings.Join(store.Categories, ", "))
 		return
 	}
 	body.By = strings.TrimSpace(body.By)
 	if body.Label != "" && body.By == "" {
-		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang memberi label")
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person applying the label")
 		return
 	}
 	err := s.Store.SetLabel(r.Context(), r.PathValue("fingerprint"), body.Label, strings.TrimSpace(body.Note), body.By)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	}
 	if err != nil {
@@ -1111,9 +1111,9 @@ func (s *Server) handleLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Label != "" && s.Analyzer != nil {
 		if res, err := s.Analyzer.PromoteCandidates(r.Context(), r.PathValue("fingerprint")); err != nil {
-			s.Log.Warn("promosi rule candidate gagal", "fingerprint", r.PathValue("fingerprint"), "err", err)
+			s.Log.Warn("rule candidate promotion failed", "fingerprint", r.PathValue("fingerprint"), "err", err)
 		} else if len(res.Promoted)+len(res.Rejected) > 0 {
-			s.Log.Info("candidate diproses setelah label", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
+			s.Log.Info("candidate processed after label", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"label": body.Label, "note": body.Note, "by": body.By})
@@ -1129,7 +1129,7 @@ func (s *Server) handleTriage(w http.ResponseWriter, r *http.Request) {
 		By     string `json:"by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"...\", \"owner\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"status\": \"...\", \"owner\": \"...\", \"note\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	if s.User != nil {
@@ -1140,20 +1140,20 @@ func (s *Server) handleTriage(w http.ResponseWriter, r *http.Request) {
 	body.Status, body.Owner, body.Note, body.By = strings.TrimSpace(body.Status),
 		strings.TrimSpace(body.Owner), strings.TrimSpace(body.Note), strings.TrimSpace(body.By)
 	if !store.ValidTriageStatus(body.Status) {
-		writeError(w, http.StatusBadRequest, "status harus salah satu dari: "+strings.Join(store.TriageStatuses, ", "))
+		writeError(w, http.StatusBadRequest, "status must be one of: "+strings.Join(store.TriageStatuses, ", "))
 		return
 	}
 	if body.By == "" {
-		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah triage")
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person changing triage")
 		return
 	}
 	if len(body.Owner) > 80 || len(body.Note) > 500 {
-		writeError(w, http.StatusBadRequest, "owner maksimal 80 karakter dan note maksimal 500 karakter")
+		writeError(w, http.StatusBadRequest, "owner must be at most 80 characters and note at most 500 characters")
 		return
 	}
 	err := s.Store.SetTriage(r.Context(), r.PathValue("fingerprint"), body.Status, body.Owner, body.Note, body.By)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	}
 	if err != nil {
@@ -1174,7 +1174,7 @@ func (s *Server) handleTriageBulk(w http.ResponseWriter, r *http.Request) {
 		By           string   `json:"by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"fingerprints\": [...], \"status\": \"...\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"fingerprints\": [...], \"status\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	if s.User != nil {
@@ -1184,11 +1184,11 @@ func (s *Server) handleTriageBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Status, body.By = strings.TrimSpace(body.Status), strings.TrimSpace(body.By)
 	if !store.ValidTriageStatus(body.Status) {
-		writeError(w, http.StatusBadRequest, "status harus salah satu dari: "+strings.Join(store.TriageStatuses, ", "))
+		writeError(w, http.StatusBadRequest, "status must be one of: "+strings.Join(store.TriageStatuses, ", "))
 		return
 	}
 	if body.By == "" {
-		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah triage")
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person changing triage")
 		return
 	}
 	ids, err := cleanFingerprints(body.Fingerprints)
@@ -1213,7 +1213,7 @@ func (s *Server) handleTriageOwnerBulk(w http.ResponseWriter, r *http.Request) {
 		By           string   `json:"by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"fingerprints\": [...], \"owner\": \"...\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"fingerprints\": [...], \"owner\": \"...\", \"by\": \"...\"}")
 		return
 	}
 	if s.User != nil {
@@ -1223,11 +1223,11 @@ func (s *Server) handleTriageOwnerBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Owner, body.By = strings.TrimSpace(body.Owner), strings.TrimSpace(body.By)
 	if body.By == "" {
-		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang mengubah owner")
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person changing the owner")
 		return
 	}
 	if len(body.Owner) > 80 {
-		writeError(w, http.StatusBadRequest, "owner maksimal 80 karakter")
+		writeError(w, http.StatusBadRequest, "owner must be at most 80 characters")
 		return
 	}
 	ids, err := cleanFingerprints(body.Fingerprints)
@@ -1255,10 +1255,10 @@ func cleanFingerprints(ids []string) ([]string, error) {
 		out = append(out, id)
 	}
 	if len(out) == 0 {
-		return nil, errors.New("fingerprints tidak boleh kosong")
+		return nil, errors.New("fingerprints must not be empty")
 	}
 	if len(out) > 200 {
-		return nil, errors.New("maksimal 200 fingerprint per permintaan")
+		return nil, errors.New("at most 200 fingerprints per request")
 	}
 	return out, nil
 }
@@ -1272,20 +1272,20 @@ func (s *Server) handleFix(w http.ResponseWriter, r *http.Request) {
 		Attempts []analysis.Attempt    `json:"attempts"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"files\": [{\"path\": \"...\", \"content\": \"...\"}]}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"files\": [{\"path\": \"...\", \"content\": \"...\"}]}")
 		return
 	}
 	fix, err := s.Analyzer.ProposeFix(r.Context(), r.PathValue("fingerprint"), body.Files, body.Attempts)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 	case errors.Is(err, analysis.ErrAIDisabled):
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, analysis.ErrBadFixInput):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case err != nil:
-		s.Log.Error("usulan patch gagal", "fingerprint", r.PathValue("fingerprint"), "err", err)
-		writeError(w, http.StatusBadGateway, "usulan patch gagal, cek log server")
+		s.Log.Error("patch proposal failed", "fingerprint", r.PathValue("fingerprint"), "err", err)
+		writeError(w, http.StatusBadGateway, "patch proposal failed; check the server logs")
 	default:
 		writeJSON(w, http.StatusOK, fix)
 	}
@@ -1297,42 +1297,42 @@ var experimentOutcomes = map[string]bool{"passed": true, "failed": true, "reject
 func (s *Server) handleSaveExperiment(w http.ResponseWriter, r *http.Request) {
 	var e store.Experiment
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&e); err != nil {
-		writeError(w, http.StatusBadRequest, "body harus JSON eksperimen")
+		writeError(w, http.StatusBadRequest, "experiment request body must be JSON")
 		return
 	}
 	e.GroupID = r.PathValue("fingerprint")
 	switch {
 	case e.Kind != "rerun" && e.Kind != "patch":
-		writeError(w, http.StatusBadRequest, "kind harus rerun atau patch")
+		writeError(w, http.StatusBadRequest, "kind must be rerun or patch")
 		return
 	case !experimentOutcomes[e.Outcome]:
-		writeError(w, http.StatusBadRequest, "outcome harus passed, failed, rejected, atau skipped")
+		writeError(w, http.StatusBadRequest, "outcome must be passed, failed, rejected or skipped")
 		return
 	case e.Category != "" && !store.ValidCategory(e.Category):
-		writeError(w, http.StatusBadRequest, "category harus salah satu dari: "+strings.Join(store.Categories, ", "))
+		writeError(w, http.StatusBadRequest, "category must be one of: "+strings.Join(store.Categories, ", "))
 		return
 	case e.Runs < 1 || e.Passes < 0 || e.Passes > e.Runs:
-		writeError(w, http.StatusBadRequest, "runs minimal 1 dan passes di antara 0 dan runs")
+		writeError(w, http.StatusBadRequest, "runs must be at least 1 and passes must be between 0 and runs")
 		return
 	case e.Outcome == "passed" && e.Passes == 0:
-		writeError(w, http.StatusBadRequest, "outcome passed butuh passes > 0")
+		writeError(w, http.StatusBadRequest, "outcome passed requires passes > 0")
 		return
 	}
 	id, err := s.Store.SaveExperiment(r.Context(), e)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok kegagalan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "failure group not found")
 		return
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.Log.Info("eksperimen tersimpan", "fingerprint", e.GroupID, "kind", e.Kind, "outcome", e.Outcome)
+	s.Log.Info("experiment stored", "fingerprint", e.GroupID, "kind", e.Kind, "outcome", e.Outcome)
 	if e.Outcome == "passed" && s.Analyzer != nil {
 		if res, err := s.Analyzer.PromoteCandidates(r.Context(), e.GroupID); err != nil {
-			s.Log.Warn("promosi rule candidate gagal", "fingerprint", e.GroupID, "err", err)
+			s.Log.Warn("rule candidate promotion failed", "fingerprint", e.GroupID, "err", err)
 		} else if len(res.Promoted)+len(res.Rejected) > 0 {
-			s.Log.Info("candidate diproses setelah eksperimen", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
+			s.Log.Info("candidate processed after experiment", "promoted", len(res.Promoted), "rejected", len(res.Rejected))
 		}
 	}
 	resp := map[string]any{"id": id, "verdicts": []store.ScoreEntry{}}
@@ -1366,7 +1366,7 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status != "" && !ruleStatuses[status] {
-		writeError(w, http.StatusBadRequest, "status harus proposed, active, atau rejected")
+		writeError(w, http.StatusBadRequest, "status must be proposed, active or rejected")
 		return
 	}
 	rules, err := s.Store.ListRules(r.Context(), status)
@@ -1381,7 +1381,7 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListRuleCandidates(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status != "" && !ruleCandidateStatuses[status] {
-		writeError(w, http.StatusBadRequest, "status harus draft, promoted, rejected, atau expired")
+		writeError(w, http.StatusBadRequest, "status must be draft, promoted, rejected or expired")
 		return
 	}
 	candidates, err := s.Store.ListRuleCandidates(r.Context(), r.URL.Query().Get("fingerprint"), status)
@@ -1397,7 +1397,7 @@ var ruleCandidateStatuses = map[string]bool{"draft": true, "promoted": true, "re
 // handlePromoteCandidates: POST /api/rules/candidates/promote?fingerprint=...
 func (s *Server) handlePromoteCandidates(w http.ResponseWriter, r *http.Request) {
 	if s.Analyzer == nil {
-		writeError(w, http.StatusServiceUnavailable, "analyzer tidak aktif")
+		writeError(w, http.StatusServiceUnavailable, "analyzer is not enabled")
 		return
 	}
 	res, err := s.Analyzer.PromoteCandidates(r.Context(), r.URL.Query().Get("fingerprint"))
@@ -1417,8 +1417,8 @@ func (s *Server) handleProposeRules(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, analysis.ErrAIDisabled):
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case err != nil:
-		s.Log.Error("usulan aturan gagal", "err", err)
-		writeError(w, http.StatusBadGateway, "usulan aturan gagal, cek log server")
+		s.Log.Error("rule proposal failed", "err", err)
+		writeError(w, http.StatusBadGateway, "rule proposal failed; check the server logs")
 	default:
 		writeJSON(w, http.StatusOK, res)
 	}
@@ -1430,7 +1430,7 @@ var ruleStatuses = map[string]bool{"proposed": true, "active": true, "rejected":
 func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id aturan harus angka")
+		writeError(w, http.StatusBadRequest, "rule id must be a number")
 		return
 	}
 	var body struct {
@@ -1438,7 +1438,7 @@ func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {
 		By     string `json:"by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || !ruleStatuses[body.Status] {
-		writeError(w, http.StatusBadRequest, "body harus JSON: {\"status\": \"active|rejected|proposed\", \"by\": \"...\"}")
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"status\": \"active|rejected|proposed\", \"by\": \"...\"}")
 		return
 	}
 	if s.User != nil {
@@ -1448,25 +1448,25 @@ func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {
 	}
 	body.By = strings.TrimSpace(body.By)
 	if body.By == "" {
-		writeError(w, http.StatusBadRequest, "isi \"by\" dengan nama yang memutuskan")
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person making the decision")
 		return
 	}
 	rule, err := s.Store.DecideRule(r.Context(), id, body.Status, body.By)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "aturan tidak ditemukan")
+		writeError(w, http.StatusNotFound, "rule not found")
 		return
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.Log.Info("aturan diputuskan", "id", id, "status", body.Status, "by", body.By)
+	s.Log.Info("rule decided", "id", id, "status", body.Status, "by", body.By)
 	writeJSON(w, http.StatusOK, rule)
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {
-	s.Log.Error("request gagal", "err", err)
-	writeError(w, http.StatusInternalServerError, "terjadi kesalahan, cek log server")
+	s.Log.Error("request failed", "err", err)
+	writeError(w, http.StatusInternalServerError, "something went wrong; check the server logs")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -1486,7 +1486,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	k, err := s.Store.Knowledge(r.Context(), r.PathValue("fingerprint"))
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "kelompok tidak ditemukan, atau belum punya kemunculan gagal")
+		writeError(w, http.StatusNotFound, "group not found, or it has no failed occurrence yet")
 		return
 	}
 	if err != nil {
@@ -1504,7 +1504,7 @@ func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
 	file := strings.TrimSpace(r.URL.Query().Get("file"))
 	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
 	if (file == "") == (endpoint == "") {
-		writeError(w, http.StatusBadRequest, "isi salah satu: file=... atau endpoint=...")
+		writeError(w, http.StatusBadRequest, "provide one of: file=... or endpoint=...")
 		return
 	}
 	var tests []store.ImpactedTest
@@ -1528,17 +1528,17 @@ var runToken = regexp.MustCompile(`^[A-Za-z0-9-]{1,100}$`)
 // Playwright baru menutup launch setelah semua reporter selesai (termasuk reporter Redline yang memanggil ini).
 func (s *Server) handleReportPortal(w http.ResponseWriter, r *http.Request) {
 	if s.ReportPortal == nil {
-		writeError(w, http.StatusNotFound, "integrasi ReportPortal mati (REPORTPORTAL_URL kosong)")
+		writeError(w, http.StatusNotFound, "ReportPortal integration is disabled (REPORTPORTAL_URL is empty)")
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "id run tidak valid")
+		writeError(w, http.StatusBadRequest, "invalid run id")
 		return
 	}
 	token := r.URL.Query().Get("token")
 	if !runToken.MatchString(token) {
-		writeError(w, http.StatusBadRequest, "token harus huruf, angka, atau tanda hubung (maksimal 100)")
+		writeError(w, http.StatusBadRequest, "token may only contain letters, digits or dashes (max 100)")
 		return
 	}
 	go func() {
@@ -1546,10 +1546,10 @@ func (s *Server) handleReportPortal(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		res, err := s.ReportPortal.Sync(ctx, id, token)
 		if err != nil {
-			s.Log.Warn("ReportPortal tidak bisa diisi", "run", id, "err", err)
+			s.Log.Warn("ReportPortal could not be filled", "run", id, "err", err)
 			return
 		}
-		s.Log.Info("ReportPortal diisi", "run", id, "launch", res.Launch, "updated", res.Updated,
+		s.Log.Info("ReportPortal filled", "run", id, "launch", res.Launch, "updated", res.Updated,
 			"unclear", res.Unclear, "labelled", res.Labelled, "unmatched", res.Unmatched)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted", "run": id})

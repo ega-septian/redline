@@ -29,7 +29,7 @@ func (d *Document) Violations(calls []report.HTTPCall) []string {
 		resp, documented := responses[strconv.Itoa(c.Status)]
 		if !documented {
 			if _, hasDefault := responses["default"]; !hasDefault {
-				out = append(out, fmt.Sprintf("%s: status %d tidak ada di kontrak (yang terdokumentasi: %s)",
+				out = append(out, fmt.Sprintf("%s: status %d is not in the contract (documented: %s)",
 					prefix, c.Status, strings.Join(statusCodes(responses), ", ")))
 			}
 			continue
@@ -101,7 +101,7 @@ func (d *Document) compare(schemaV, shape any, path string, depth int, out *[]st
 		return
 	}
 	if !kindMatches(want, got, schema) {
-		*out = append(*out, fmt.Sprintf("%s bertipe %s, kontrak: %s", at, got, describeKind(want, schema)))
+		*out = append(*out, fmt.Sprintf("%s has type %s, contract: %s", at, got, describeKind(want, schema)))
 		return
 	}
 	switch want {
@@ -120,7 +120,7 @@ func (d *Document) compare(schemaV, shape any, path string, depth int, out *[]st
 			child := join(path, name)
 			v, present := obj[name]
 			if !present {
-				*out = append(*out, fmt.Sprintf("field %s ada di kontrak tapi tidak ada di response", child))
+				*out = append(*out, fmt.Sprintf("field %s is in the contract but missing from the response", child))
 				continue
 			}
 			d.compare(props[name], v, child, depth+1, out)
@@ -185,7 +185,7 @@ func kindMatches(want, got string, schema map[string]any) bool {
 
 func describeKind(want string, schema map[string]any) string {
 	if nullable, _ := schema["nullable"].(bool); nullable {
-		return want + " atau null"
+		return want + " or null"
 	}
 	return want
 }

@@ -65,7 +65,7 @@ type coverageResponse struct {
 func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
-		writeError(w, http.StatusBadRequest, "project wajib diisi")
+		writeError(w, http.StatusBadRequest, "project is required")
 		return
 	}
 	snapshots, err := s.Store.ContractSnapshots(r.Context(), project, 20)
