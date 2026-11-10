@@ -60,8 +60,11 @@ The image builds the React UI and the Go server, so Go and Node are not needed o
 ```bash
 export REDLINE_API_KEY=$(openssl rand -hex 32)
 docker compose --profile full up -d --build
-open http://localhost:8787/ui/        # sign in with REDLINE_API_KEY
+open http://localhost:8787/ui/        # first run: create the admin account
 ```
+
+`REDLINE_API_KEY` is the machine key for the reporter, fixture and CLI; the UI signs in with the
+admin username/password created on first run.
 
 `docker compose up -d` still starts only Neo4j for local `go run` development. The full profile binds
 the server to `127.0.0.1:8787`.
@@ -193,19 +196,31 @@ on a non-loopback host without one.
 # server .env
 HOST=0.0.0.0
 REDLINE_API_KEY=$(openssl rand -hex 32)
-# optional: one key per person, used for API clients and label audit
-# REDLINE_USERS=ega:key-ega,budi:key-budi
+# optional: extra API keys for other projects or people
+# REDLINE_USERS=project-a:key-a,project-b:key-b
 
 # every Playwright project .env
 REDLINE_URL=http://your-server:8787
 REDLINE_API_KEY=<the same key>
 ```
 
-A user key still works for API clients and label audit, but the UI now uses the admin account.
-On a fresh install with no admin, `/ui/login` redirects to `/ui/register`; create the first admin
-username/password there. Registration is only available until the first account exists.
-After that, `/ui/login` asks for the username/password, and **Account** in the sidebar lets the admin
-change the password. Finish registration before exposing the server on a network.
+The UI uses the admin account. On a fresh install with no admin, `/ui/login` redirects to
+`/ui/register`; create the first admin username/password there. Registration is only available until
+the first account exists. After that, `/ui/login` asks for the username/password, and **Account** in
+the sidebar lets the admin change the password. Finish registration before exposing the server on a
+network.
+
+Additional `REDLINE_USERS` keys still work for API clients. To give another project access:
+
+1. Generate a key on the server with `openssl rand -hex 32`.
+2. Put it in the server `.env` as `REDLINE_API_KEY` (or as a named entry in `REDLINE_USERS`) and restart.
+3. Share the server URL and the key through a secret manager, never through Git.
+4. In the other project set `REDLINE_URL` and `REDLINE_API_KEY`, and add the key as a CI secret.
+5. Install `redline-playwright` at the same release as the server and add the reporter.
+
+Revoke a key by removing it from the environment and restarting; UI sessions stay valid because they
+are signed with a separate secret stored in Neo4j. Generating and revoking keys from the Config page
+is the next step; until then the admin provisions keys through the environment.
 
 `REDLINE_API_KEY` and `REDLINE_USERS` remain the machine/CI credentials: API clients send
 `Authorization: Bearer <key>`. The UI session is a signed, HttpOnly cookie for 12 hours; API reads accept
@@ -230,7 +245,7 @@ From your Playwright project:
 | Client env variable   | Effect                                                  |
 | --------------------- | ------------------------------------------------------- |
 | `REDLINE_URL`         | Server address, default `http://localhost:8787`         |
-| `REDLINE_API_KEY`     | The server's API key, if it has one                     |
+| `REDLINE_API_KEY`     | Bearer key for the reporter, fixture and CLI            |
 | `REDLINE_AI=1`        | Explain failures with Claude                            |
 | `REDLINE_AI_MAX`      | Maximum AI analyses per run, default `10`               |
 | `REDLINE_ARTIFACTS=0` | Do not upload trace/screenshot files for failed tests   |
