@@ -85,14 +85,16 @@ type Store interface {
 	ListGroupsForProject(ctx context.Context, statuses []string, limit int, project string) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
-	AutoAcceptStats(ctx context.Context) (store.AutoAcceptStats, error)
+	AutoAcceptStats(ctx context.Context, project string) (store.AutoAcceptStats, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
+	ConfirmAcceptanceBulk(ctx context.Context, ids []string, by string) (int, error)
 	SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error
 	SetTriageStatusBulk(ctx context.Context, ids []string, status, by string) (int, error)
 	SetTriageOwnerBulk(ctx context.Context, ids []string, owner, by string) (int, error)
 	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
 	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
+	ShadowStats(ctx context.Context) ([]store.ShadowStat, error)
 	ListRuleCandidates(ctx context.Context, fingerprint, status string) ([]store.RuleCandidate, error)
 	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
 	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
@@ -227,10 +229,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/label", s.handleLabel)
 	mux.HandleFunc("PUT /api/groups/triage", s.handleTriageBulk)
 	mux.HandleFunc("PUT /api/groups/triage/owner", s.handleTriageOwnerBulk)
+	mux.HandleFunc("POST /api/groups/accept", s.handleConfirmAcceptanceBulk)
 	mux.HandleFunc("PUT /api/groups/{fingerprint}/triage", s.handleTriage)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/fix", s.handleFix)
 	mux.HandleFunc("POST /api/groups/{fingerprint}/experiments", s.handleSaveExperiment)
 	mux.HandleFunc("GET /api/rules", s.handleListRules)
+	mux.HandleFunc("GET /api/rules/shadow/stats", s.handleShadowStats)
 	mux.HandleFunc("GET /api/rules/candidates", s.handleListRuleCandidates)
 	mux.HandleFunc("POST /api/rules/candidates/promote", s.handlePromoteCandidates)
 	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
@@ -1261,6 +1265,40 @@ func (s *Server) handleTriageOwnerBulk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
 }
 
+// handleConfirmAcceptanceBulk: POST /api/groups/accept
+// {"fingerprints":["..."],"by":"ega"} — promote auto-accepted groups to human truth.
+func (s *Server) handleConfirmAcceptanceBulk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Fingerprints []string `json:"fingerprints"`
+		By           string   `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "request body must be JSON: {\"fingerprints\": [...], \"by\": \"...\"}")
+		return
+	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.By = strings.TrimSpace(body.By)
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person confirming the diagnosis")
+		return
+	}
+	ids, err := cleanFingerprints(body.Fingerprints)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	n, err := s.Store.ConfirmAcceptanceBulk(r.Context(), ids, body.By)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"confirmed": n})
+}
+
 func cleanFingerprints(ids []string) ([]string, error) {
 	seen := map[string]bool{}
 	out := []string{}
@@ -1384,7 +1422,7 @@ func (s *Server) handleScoreboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status != "" && !ruleStatuses[status] {
-		writeError(w, http.StatusBadRequest, "status must be proposed, active or rejected")
+		writeError(w, http.StatusBadRequest, "status must be proposed, shadow, active or rejected")
 		return
 	}
 	rules, err := s.Store.ListRules(r.Context(), status)
@@ -1393,6 +1431,16 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, rules)
+}
+
+// handleShadowStats: GET /api/rules/shadow/stats — shadow matches compared with human labels.
+func (s *Server) handleShadowStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.Store.ShadowStats(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // handleListRuleCandidates: GET /api/rules/candidates?status=draft|promoted|rejected|expired
@@ -1442,7 +1490,7 @@ func (s *Server) handleProposeRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var ruleStatuses = map[string]bool{"proposed": true, "active": true, "rejected": true}
+var ruleStatuses = map[string]bool{"proposed": true, "shadow": true, "active": true, "rejected": true}
 
 // handleDecideRule: PUT /api/rules/{id} {"status": "active", "by": "ega"}
 func (s *Server) handleDecideRule(w http.ResponseWriter, r *http.Request) {

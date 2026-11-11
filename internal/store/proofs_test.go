@@ -14,6 +14,7 @@ func TestProofs(t *testing.T) {
 	t.Run("Experiments", func(t *testing.T) { testExperiments(t, newStore(t)) })
 	t.Run("Scoreboard", func(t *testing.T) { testScoreboard(t, newStore(t)) })
 	t.Run("Rules", func(t *testing.T) { testRules(t, newStore(t)) })
+	t.Run("ShadowRules", func(t *testing.T) { testShadowRules(t, newStore(t)) })
 	t.Run("ConfirmedCases", func(t *testing.T) { testConfirmedCases(t, newStore(t)) })
 }
 
@@ -181,6 +182,57 @@ func testRules(t *testing.T, b *store.Store) {
 	}
 	if _, err := b.DecideRule(ctx, 9999, "active", "ega"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("aturan tidak ada: mau ErrNotFound, dapat %v", err)
+	}
+}
+
+func testShadowRules(t *testing.T, b *store.Store) {
+	ctx := context.Background()
+	fps, _, _ := passThenFail(t, b)
+	id, err := b.SaveRule(ctx, store.LearnedRule{
+		Pattern: `received Promise`, Category: "test_bug", Summary: "Lupa await.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, err := b.DecideRule(ctx, id, "shadow", "ega")
+	if err != nil || rule.Status != "shadow" {
+		t.Fatalf("shadow rule = %+v, %v", rule, err)
+	}
+	shadow, err := b.ShadowRules(ctx)
+	if err != nil || len(shadow) != 1 || shadow[0].ID != id {
+		t.Fatalf("shadow rules = %+v, %v", shadow, err)
+	}
+	if active, _ := b.ActiveRules(ctx); len(active) != 0 {
+		t.Errorf("shadow tidak boleh aktif: %+v", active)
+	}
+
+	order, brands, register := fps["order dibayar"], fps["brands punya slug"], fps["register user"]
+	if err := b.RecordShadowMatch(ctx, rule, order, "order"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RecordShadowMatch(ctx, rule, order, "order"); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	if err := b.RecordShadowMatch(ctx, rule, brands, "brands"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RecordShadowMatch(ctx, rule, register, "register"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetLabel(ctx, order, "test_bug", "setuju", "ega"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SetLabel(ctx, brands, "backend_bug", "beda", "ega"); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := b.ShadowStats(ctx)
+	if err != nil || len(stats) != 1 {
+		t.Fatalf("shadow stats = %+v, %v", stats, err)
+	}
+	got := stats[0]
+	if got.RuleID != id || got.Matches != 3 || got.Confirmed != 1 || got.Overridden != 1 ||
+		got.Pending != 1 || got.AgreementRate != 0.5 {
+		t.Errorf("shadow stats salah: %+v", got)
 	}
 }
 

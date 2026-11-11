@@ -370,7 +370,59 @@ func (s *Store) ActiveRules(ctx context.Context) ([]LearnedRule, error) {
 	return rules, nil
 }
 
-// DecideRule mengaktifkan atau menolak aturan. status: active / rejected / proposed.
+// ShadowRules returns rules that are evaluated for evidence but never change an analysis.
+func (s *Store) ShadowRules(ctx context.Context) ([]LearnedRule, error) {
+	return s.ListRules(ctx, "shadow")
+}
+
+// RecordShadowMatch stores one rule/group evaluation. MERGE keeps it idempotent across re-analysis.
+func (s *Store) RecordShadowMatch(ctx context.Context, r LearnedRule, groupID, test string) error {
+	_, err := s.query(ctx, `
+		MATCH (f:Failure {id: $groupId}), (rule:Rule {id: $ruleId})
+		MERGE (m:ShadowMatch {ruleId: $ruleId, groupId: $groupId})
+		ON CREATE SET m.createdAt = datetime()
+		SET m.category = $category, m.summary = $summary, m.test = $test
+		MERGE (m)-[:SHADOW_OF]->(f)
+		MERGE (m)-[:FROM_RULE]->(rule)`,
+		map[string]any{"groupId": groupID, "ruleId": r.ID, "category": r.Category,
+			"summary": r.Summary, "test": test})
+	return err
+}
+
+// ShadowStats compares shadow matches with human labels. Pending means no human label yet.
+func (s *Store) ShadowStats(ctx context.Context) ([]ShadowStat, error) {
+	res, err := s.query(ctx, `
+		MATCH (m:ShadowMatch)-[:FROM_RULE]->(r:Rule)
+		OPTIONAL MATCH (m)-[:SHADOW_OF]->(f:Failure)
+		WITH r, m, coalesce(f.manualCategory, '') AS human
+		RETURN r.id AS id, r.pattern AS pattern, r.category AS category, r.summary AS summary,
+			count(m) AS matches,
+			sum(CASE WHEN human <> '' AND human = m.category THEN 1 ELSE 0 END) AS confirmed,
+			sum(CASE WHEN human <> '' AND human <> m.category THEN 1 ELSE 0 END) AS overridden,
+			sum(CASE WHEN human = '' THEN 1 ELSE 0 END) AS pending
+		ORDER BY r.id`, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []ShadowStat{}
+	for _, rec := range res.Records {
+		m := rec.AsMap()
+		stat := ShadowStat{
+			RuleID: i64(m, "id"), Pattern: str(m, "pattern"), Category: str(m, "category"),
+			Summary: str(m, "summary"), Matches: int(i64(m, "matches")),
+			Confirmed: int(i64(m, "confirmed")), Overridden: int(i64(m, "overridden")),
+			Pending: int(i64(m, "pending")),
+		}
+		decided := stat.Confirmed + stat.Overridden
+		if decided > 0 {
+			stat.AgreementRate = float64(stat.Confirmed) / float64(decided)
+		}
+		out = append(out, stat)
+	}
+	return out, nil
+}
+
+// DecideRule mengaktifkan, menolak, atau memasukkan aturan ke shadow. status: active / rejected / proposed / shadow.
 func (s *Store) DecideRule(ctx context.Context, id int64, status, by string) (LearnedRule, error) {
 	res, err := s.query(ctx, `
 		MATCH (r:Rule {id: $id})

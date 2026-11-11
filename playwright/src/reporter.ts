@@ -317,6 +317,7 @@ export default class RedlineReporter implements Reporter {
       baseURL,
       summary,
       incidents,
+      this.curls,
     );
     await this.uploadArtifacts(summary.run_id, baseURL);
 
@@ -484,7 +485,13 @@ async function requestReportPortal(baseURL: string, runId: number) {
   }
 }
 
-function writeLastRun(file: string, url: string, r: IngestResult, incidents: IncidentView[]) {
+function writeLastRun(
+  file: string,
+  url: string,
+  r: IngestResult,
+  incidents: IncidentView[],
+  curls: Record<string, string>,
+) {
   const failures = incidents.map((v) => ({
     fingerprint: v.representative.group.fingerprint,
     test: v.representative.group.test,
@@ -492,6 +499,7 @@ function writeLastRun(file: string, url: string, r: IngestResult, incidents: Inc
     ids: v.rows.map((r) => r.id), // semua test di insiden ini (penyebab sama)
     status: v.representative.status,
     affected: v.rows.length,
+    curl: curls[v.representative.group.test] ?? "",
   }));
   writeFileSync(file, JSON.stringify({ url, run_id: r.run_id, failures }, null, 2));
 }

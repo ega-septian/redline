@@ -554,3 +554,15 @@ export type ApiAIUsage = {
   max_per_run: number;
   budget_exhausted: boolean;
 };
+
+export type ApiAutoAcceptStats = {
+  project?: string;
+  accepted: number;
+  confirmed: number;
+  overridden: number;
+  pending: number;
+  decided: number;
+  override_rate: number;
+  threshold: number;
+  warning: boolean;
+};

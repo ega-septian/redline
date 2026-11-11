@@ -353,6 +353,25 @@ func (s *Store) SetAcceptance(ctx context.Context, fingerprint, category, by, co
 	return nil
 }
 
+// ConfirmAcceptanceBulk promotes accepted groups to human truth in one transaction. Groups without
+// an automatic acceptance or with a human label already are left untouched.
+func (s *Store) ConfirmAcceptanceBulk(ctx context.Context, ids []string, by string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res, err := s.query(ctx, `
+		MATCH (f:Failure)
+		WHERE f.id IN $ids AND f.manualCategory IS NULL AND coalesce(f.acceptedCategory, '') <> ''
+		SET f.manualCategory = f.acceptedCategory, f.manualNote = 'Confirmed in bulk',
+			f.labeledBy = $by, f.labeledAt = datetime(),
+			f.acceptedOutcome = 'confirmed', f.acceptedDecidedAt = datetime(), f.acceptedDecidedBy = $by
+		RETURN count(f) AS n`, map[string]any{"ids": ids, "by": by})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Records[0].AsMap()["n"].(int64)), nil
+}
+
 // BackfillAcceptance marks existing high-confidence analyses as accepted, so groups created
 // before AUTO_ACCEPT existed get the same UI state without a manual re-analysis.
 func (s *Store) BackfillAcceptance(ctx context.Context) (int, error) {
@@ -374,26 +393,33 @@ func (s *Store) BackfillAcceptance(ctx context.Context) (int, error) {
 }
 
 // AutoAcceptStats counts how often automatic acceptance was confirmed or overridden by a human.
-func (s *Store) AutoAcceptStats(ctx context.Context) (AutoAcceptStats, error) {
+// An empty project means all projects.
+func (s *Store) AutoAcceptStats(ctx context.Context, project string) (AutoAcceptStats, error) {
 	res, err := s.query(ctx, `
 		MATCH (f:Failure) WHERE coalesce(f.acceptedCategory, '') <> ''
+			AND ($project = '' OR f.project = $project)
 		RETURN count(f) AS accepted,
 			sum(CASE WHEN f.acceptedOutcome = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
 			sum(CASE WHEN f.acceptedOutcome = 'overridden' THEN 1 ELSE 0 END) AS overridden,
-			sum(CASE WHEN coalesce(f.acceptedOutcome, '') = '' THEN 1 ELSE 0 END) AS pending`, nil)
+			sum(CASE WHEN coalesce(f.acceptedOutcome, '') = '' THEN 1 ELSE 0 END) AS pending`,
+		map[string]any{"project": project})
 	if err != nil {
 		return AutoAcceptStats{}, err
 	}
 	m := res.Records[0].AsMap()
 	stats := AutoAcceptStats{
+		Project:    project,
 		Accepted:   int(i64(m, "accepted")),
 		Confirmed:  int(i64(m, "confirmed")),
 		Overridden: int(i64(m, "overridden")),
 		Pending:    int(i64(m, "pending")),
+		Threshold:  AutoAcceptOverrideThreshold,
 	}
-	decided := stats.Confirmed + stats.Overridden
-	if decided > 0 {
-		stats.OverrideRate = float64(stats.Overridden) / float64(decided)
+	stats.Decided = stats.Confirmed + stats.Overridden
+	if stats.Decided > 0 {
+		stats.OverrideRate = float64(stats.Overridden) / float64(stats.Decided)
 	}
+	stats.Warning = stats.Decided >= AutoAcceptMinDecided &&
+		stats.OverrideRate > AutoAcceptOverrideThreshold
 	return stats, nil
 }

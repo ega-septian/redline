@@ -28,7 +28,7 @@ import {
 } from "@/lib/failure";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | FailureStatus | "needs_ai";
+type StatusFilter = "all" | FailureStatus | "needs_ai" | "accepted";
 type CategoryFilter = "all" | Category;
 type SortMode = "recent" | "oldest" | "occurrences";
 type TriageFilter = "active" | "all" | TriageStatus;
@@ -85,6 +85,13 @@ const statuses: Array<{
     id: "needs_ai",
     label: "Needs AI",
     hint: "No rule, AI or human diagnosis yet. Run AI or set the cause manually.",
+    align: "end",
+    wide: true,
+  },
+  {
+    id: "accepted",
+    label: "Accepted",
+    hint: "High-confidence groups accepted automatically and waiting for confirmation.",
     align: "end",
     wide: true,
   },
@@ -160,7 +167,11 @@ export function FailuresPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const [status, setStatus] = useState<StatusFilter>(() => {
     const value = params.get("status");
-    return value === "new" || value === "recurring" || value === "regressed" || value === "needs_ai"
+    return value === "new" ||
+      value === "recurring" ||
+      value === "regressed" ||
+      value === "needs_ai" ||
+      value === "accepted"
       ? value
       : "all";
   });
@@ -216,6 +227,14 @@ export function FailuresPage() {
     return triageScoped.filter((failure) => {
       if (status === "needs_ai") {
         if (!failure.needsAI) return false;
+      } else if (status === "accepted") {
+        if (
+          failure.acceptedBy === "" ||
+          failure.source === "human" ||
+          failure.source === "experiment"
+        ) {
+          return false;
+        }
       } else if (status !== "all" && failure.status !== status) {
         return false;
       }
@@ -300,6 +319,12 @@ export function FailuresPage() {
     : undefined;
 
   const selectedFailures = sorted.filter((failure) => selection.has(failure.fingerprint));
+  const selectedAccepted = selectedFailures.some(
+    (failure) =>
+      failure.acceptedBy !== "" &&
+      failure.source !== "human" &&
+      failure.source !== "experiment",
+  );
 
   async function refreshFailures() {
     await Promise.all([
@@ -330,6 +355,14 @@ export function FailuresPage() {
     onSuccess: async () => {
       setSelection(new Set());
       setBulkOwner("");
+      await refreshFailures();
+    },
+  });
+
+  const bulkConfirmMutation = useMutation({
+    mutationFn: () => api.confirmAcceptanceBulk([...selection]),
+    onSuccess: async () => {
+      setSelection(new Set());
       await refreshFailures();
     },
   });
@@ -444,7 +477,14 @@ export function FailuresPage() {
                   ? triageScoped.length
                   : item.id === "needs_ai"
                     ? triageScoped.filter((failure) => failure.needsAI).length
-                    : triageScoped.filter((failure) => failure.status === item.id).length;
+                    : item.id === "accepted"
+                      ? triageScoped.filter(
+                          (failure) =>
+                            failure.acceptedBy !== "" &&
+                            failure.source !== "human" &&
+                            failure.source !== "experiment",
+                        ).length
+                      : triageScoped.filter((failure) => failure.status === item.id).length;
               return (
                 <StatusFilterPill
                   key={item.id}
@@ -570,6 +610,15 @@ export function FailuresPage() {
           >
             Acknowledge
           </Button>
+          {selectedAccepted && (
+            <Button
+              variant="secondary"
+              onClick={() => bulkConfirmMutation.mutate()}
+              disabled={bulkConfirmMutation.isPending}
+            >
+              {bulkConfirmMutation.isPending ? "Confirming…" : "Confirm accepted"}
+            </Button>
+          )}
           <Button
             variant="secondary"
             onClick={() => bulkStatus.mutate("in_progress")}
@@ -614,13 +663,15 @@ export function FailuresPage() {
           <Button variant="ghost" onClick={() => setSelection(new Set())}>
             Clear
           </Button>
-          {(bulkStatus.isError || bulkOwnerMutation.isError) && (
+          {(bulkStatus.isError || bulkOwnerMutation.isError || bulkConfirmMutation.isError) && (
             <span className="text-[11px] text-danger">
               {bulkStatus.error instanceof Error
                 ? bulkStatus.error.message
                 : bulkOwnerMutation.error instanceof Error
                   ? bulkOwnerMutation.error.message
-                  : "Bulk update failed"}
+                  : bulkConfirmMutation.error instanceof Error
+                    ? bulkConfirmMutation.error.message
+                    : "Bulk update failed"}
             </span>
           )}
         </section>

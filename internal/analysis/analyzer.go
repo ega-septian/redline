@@ -33,6 +33,8 @@ type Store interface {
 	SetAcceptance(ctx context.Context, fingerprint, category, by, confidence string) error
 	LatestProof(ctx context.Context, groupID string) (store.Experiment, error)
 	ActiveRules(ctx context.Context) ([]store.LearnedRule, error)
+	ShadowRules(ctx context.Context) ([]store.LearnedRule, error)
+	RecordShadowMatch(ctx context.Context, rule store.LearnedRule, groupID, test string) error
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
 	SaveRule(ctx context.Context, r store.LearnedRule) (int64, error)
 	SaveRuleCandidate(ctx context.Context, c store.RuleCandidate) (int64, error)
@@ -97,6 +99,7 @@ func (a *Analyzer) Analyze(ctx context.Context, fingerprint string, force bool) 
 	if err != nil {
 		return nil, false, err
 	}
+	a.shadow(ctx, facts)
 	res, cached, err := a.decide(ctx, fingerprint, facts, force)
 	if res != nil {
 		res.Similar = facts.Similar // supaya pengguna melihat referensi yang sama dengan yang dilihat AI
@@ -112,6 +115,7 @@ func (a *Analyzer) AnalyzeLocal(ctx context.Context, fingerprint string, force b
 	if err != nil {
 		return nil, err
 	}
+	a.shadow(ctx, facts)
 	if label := facts.Group.HumanLabel; label != "" {
 		summary := facts.Group.HumanNote
 		if summary == "" {
@@ -286,6 +290,25 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 		}
 	}
 	return res, false, nil
+}
+
+// shadow evaluates shadow rules against the error text and records what they would say. It never
+// feeds the result back into the analysis; promotion to a real rule still needs a human.
+func (a *Analyzer) shadow(ctx context.Context, f *store.Facts) {
+	rules, err := a.Store.ShadowRules(ctx)
+	if err != nil {
+		a.logger().Warn("shadow rules could not be read", "err", err)
+		return
+	}
+	for _, rule := range rules {
+		re := compileCached(rule.Pattern)
+		if re == nil || !re.MatchString(f.ErrorMessage) {
+			continue
+		}
+		if err := a.Store.RecordShadowMatch(ctx, rule, f.Group.Fingerprint, f.Group.TestKey); err != nil {
+			a.logger().Warn("shadow match could not be stored", "rule", rule.ID, "err", err)
+		}
+	}
 }
 
 // checkBudget menolak panggilan AI kalau biaya hari ini sudah mencapai batas. Kalau query gagal,

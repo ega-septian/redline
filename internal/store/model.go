@@ -474,11 +474,36 @@ type Group struct {
 
 // AutoAcceptStats is the calibration of automatic acceptance against human labels.
 type AutoAcceptStats struct {
+	Project      string  `json:"project,omitempty"`
 	Accepted     int     `json:"accepted"`
 	Confirmed    int     `json:"confirmed"`
 	Overridden   int     `json:"overridden"`
 	Pending      int     `json:"pending"`
+	Decided      int     `json:"decided"`
 	OverrideRate float64 `json:"override_rate"`
+	Threshold    float64 `json:"threshold"`
+	Warning      bool    `json:"warning"`
+}
+
+const (
+	// AutoAcceptOverrideThreshold is the override rate that triggers the warning once enough
+	// acceptances have been decided. It never disables auto-accept automatically.
+	AutoAcceptOverrideThreshold = 0.10
+	// AutoAcceptMinDecided avoids warning on a tiny sample.
+	AutoAcceptMinDecided = 10
+)
+
+// ShadowStat is the agreement of one shadow rule with human labels.
+type ShadowStat struct {
+	RuleID        int64   `json:"rule_id"`
+	Pattern       string  `json:"pattern"`
+	Category      string  `json:"category"`
+	Summary       string  `json:"summary"`
+	Matches       int     `json:"matches"`
+	Confirmed     int     `json:"confirmed"`
+	Overridden    int     `json:"overridden"`
+	Pending       int     `json:"pending"`
+	AgreementRate float64 `json:"agreement_rate"`
 }
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.
@@ -517,7 +542,7 @@ type LearnedRule struct {
 	Category    string     `json:"category"`
 	Summary     string     `json:"summary"`
 	NextStep    string     `json:"next_step"`
-	Status      string     `json:"status"` // proposed / active / rejected
+	Status      string     `json:"status"` // proposed / shadow / active / rejected
 	LearnedFrom []string   `json:"learned_from"`
 	Hits        int        `json:"hits"`
 	AlsoMatches int        `json:"also_matches"`

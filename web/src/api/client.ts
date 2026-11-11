@@ -10,6 +10,7 @@ import type {
   ApiSourceCheckEvent,
   ApiCoverage,
   ApiAIUsage,
+  ApiAutoAcceptStats,
   ApiConfig,
   ApiContractSource,
   ApiCreatedKey,
@@ -170,6 +171,12 @@ export const api = {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
       body: JSON.stringify({ fingerprints, status, by: "ui" }),
     }),
+  confirmAcceptanceBulk: (fingerprints: string[]) =>
+    request<{ confirmed: number }>("/api/groups/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+      body: JSON.stringify({ fingerprints, by: "ui" }),
+    }),
   triageOwnerBulk: (fingerprints: string[], owner: string) =>
     request<TriageBulkResult>("/api/groups/triage/owner", {
       method: "PUT",
@@ -215,6 +222,10 @@ export const api = {
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
   config: () => request<ApiConfig>("/api/config"),
   aiUsage: () => request<ApiAIUsage>("/api/ai/usage"),
+  autoAcceptStats: (project: string) =>
+    request<ApiAutoAcceptStats>(
+      `/api/auto-accept/stats${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    ),
   sourceHistory: (project: string, limit = 20) =>
     request<ApiSourceCheckEvent[]>(
       `/api/config/contracts/history?project=${encodeURIComponent(project)}&limit=${limit}`,

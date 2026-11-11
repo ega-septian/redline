@@ -58,10 +58,10 @@ func TestAIUsageUnlimitedBudget(t *testing.T) {
 
 func TestAutoAcceptStats(t *testing.T) {
 	srv := &Server{Store: &fakeStore{autoAccept: store.AutoAcceptStats{
-		Accepted: 4, Confirmed: 2, Overridden: 1, Pending: 1, OverrideRate: 1.0 / 3.0,
+		Accepted: 4, Confirmed: 2, Overridden: 1, Pending: 1, Decided: 3, OverrideRate: 1.0 / 3.0,
 	}}}
 	rec := httptest.NewRecorder()
-	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auto-accept/stats", nil))
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auto-accept/stats?project=toolshop", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -69,8 +69,8 @@ func TestAutoAcceptStats(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Accepted != 4 || body.Confirmed != 2 || body.Overridden != 1 || body.Pending != 1 ||
-		body.OverrideRate != 1.0/3.0 {
+	if body.Project != "toolshop" || body.Accepted != 4 || body.Confirmed != 2 || body.Overridden != 1 ||
+		body.Pending != 1 || body.Decided != 3 || body.OverrideRate != 1.0/3.0 {
 		t.Fatalf("stats = %+v", body)
 	}
 }
