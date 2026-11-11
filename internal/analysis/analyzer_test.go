@@ -374,3 +374,31 @@ func TestListGroupsIncludesLatestAnalysis(t *testing.T) {
 	}
 	t.Fatal("analysed group not in ListGroups")
 }
+
+func TestAnalyze_AlwaysModeAndRunLimit(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fake := &fakeLLM{verdict: verdict{
+		Deviates: "api", Category: "backend_bug", Confidence: "high",
+		Summary: "The API response changed.", Evidence: []string{"Test code changed: no"},
+	}}
+	a := &Analyzer{Store: s, LLM: fake, AIMode: "always", MaxAIPerRun: 1}
+
+	// The first group is high-confidence according to rules, but always mode still asks AI.
+	res, _, err := a.Analyze(ctx, fps["brands punya slug"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "ai" || fake.calls != 1 {
+		t.Fatalf("always mode should call AI: %+v calls=%d", res, fake.calls)
+	}
+
+	// A forced re-analysis of the same run falls back to rules after the per-run cap.
+	res, _, err = a.Analyze(ctx, fps["brands punya slug"], true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "rule" || fake.calls != 1 {
+		t.Errorf("per-run limit should fall back to rules: %+v calls=%d", res, fake.calls)
+	}
+}

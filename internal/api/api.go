@@ -1061,6 +1061,9 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, analysis.ErrAIDisabled):
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
+	case errors.Is(err, analysis.ErrBudgetExceeded), errors.Is(err, analysis.ErrAIRunLimit):
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
 	case err != nil:
 		s.Log.Error("analysis failed", "fingerprint", fingerprint, "err", err)
 		writeError(w, http.StatusBadGateway, "analysis failed; check the server logs")

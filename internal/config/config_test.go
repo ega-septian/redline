@@ -128,3 +128,45 @@ func TestLoad_RejectsInvalidUsers(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_AIMode(t *testing.T) {
+	t.Setenv("AI_MODE", "always")
+	t.Setenv("AI_MAX_PER_RUN", "7")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AIMode != "always" || cfg.AIMaxPerRun != 7 {
+		t.Errorf("AI mode/limit = %q/%d", cfg.AIMode, cfg.AIMaxPerRun)
+	}
+}
+
+func TestLoad_AIModeDefaults(t *testing.T) {
+	t.Setenv("AI_MODE", "")
+	t.Setenv("AI_MAX_PER_RUN", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AIMode != "fallback" || cfg.AIMaxPerRun != 20 {
+		t.Errorf("AI defaults = %q/%d", cfg.AIMode, cfg.AIMaxPerRun)
+	}
+}
+
+func TestLoad_RejectsInvalidAIMode(t *testing.T) {
+	t.Setenv("AI_MODE", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid AI_MODE must be rejected")
+	}
+}
+
+func TestLoad_RejectsInvalidAIMaxPerRun(t *testing.T) {
+	for _, raw := range []string{"-1", "many"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("AI_MAX_PER_RUN", raw)
+			if _, err := Load(); err == nil {
+				t.Fatalf("AI_MAX_PER_RUN=%q must be rejected", raw)
+			}
+		})
+	}
+}

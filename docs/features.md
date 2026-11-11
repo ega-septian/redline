@@ -13,6 +13,12 @@ The Failures page is the main workspace:
 - Labels and triage status are stored with the person who changed them. `resolved` is automatic when the test passes again.
 - The **Knowledge** tab builds a Markdown page from stored facts: test identity, cause, evidence, history, graph facts and proof experiments. It never calls an LLM.
 
+### AI modes
+
+`AI_MODE=fallback` (default) asks AI only when rules are not high-confidence. `AI_MODE=always` asks AI for every requested failure group and keeps the rule result as fallback if AI is disabled, over budget, or over the per-run limit.
+
+Analyses are requested by `REDLINE_AI=1 npx playwright test`, `npx redline analyze`, or the Analyze action in the UI. The server does not call AI for every ingest automatically. `AI_MAX_PER_RUN` defaults to 20 and falls back to rules after the limit; `AI_DAILY_BUDGET_USD` caps the total daily spend.
+
 ## Runs and comparison
 
 The Runs page lists every uploaded run with branch, commit, source, result counts, duration and who triggered it. Open a run to see:

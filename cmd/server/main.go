@@ -128,7 +128,8 @@ func run(log *slog.Logger) error {
 		log.Info("retention disabled (RETENTION_DAYS=0); all test details are kept")
 	}
 
-	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log}
+	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log,
+		AIMode: cfg.AIMode, MaxAIPerRun: cfg.AIMaxPerRun}
 	price, knownPrice := llm.PricingFor(cfg.AnthropicModel)
 	if cfg.AnthropicInputPrice > 0 || cfg.AnthropicOutputPrice > 0 {
 		price = llm.Pricing{InputPerMTok: cfg.AnthropicInputPrice, OutputPerMTok: cfg.AnthropicOutputPrice}
@@ -145,7 +146,7 @@ func run(log *slog.Logger) error {
 	}
 	if cfg.AnthropicAPIKey != "" {
 		analyzer.LLM = llm.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
-		log.Info("AI analysis enabled", "model", cfg.AnthropicModel)
+		log.Info("AI analysis enabled", "model", cfg.AnthropicModel, "mode", cfg.AIMode, "max_per_run", cfg.AIMaxPerRun)
 	} else {
 		log.Info("AI analysis disabled (ANTHROPIC_API_KEY is empty); only deterministic rules run")
 	}

@@ -21,6 +21,10 @@ var ErrAIDisabled = errors.New("AI analysis is not enabled: set ANTHROPIC_API_KE
 // ErrBudgetExceeded: biaya AI hari ini sudah mencapai AI_DAILY_BUDGET_USD.
 var ErrBudgetExceeded = errors.New("daily AI budget reached")
 
+// ErrAIRunLimit: AI_MAX_PER_RUN sudah mencapai batas untuk run ini dan tidak ada hasil aturan
+// yang bisa dipakai sebagai fallback.
+var ErrAIRunLimit = errors.New("AI per-run limit reached")
+
 type Store interface {
 	Facts(ctx context.Context, fingerprint string) (*store.Facts, error)
 	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
@@ -65,6 +69,14 @@ type Analyzer struct {
 	// DailyBudgetUSD: batas biaya AI per hari, USD (0 = tanpa batas). Biaya dicatat di Store
 	// setiap kali AI menjawab, jadi analisis ulang tetap terhitung.
 	DailyBudgetUSD float64
+	// AIMode: "fallback" (default) or "always". Always calls AI even when a rule is confident,
+	// keeping the rule result as fallback if AI is unavailable.
+	AIMode string
+	// MaxAIPerRun limits AI calls per failing run (0 = unlimited).
+	MaxAIPerRun int
+
+	aiMu    sync.Mutex
+	aiCalls map[int64]int
 }
 
 // Analyze menentukan penyebab satu kelompok kegagalan. Urutannya, dari bukti terkuat:
@@ -183,7 +195,7 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	// Aturan yang belum yakin (misalnya "kode test berubah") tidak menghentikan AI: AI membaca kodenya dan bisa
 	// menunjuk kesalahan yang spesifik. Hasil aturan dipakai lagi kalau AI mati atau gagal.
 	var fallback *store.Analysis
-	if res != nil && res.Confidence != "high" && a.LLM != nil {
+	if res != nil && a.LLM != nil && (a.AIMode == "always" || res.Confidence != "high") {
 		fallback, res = res, nil
 	}
 	if res == nil && !force {
@@ -203,6 +215,13 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 				return nil, false, err
 			}
 			a.logger().Warn("AI budget reached; using rule result", "fingerprint", fingerprint, "err", err)
+			res = fallback
+		} else if !a.takeAISlot(facts.FailRunID) {
+			if fallback == nil {
+				return nil, false, ErrAIRunLimit
+			}
+			a.logger().Warn("AI per-run limit reached; using rule result", "fingerprint", fingerprint,
+				"run", facts.FailRunID, "limit", a.MaxAIPerRun)
 			res = fallback
 		} else if res, err = a.ask(ctx, facts); err != nil {
 			if fallback == nil {
@@ -255,6 +274,22 @@ func (a *Analyzer) checkBudget(ctx context.Context) error {
 		return fmt.Errorf("%w: $%.4f of $%.2f", ErrBudgetExceeded, spent, a.DailyBudgetUSD)
 	}
 	return nil
+}
+
+func (a *Analyzer) takeAISlot(runID int64) bool {
+	if a.MaxAIPerRun <= 0 {
+		return true
+	}
+	a.aiMu.Lock()
+	defer a.aiMu.Unlock()
+	if a.aiCalls == nil {
+		a.aiCalls = map[int64]int{}
+	}
+	if a.aiCalls[runID] >= a.MaxAIPerRun {
+		return false
+	}
+	a.aiCalls[runID]++
+	return true
 }
 
 func (a *Analyzer) ask(ctx context.Context, f *store.Facts) (*store.Analysis, error) {
