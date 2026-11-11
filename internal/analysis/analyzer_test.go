@@ -258,6 +258,33 @@ func TestAnalyze_AutoAcceptOff(t *testing.T) {
 	}
 }
 
+func TestAnalyze_ShadowRulesDoNotChangeResult(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	id, err := s.SaveRule(ctx, store.LearnedRule{
+		Pattern: `(?i).`, Category: "test_bug", Summary: "Shadow.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideRule(ctx, id, "shadow", "ega"); err != nil {
+		t.Fatal(err)
+	}
+	a := &Analyzer{Store: s}
+	res, _, err := a.Analyze(ctx, fps["brands punya slug"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "rule" || res.Category != "backend_bug" {
+		t.Errorf("shadow rule tidak boleh mengubah hasil: %+v", res)
+	}
+	stats, err := s.ShadowStats(ctx)
+	if err != nil || len(stats) != 1 || stats[0].RuleID != id || stats[0].Matches != 1 ||
+		stats[0].Category != "test_bug" {
+		t.Errorf("shadow match tidak tercatat: %+v %v", stats, err)
+	}
+}
+
 func TestAnalyzeLocalNeedsAI(t *testing.T) {
 	s, fps := setup(t)
 	ctx := context.Background()

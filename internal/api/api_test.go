@@ -44,6 +44,8 @@ type fakeStore struct {
 	apiKeyErr          error
 	spend              float64
 	autoAccept         store.AutoAcceptStats
+	shadowStats        []store.ShadowStat
+	bulkConfirmed      int
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
 	runErrors          []store.Run
@@ -497,8 +499,18 @@ func (f *fakeStore) GetGroup(_ context.Context, _ string) (store.Group, []store.
 	}
 	return store.Group{}, nil, store.ErrNotFound
 }
-func (f *fakeStore) AutoAcceptStats(context.Context) (store.AutoAcceptStats, error) {
-	return f.autoAccept, nil
+func (f *fakeStore) AutoAcceptStats(_ context.Context, project string) (store.AutoAcceptStats, error) {
+	stats := f.autoAccept
+	stats.Project = project
+	return stats, nil
+}
+
+func (f *fakeStore) ShadowStats(context.Context) ([]store.ShadowStat, error) {
+	return f.shadowStats, nil
+}
+
+func (f *fakeStore) ConfirmAcceptanceBulk(context.Context, []string, string) (int, error) {
+	return f.bulkConfirmed, nil
 }
 
 func (f *fakeStore) GetAnalysis(context.Context, string, string) (store.Analysis, error) {
@@ -968,6 +980,16 @@ func TestTriage(t *testing.T) {
 	if rec := do(h, http.MethodPut, "/api/groups/triage",
 		strings.NewReader(`{"fingerprints":[],"status":"open","by":"ega"}`)); rec.Code != http.StatusBadRequest {
 		t.Errorf("bulk tanpa fingerprint = %d, want 400", rec.Code)
+	}
+	fs.bulkConfirmed = 2
+	rec = do(h, http.MethodPost, "/api/groups/accept",
+		strings.NewReader(`{"fingerprints":["a","b"],"by":"ega"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"confirmed": 2`) {
+		t.Errorf("bulk accept = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, http.MethodPost, "/api/groups/accept",
+		strings.NewReader(`{"fingerprints":[],"by":"ega"}`)); rec.Code != http.StatusBadRequest {
+		t.Errorf("bulk accept tanpa fingerprint = %d, want 400", rec.Code)
 	}
 }
 

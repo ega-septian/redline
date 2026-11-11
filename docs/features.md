@@ -21,7 +21,9 @@ Analyses are requested by `REDLINE_AI=1 npx playwright test`, `npx redline analy
 
 `AUTO_ACCEPT=high` (default) marks high-confidence rule/AI results as **accepted**, so the Failures page does not ask for confirmation on clear cases. Accepted is not human truth: it is a separate field, and the scoreboard and rule learning still use only human labels and proven experiments. Lower-confidence re-analysis clears a stale acceptance; a human label always wins. On startup Redline backfills existing high-confidence analyses, so groups created before the feature get the same state without a manual re-analysis.
 
-Calibration is available from `GET /api/auto-accept/stats` and `npx redline score`: how many groups were accepted, confirmed by a human, overridden to another category, still pending, and the override rate of decided cases. Use a high override rate as a signal to set `AUTO_ACCEPT=off` or tighten the confidence rule.
+Calibration is available from `GET /api/auto-accept/stats` and `npx redline score`: how many groups were accepted, confirmed by a human, overridden to another category, still pending, and the override rate of decided cases. The endpoint accepts `?project=...`, and `npx redline score --project=<name>` scopes the same numbers. Once at least 10 cases are decided, an override rate above 10% raises a warning in the API response, the CLI and the Config card. The warning never disables auto-accept automatically; set `AUTO_ACCEPT=off` when you want to stop it.
+
+The Failures page has an **Accepted** filter and a **Confirm accepted** bulk action. Confirming promotes the automatic category to a human label, which also feeds the scoreboard and rule learning.
 
 ## Runs and comparison
 
@@ -88,7 +90,9 @@ The configuration lives in Neo4j, so backing up the database also backs up these
 
 The patch is saved to `test-results/redline/<id>.patch`. Patches that remove assertions or add `skip`, `try/catch` or retries are rejected.
 
-`npx redline fix <id>` takes a **proven `test_bug` patch**, creates a branch from `HEAD`, commits it, pushes it, and opens a PR against `main` (override with `REDLINE_PR_BASE`). The PR body carries the cause, experiment, patch and a note that it was not auto-merged. Use `--dry-run` to print the branch and body without pushing. The command refuses patches that touch `.env`, CI workflows, secrets or generated directories, and requires `GITHUB_TOKEN` or an authenticated `gh`.
+`npx redline fix <id>` takes a **proven `test_bug` patch** (reusing a stored experiment unless `--force`), creates a branch from `HEAD`, commits it, pushes it, and opens a PR against `main` (override with `REDLINE_PR_BASE` or `--base=<branch>`). The PR body carries the cause, evidence, curl, experiment, patch and a note that it was not auto-merged. Use `--dry-run` to print the branch and body without pushing. The command refuses patches that touch `.env`, CI workflows, secrets or generated directories, and requires `GITHUB_TOKEN` or an authenticated `gh`.
+
+Shadow rules are the safe next step for rule learning: `npx redline shadow <id>` evaluates a rule against new failures and records what it would say, but never changes the analysis. `npx redline shadow --stats` compares those matches with human labels; promotion to an active rule is still a human decision.
 
 ## Reports
 

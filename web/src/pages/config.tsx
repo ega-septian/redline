@@ -220,6 +220,7 @@ export function ConfigPage() {
       </Card>
 
       <AIUsageCard />
+      <AutoAcceptCard />
 
       <APIKeysCard />
 
@@ -590,6 +591,83 @@ function CheckPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function AutoAcceptCard() {
+  const { project } = useProject();
+  const query = useQuery({
+    queryKey: ["auto-accept", project],
+    queryFn: () => api.autoAcceptStats(project),
+    refetchInterval: 30_000,
+  });
+  const stats = query.data;
+  const percent = stats ? Math.round(stats.override_rate * 100) : 0;
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <Sparkles className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12.5px] font-semibold">Auto-accept calibration</span>
+        {stats && <Badge tone="neutral">{stats.project || "all projects"}</Badge>}
+        <Button
+          className="ml-auto"
+          size="icon"
+          variant="ghost"
+          onClick={() => query.refetch()}
+          disabled={query.isFetching}
+          aria-label="Refresh auto-accept calibration"
+          title="Refresh auto-accept calibration"
+        >
+          <RefreshCw className={cn("h-3 w-3", query.isFetching && "animate-spin")} />
+        </Button>
+      </div>
+
+      {query.isPending ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-muted">
+          Loading auto-accept calibration…
+        </div>
+      ) : query.isError ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-danger">
+          Cannot load auto-accept calibration: {messageOf(query.error)}
+          <Button className="ml-2" variant="outline" onClick={() => query.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <div className="px-3.5 py-3">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <UsageMetric label="Accepted" value={String(stats?.accepted ?? 0)} />
+            <UsageMetric label="Confirmed" value={String(stats?.confirmed ?? 0)} />
+            <UsageMetric label="Overridden" value={String(stats?.overridden ?? 0)} />
+            <UsageMetric label="Pending" value={String(stats?.pending ?? 0)} />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-faint">
+            <span>
+              Override rate: <span className="font-mono text-muted">{percent}%</span> of{" "}
+              {stats?.decided ?? 0} decided
+            </span>
+            <span>
+              Warning threshold:{" "}
+              <span className="font-mono text-muted">
+                {Math.round((stats?.threshold ?? 0.1) * 100)}%
+              </span>
+            </span>
+          </div>
+          {stats?.warning && (
+            <div className="mt-3 rounded-md border border-warn/40 bg-warn/10 px-2.5 py-1.5 text-[10.5px] text-[#ffd28a]">
+              Override rate is above the threshold. Consider setting{" "}
+              <span className="font-mono">AUTO_ACCEPT=off</span> or tightening the confidence rule.
+            </div>
+          )}
+          {stats && stats.accepted === 0 && (
+            <div className="mt-3 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-[10.5px] text-muted">
+              No auto-accepted groups yet. A high-confidence analysis will appear here after the next
+              run.
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

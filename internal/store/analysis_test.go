@@ -254,6 +254,14 @@ func TestAutoAccept(t *testing.T) {
 			g.AcceptedOutcome != "" || g.AcceptedAt == nil {
 			t.Errorf("backfill tidak benar: %+v", g)
 		}
+		projectStats, err := b.AutoAcceptStats(ctx, g.Project)
+		if err != nil || projectStats.Accepted != 1 || projectStats.Project != g.Project || projectStats.Warning {
+			t.Errorf("stats per project salah: %+v %v", projectStats, err)
+		}
+		other, err := b.AutoAcceptStats(ctx, "other-project")
+		if err != nil || other.Accepted != 0 {
+			t.Errorf("project lain harus kosong: %+v %v", other, err)
+		}
 	})
 
 	t.Run("Confirmed", func(t *testing.T) {
@@ -272,9 +280,9 @@ func TestAutoAccept(t *testing.T) {
 			g.AcceptedDecidedAt == nil {
 			t.Errorf("acceptance harus confirmed: %+v", g)
 		}
-		stats, err := b.AutoAcceptStats(ctx)
+		stats, err := b.AutoAcceptStats(ctx, "")
 		if err != nil || stats.Accepted != 1 || stats.Confirmed != 1 || stats.Overridden != 0 ||
-			stats.Pending != 0 || stats.OverrideRate != 0 {
+			stats.Pending != 0 || stats.Decided != 1 || stats.OverrideRate != 0 || stats.Warning {
 			t.Errorf("stats confirmed salah: %+v %v", stats, err)
 		}
 	})
@@ -294,10 +302,28 @@ func TestAutoAccept(t *testing.T) {
 		if g.AcceptedOutcome != "overridden" || g.AcceptedCategory != "test_bug" || g.HumanLabel != "backend_bug" {
 			t.Errorf("acceptance harus overridden: %+v", g)
 		}
-		stats, err := b.AutoAcceptStats(ctx)
+		stats, err := b.AutoAcceptStats(ctx, "")
 		if err != nil || stats.Accepted != 1 || stats.Confirmed != 0 || stats.Overridden != 1 ||
-			stats.Pending != 0 || stats.OverrideRate != 1 {
+			stats.Pending != 0 || stats.Decided != 1 || stats.OverrideRate != 1 || stats.Warning {
 			t.Errorf("stats overridden salah: %+v %v", stats, err)
+		}
+	})
+
+	t.Run("BulkConfirm", func(t *testing.T) {
+		b := newStore(t)
+		ctx := context.Background()
+		fps, _, _ := passThenFail(t, b)
+		fp := fps["order dibayar"]
+		if err := b.SetAcceptance(ctx, fp, "test_bug", "ai", "high"); err != nil {
+			t.Fatal(err)
+		}
+		n, err := b.ConfirmAcceptanceBulk(ctx, []string{fp, "missing"}, "ega")
+		if err != nil || n != 1 {
+			t.Fatalf("bulk confirm = %d, %v; mau 1", n, err)
+		}
+		g, _ := group(t, b, fp)
+		if g.HumanLabel != "test_bug" || g.AcceptedOutcome != "confirmed" || g.AcceptedDecidedBy != "ega" {
+			t.Errorf("bulk confirm tidak benar: %+v", g)
 		}
 	})
 
@@ -309,8 +335,9 @@ func TestAutoAccept(t *testing.T) {
 		if err := b.SetAcceptance(ctx, fp, "test_bug", "rule", "high"); err != nil {
 			t.Fatal(err)
 		}
-		stats, err := b.AutoAcceptStats(ctx)
-		if err != nil || stats.Accepted != 1 || stats.Pending != 1 || stats.Confirmed != 0 || stats.Overridden != 0 {
+		stats, err := b.AutoAcceptStats(ctx, "")
+		if err != nil || stats.Accepted != 1 || stats.Pending != 1 || stats.Confirmed != 0 || stats.Overridden != 0 ||
+			stats.Decided != 0 || stats.Warning {
 			t.Errorf("stats pending salah: %+v %v", stats, err)
 		}
 		if err := b.SetLabel(ctx, fp, "", "", ""); err != nil {

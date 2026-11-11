@@ -7,13 +7,17 @@
  *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
  *   npx redline fix <id> --dry-run     tampilkan branch dan PR body tanpa push
  *   npx redline fix <id> --force       buktikan ulang walau sudah ada eksperimen yang lulus
+ *   npx redline fix <id> --base=dev    PR ke branch lain (default main)
  *   npx redline learn                  promosikan candidate yang terbukti, lalu AI mengusulkan aturan baru
  *   npx redline candidates             daftar rule candidate (draft/proposed/rejected)
  *   npx redline analyze --run <id>     analisis failure pada run yang sudah ada (butuh AI di server)
  *   npx redline analyze --run <id> --rules  analisis lokal tanpa AI (rule + needs_ai)
  *   npx redline rules                  daftar aturan
+ *   npx redline shadow <id>            jalankan aturan dalam mode shadow (tanpa mengubah hasil)
+ *   npx redline shadow --stats         agreement shadow rule vs human label
  *   npx redline approve <id>           aktifkan aturan (reject <id> untuk menolak)
  *   npx redline score                  rapor: seberapa sering tebakan aturan dan AI terbukti benar
+ *   npx redline score --project=name   kalibrasi auto-accept untuk satu project
  *   npx redline impact <file>          test yang terdampak kalau file ini berubah (import bertingkat ikut)
  *   npx redline impact GET /brands/1   test yang memanggil endpoint ini
  *   npx redline comment                tulis/update komentar PR dengan redline-report.md
@@ -66,6 +70,7 @@ type Failure = {
   id?: string;
   status?: string;
   affected?: number;
+  curl?: string;
 };
 type SourceFile = { path: string; content: string };
 type Edit = { path: string; find: string; replace: string };
@@ -98,6 +103,8 @@ type VerifyOutcome = {
   category?: string;
   hypothesis?: string;
   experimentId?: number;
+  evidence?: string[];
+  curl?: string;
 };
 type Rule = {
   id: number;
@@ -125,6 +132,17 @@ type Promotion = {
   candidates: number;
   promoted: Rule[];
   rejected: { id: number; pattern: string; reason: string }[];
+};
+type ShadowStat = {
+  rule_id: number;
+  pattern: string;
+  category: string;
+  summary: string;
+  matches: number;
+  confirmed: number;
+  overridden: number;
+  pending: number;
+  agreement_rate: number;
 };
 
 const env = (name: string, fallback: number) => Number(process.env[name] || fallback);
@@ -174,6 +192,7 @@ async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
 async function verify(args: string[]) {
   const force = args.includes("--force");
   const dryRun = args.includes("--dry-run");
+  const base = args.find((a) => a.startsWith("--base="))?.split("=")[1];
   const pr = args.includes("--pr") || dryRun;
   const fingerprints = args.filter((a) => !a.startsWith("--"));
   let targets: Failure[];
@@ -208,7 +227,7 @@ async function verify(args: string[]) {
       cost += outcome.cost;
       if (pr && outcome.proven && outcome.patch) {
         try {
-          await openPullRequest(outcome, dryRun);
+          await openPullRequest(outcome, dryRun, base);
         } catch (e) {
           console.log(`  ✗ PR failed: ${(e as Error).message}`);
         }
@@ -227,12 +246,13 @@ async function fix(args: string[]) {
   }
   const force = args.includes("--force");
   const dryRun = args.includes("--dry-run");
+  const base = args.find((a) => a.startsWith("--base="))?.split("=")[1];
   if (!force) {
     const proof = await storedProof(targets[0]);
     if (proof) {
       console.log(`  using stored experiment #${proof.experimentId}; no rerun or AI call.`);
       try {
-        await openPullRequest(proof, dryRun);
+        await openPullRequest(proof, dryRun, base);
       } catch (e) {
         console.log(`  ✗ PR failed: ${(e as Error).message}`);
       }
@@ -247,11 +267,13 @@ async function storedProof(fp: string): Promise<VerifyOutcome | null> {
   const detail = await api<{
     group: { test: string; test_case_id?: string };
     experiments?: Experiment[];
+    analysis?: { evidence?: string[] };
   }>("GET", `/api/groups/${fp}`);
   const proof = (detail.experiments ?? [])
     .filter((e) => e.kind === "patch" && e.outcome === "passed" && e.patch)
     .sort((a, b) => b.id - a.id)[0];
   if (!proof) return null;
+  const known = lastRun().failures.find((f) => f.fingerprint === fp);
   return {
     cost: 0,
     proven: true,
@@ -259,11 +281,14 @@ async function storedProof(fp: string): Promise<VerifyOutcome | null> {
       fingerprint: fp,
       test: detail.group.test,
       id: detail.group.test_case_id,
+      curl: known?.curl,
     },
     patch: proof.patch,
     category: proof.category,
     hypothesis: proof.hypothesis,
     experimentId: proof.id,
+    evidence: detail.analysis?.evidence ?? [],
+    curl: known?.curl ?? "",
   };
 }
 
@@ -302,6 +327,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
   // 0. Tebakan Redline SEBELUM eksperimen, supaya nanti bisa dinilai benar atau salah.
   let cost = 0;
   const guess = await guessFirst(f.fingerprint);
+  const evidence = guess?.analysis?.evidence ?? [];
   if (guess?.analysis) {
     const a = guess.analysis;
     if (a.source === "experiment" && !force) {
@@ -437,6 +463,8 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
           category: fix.category,
           hypothesis: fix.hypothesis,
           experimentId: saved.id,
+          evidence,
+          curl: f.curl ?? "",
         };
       }
       attempts.push({ hypothesis: fix.hypothesis, patch, result: result.error });
@@ -516,19 +544,27 @@ function assertSafePatch(patch: string) {
   }
 }
 
-function pullRequestPlan(outcome: VerifyOutcome): PullRequestPlan {
+function pullRequestPlan(outcome: VerifyOutcome, baseOverride?: string): PullRequestPlan {
   if (!outcome.patch) throw new Error("no proven patch to open");
   if (outcome.category !== "test_bug") {
     throw new Error(`only proven test_bug patches can open a PR, got ${outcome.category ?? "unknown"}`);
   }
   assertSafePatch(outcome.patch);
   const repo = githubRepo();
-  const base = process.env.REDLINE_PR_BASE || "main";
+  const base = baseOverride || process.env.REDLINE_PR_BASE || "main";
   const test = shortTest(outcome.failure.test);
   const id = outcome.failure.id && outcome.failure.id !== "-" ? outcome.failure.id : "";
   const branch = `redline/fix-${slug(id || outcome.failure.fingerprint.slice(0, 8))}-${Date.now().toString(36)}`;
   const title = `fix(test): ${id ? id + " " : ""}${test}`.slice(0, 72);
   const patch = outcome.patch.length > 50_000 ? outcome.patch.slice(0, 50_000) + "\n… (truncated)" : outcome.patch;
+  const evidenceLines =
+    (outcome.evidence ?? [])
+      .slice(0, 3)
+      .map((line) => `- \`${line.replace(/`/g, "'")}\``)
+      .join("\n") || "- No evidence was stored for this failure.";
+  const curlSection = outcome.curl
+    ? `\n**Reproduce with curl**\n\n\`\`\`bash\n${outcome.curl}\n\`\`\`\n`
+    : "";
   const body = `## Cause
 
 ${outcome.hypothesis ?? "Proven test fix."}
@@ -537,6 +573,10 @@ ${outcome.hypothesis ?? "Proven test fix."}
 - Test: \`${outcome.failure.test}\`
 - Fingerprint: \`${outcome.failure.fingerprint}\`
 ${outcome.experimentId ? `- Redline experiment: #${outcome.experimentId}` : ""}
+
+## Evidence
+
+${evidenceLines}
 
 ## Verification
 
@@ -555,12 +595,12 @@ ${patch}
 \`\`\`bash
 npx redline verify ${outcome.failure.fingerprint} --force
 \`\`\`
-`;
+${curlSection}`;
   return { repo, base, branch, title, body, patch: outcome.patch };
 }
 
-async function openPullRequest(outcome: VerifyOutcome, dryRun: boolean) {
-  const plan = pullRequestPlan(outcome);
+async function openPullRequest(outcome: VerifyOutcome, dryRun: boolean, baseOverride?: string) {
+  const plan = pullRequestPlan(outcome, baseOverride);
   console.log(`\n  PR plan: ${plan.repo} ${plan.branch} -> ${plan.base}`);
   console.log(`  ${plan.title}`);
   if (dryRun) {
@@ -645,6 +685,7 @@ type Analysis = {
   category: string;
   confidence: string;
   summary: string;
+  evidence?: string[];
   cost_usd: number;
   similar?: { test: string; category: string; similarity: number }[];
 };
@@ -960,7 +1001,7 @@ async function analyzeRun(args: string[]) {
 }
 
 function printRule(r: Rule) {
-  const mark = { proposed: "?", active: "✓", rejected: "✗" }[r.status] ?? " ";
+  const mark = { proposed: "?", shadow: "◐", active: "✓", rejected: "✗" }[r.status] ?? " ";
   console.log(`  ${mark} #${r.id} [${r.status}] /${r.pattern}/ → ${r.category}`);
   console.log(`      ${r.summary}`);
   console.log(
@@ -968,7 +1009,8 @@ function printRule(r: Rule) {
   );
 }
 
-async function score() {
+async function score(args: string[]) {
+  const project = args.find((a) => a.startsWith("--project="))?.split("=")[1] ?? "";
   const board = await api<{
     sources: {
       source: string;
@@ -989,18 +1031,31 @@ async function score() {
   }
   try {
     const auto = await api<{
+      project?: string;
       accepted: number;
       confirmed: number;
       overridden: number;
       pending: number;
+      decided: number;
       override_rate: number;
-    }>("GET", "/api/auto-accept/stats");
+      threshold: number;
+      warning: boolean;
+    }>(
+      "GET",
+      `/api/auto-accept/stats${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    );
     if (auto.accepted > 0) {
       const rate = Math.round(auto.override_rate * 100);
+      const scope = auto.project ? ` (${auto.project})` : "";
       console.log(
-        `\nAuto-accept: ${auto.confirmed} confirmed, ${auto.overridden} overridden, ${auto.pending} pending` +
-          ` (override ${rate}% of decided)`,
+        `\nAuto-accept${scope}: ${auto.confirmed} confirmed, ${auto.overridden} overridden, ${auto.pending} pending` +
+          ` (override ${rate}% of ${auto.decided} decided)`,
       );
+      if (auto.warning) {
+        console.log(
+          `  ⚠ Override rate is above ${Math.round(auto.threshold * 100)}%; consider setting AUTO_ACCEPT=off.`,
+        );
+      }
     }
   } catch {
     // Older servers do not have the endpoint; the scoreboard is still useful.
@@ -1024,6 +1079,32 @@ async function rules() {
   const list = await api<Rule[]>("GET", "/api/rules");
   if (list.length === 0) console.log("No rules yet. Run: npx redline learn");
   for (const r of list) printRule(r);
+}
+
+async function shadow(args: string[]) {
+  if (args.includes("--stats")) {
+    const stats = await api<ShadowStat[]>("GET", "/api/rules/shadow/stats");
+    if (stats.length === 0) {
+      console.log("No shadow matches yet. Put a rule in shadow, then let failures be analyzed.");
+      return;
+    }
+    console.log("Shadow rule agreement (compared with human labels)\n");
+    for (const s of stats) {
+      const decided = s.confirmed + s.overridden;
+      const rate = decided > 0 ? `${Math.round(s.agreement_rate * 100)}%` : "-";
+      console.log(
+        `  #${s.rule_id} [${s.category}] /${s.pattern}/  matches ${s.matches}, ` +
+          `confirmed ${s.confirmed}, overridden ${s.overridden}, pending ${s.pending}, agreement ${rate}`,
+      );
+    }
+    return;
+  }
+  const id = args[0];
+  if (!id || !/^\d+$/.test(id))
+    throw new Error("usage: npx redline shadow <id>  (or: npx redline shadow --stats)");
+  const r = await api<Rule>("PUT", `/api/rules/${id}`, { status: "shadow", by: who() });
+  printRule(r);
+  console.log("Shadow mode: the rule is evaluated and recorded, but never changes the analysis.");
 }
 
 async function decide(id: string | undefined, status: "active" | "rejected") {
@@ -1147,8 +1228,10 @@ async function main() {
       return candidates();
     case "rules":
       return rules();
+    case "shadow":
+      return shadow(args);
     case "score":
-      return score();
+      return score(args);
     case "approve":
       return decide(args[0], "active");
     case "reject":
