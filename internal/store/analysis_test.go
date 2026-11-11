@@ -232,3 +232,93 @@ func testLabels(t *testing.T, b *store.Store) {
 		t.Errorf("kelompok tidak ada: mau ErrNotFound, dapat %v", err)
 	}
 }
+
+func TestAutoAccept(t *testing.T) {
+	t.Run("Backfill", func(t *testing.T) {
+		b := newStore(t)
+		ctx := context.Background()
+		fps, _, _ := passThenFail(t, b)
+		fp := fps["order dibayar"]
+		if err := b.SaveAnalysis(ctx, store.Analysis{
+			Fingerprint: fp, PromptVersion: "v11", Source: "ai", Category: "test_bug",
+			Confidence: "high", Summary: "Status berubah.",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		n, err := b.BackfillAcceptance(ctx)
+		if err != nil || n != 1 {
+			t.Fatalf("backfill = %d, %v; mau 1", n, err)
+		}
+		g, _ := group(t, b, fp)
+		if g.AcceptedCategory != "test_bug" || g.AcceptedBy != "ai" || g.AcceptedConfidence != "high" ||
+			g.AcceptedOutcome != "" || g.AcceptedAt == nil {
+			t.Errorf("backfill tidak benar: %+v", g)
+		}
+	})
+
+	t.Run("Confirmed", func(t *testing.T) {
+		b := newStore(t)
+		ctx := context.Background()
+		fps, _, _ := passThenFail(t, b)
+		fp := fps["order dibayar"]
+		if err := b.SetAcceptance(ctx, fp, "test_bug", "ai", "high"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetLabel(ctx, fp, "test_bug", "setuju", "ega"); err != nil {
+			t.Fatal(err)
+		}
+		g, _ := group(t, b, fp)
+		if g.AcceptedOutcome != "confirmed" || g.AcceptedCategory != "test_bug" || g.AcceptedDecidedBy != "ega" ||
+			g.AcceptedDecidedAt == nil {
+			t.Errorf("acceptance harus confirmed: %+v", g)
+		}
+		stats, err := b.AutoAcceptStats(ctx)
+		if err != nil || stats.Accepted != 1 || stats.Confirmed != 1 || stats.Overridden != 0 ||
+			stats.Pending != 0 || stats.OverrideRate != 0 {
+			t.Errorf("stats confirmed salah: %+v %v", stats, err)
+		}
+	})
+
+	t.Run("Overridden", func(t *testing.T) {
+		b := newStore(t)
+		ctx := context.Background()
+		fps, _, _ := passThenFail(t, b)
+		fp := fps["order dibayar"]
+		if err := b.SetAcceptance(ctx, fp, "test_bug", "ai", "high"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.SetLabel(ctx, fp, "backend_bug", "ternyata API", "ega"); err != nil {
+			t.Fatal(err)
+		}
+		g, _ := group(t, b, fp)
+		if g.AcceptedOutcome != "overridden" || g.AcceptedCategory != "test_bug" || g.HumanLabel != "backend_bug" {
+			t.Errorf("acceptance harus overridden: %+v", g)
+		}
+		stats, err := b.AutoAcceptStats(ctx)
+		if err != nil || stats.Accepted != 1 || stats.Confirmed != 0 || stats.Overridden != 1 ||
+			stats.Pending != 0 || stats.OverrideRate != 1 {
+			t.Errorf("stats overridden salah: %+v %v", stats, err)
+		}
+	})
+
+	t.Run("PendingAndClear", func(t *testing.T) {
+		b := newStore(t)
+		ctx := context.Background()
+		fps, _, _ := passThenFail(t, b)
+		fp := fps["order dibayar"]
+		if err := b.SetAcceptance(ctx, fp, "test_bug", "rule", "high"); err != nil {
+			t.Fatal(err)
+		}
+		stats, err := b.AutoAcceptStats(ctx)
+		if err != nil || stats.Accepted != 1 || stats.Pending != 1 || stats.Confirmed != 0 || stats.Overridden != 0 {
+			t.Errorf("stats pending salah: %+v %v", stats, err)
+		}
+		if err := b.SetLabel(ctx, fp, "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		g, _ := group(t, b, fp)
+		if g.AcceptedOutcome != "" || g.AcceptedCategory != "test_bug" {
+			t.Errorf("hapus label harus mengembalikan pending: %+v", g)
+		}
+	})
+}

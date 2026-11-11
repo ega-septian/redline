@@ -465,6 +465,20 @@ type Group struct {
 	AcceptedBy         string     `json:"accepted_by,omitempty"` // rule / ai
 	AcceptedConfidence string     `json:"accepted_confidence,omitempty"`
 	AcceptedAt         *time.Time `json:"accepted_at,omitempty"`
+	// AcceptedOutcome is set when a human labels a group that had an automatic acceptance:
+	// confirmed (same category) or overridden (different category). Empty = still pending.
+	AcceptedOutcome   string     `json:"accepted_outcome,omitempty"`
+	AcceptedDecidedAt *time.Time `json:"accepted_decided_at,omitempty"`
+	AcceptedDecidedBy string     `json:"accepted_decided_by,omitempty"`
+}
+
+// AutoAcceptStats is the calibration of automatic acceptance against human labels.
+type AutoAcceptStats struct {
+	Accepted     int     `json:"accepted"`
+	Confirmed    int     `json:"confirmed"`
+	Overridden   int     `json:"overridden"`
+	Pending      int     `json:"pending"`
+	OverrideRate float64 `json:"override_rate"`
 }
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.

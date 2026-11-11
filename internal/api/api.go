@@ -85,6 +85,7 @@ type Store interface {
 	ListGroupsForProject(ctx context.Context, statuses []string, limit int, project string) ([]store.Group, error)
 	GetGroup(ctx context.Context, fingerprint string) (store.Group, []store.Occurrence, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
+	AutoAcceptStats(ctx context.Context) (store.AutoAcceptStats, error)
 	SetLabel(ctx context.Context, fingerprint, label, note, by string) error
 	SetTriage(ctx context.Context, fingerprint, status, owner, note, by string) error
 	SetTriageStatusBulk(ctx context.Context, ids []string, status, by string) (int, error)
@@ -211,6 +212,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
 	mux.HandleFunc("GET /api/config/notifications/deliveries", s.handleNotificationDeliveries)
 	mux.HandleFunc("GET /api/ai/usage", s.handleAIUsage)
+	mux.HandleFunc("GET /api/auto-accept/stats", s.handleAutoAcceptStats)
 	mux.HandleFunc("GET /api/keys", s.handleListAPIKeys)
 	mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
 	mux.HandleFunc("DELETE /api/keys/{id}", s.handleRevokeAPIKey)

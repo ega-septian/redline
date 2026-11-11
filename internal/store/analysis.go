@@ -304,9 +304,15 @@ func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by strin
 	}
 	res, err := s.query(ctx, `
 		MATCH (f:Failure {id: $id})
+		WITH f, coalesce(f.acceptedCategory, '') AS accepted
 		SET f.manualCategory = $label, f.manualNote = $note, f.labeledBy = $by,
-			f.labeledAt = CASE WHEN $label IS NULL THEN null ELSE datetime() END
-		REMOVE f.acceptedCategory, f.acceptedBy, f.acceptedConfidence, f.acceptedAt
+			f.labeledAt = CASE WHEN $label IS NULL THEN null ELSE datetime() END,
+			f.acceptedOutcome = CASE
+				WHEN $label IS NULL OR accepted = '' THEN null
+				WHEN accepted = $label THEN 'confirmed'
+				ELSE 'overridden' END,
+			f.acceptedDecidedAt = CASE WHEN $label IS NOT NULL AND accepted <> '' THEN datetime() ELSE null END,
+			f.acceptedDecidedBy = CASE WHEN $label IS NOT NULL AND accepted <> '' THEN $by ELSE '' END
 		RETURN count(f) AS n`, map[string]any{"id": fingerprint, "label": labelArg, "note": note, "by": by})
 	if err != nil {
 		return err
@@ -324,8 +330,18 @@ func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by strin
 func (s *Store) SetAcceptance(ctx context.Context, fingerprint, category, by, confidence string) error {
 	res, err := s.query(ctx, `
 		MATCH (f:Failure {id: $id})
+		WITH f, coalesce(f.acceptedCategory, '') AS oldCategory, coalesce(f.acceptedBy, '') AS oldBy,
+			f.acceptedAt AS oldAt, coalesce(f.acceptedOutcome, '') AS oldOutcome,
+			f.acceptedDecidedAt AS oldDecidedAt, coalesce(f.acceptedDecidedBy, '') AS oldDecidedBy
 		SET f.acceptedCategory = $category, f.acceptedBy = $by, f.acceptedConfidence = $confidence,
-			f.acceptedAt = CASE WHEN $category = '' THEN null ELSE datetime() END
+			f.acceptedAt = CASE WHEN $category = '' THEN null
+				WHEN oldCategory = $category AND oldBy = $by THEN oldAt ELSE datetime() END,
+			f.acceptedOutcome = CASE WHEN $category = '' OR oldCategory <> $category OR oldBy <> $by
+				THEN null ELSE oldOutcome END,
+			f.acceptedDecidedAt = CASE WHEN $category = '' OR oldCategory <> $category OR oldBy <> $by
+				THEN null ELSE oldDecidedAt END,
+			f.acceptedDecidedBy = CASE WHEN $category = '' OR oldCategory <> $category OR oldBy <> $by
+				THEN '' ELSE oldDecidedBy END
 		RETURN count(f) AS n`,
 		map[string]any{"id": fingerprint, "category": category, "by": by, "confidence": confidence})
 	if err != nil {
@@ -335,4 +351,49 @@ func (s *Store) SetAcceptance(ctx context.Context, fingerprint, category, by, co
 		return ErrNotFound
 	}
 	return nil
+}
+
+// BackfillAcceptance marks existing high-confidence analyses as accepted, so groups created
+// before AUTO_ACCEPT existed get the same UI state without a manual re-analysis.
+func (s *Store) BackfillAcceptance(ctx context.Context) (int, error) {
+	res, err := s.query(ctx, `
+		MATCH (f:Failure)-[:ANALYZED]->(a:Analysis)
+		WHERE f.manualCategory IS NULL AND f.acceptedCategory IS NULL
+		WITH f, a ORDER BY f.id, a.createdAt DESC
+		WITH f, head(collect(a)) AS a
+		WHERE a.source IN ['rule', 'ai'] AND a.confidence = 'high'
+			AND a.category IN ['backend_bug', 'test_bug', 'environment']
+		SET f.acceptedCategory = a.category, f.acceptedBy = a.source,
+			f.acceptedConfidence = a.confidence, f.acceptedAt = a.createdAt,
+			f.acceptedOutcome = null, f.acceptedDecidedAt = null, f.acceptedDecidedBy = ''
+		RETURN count(f) AS n`, nil)
+	if err != nil {
+		return 0, err
+	}
+	return int(res.Records[0].AsMap()["n"].(int64)), nil
+}
+
+// AutoAcceptStats counts how often automatic acceptance was confirmed or overridden by a human.
+func (s *Store) AutoAcceptStats(ctx context.Context) (AutoAcceptStats, error) {
+	res, err := s.query(ctx, `
+		MATCH (f:Failure) WHERE coalesce(f.acceptedCategory, '') <> ''
+		RETURN count(f) AS accepted,
+			sum(CASE WHEN f.acceptedOutcome = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
+			sum(CASE WHEN f.acceptedOutcome = 'overridden' THEN 1 ELSE 0 END) AS overridden,
+			sum(CASE WHEN coalesce(f.acceptedOutcome, '') = '' THEN 1 ELSE 0 END) AS pending`, nil)
+	if err != nil {
+		return AutoAcceptStats{}, err
+	}
+	m := res.Records[0].AsMap()
+	stats := AutoAcceptStats{
+		Accepted:   int(i64(m, "accepted")),
+		Confirmed:  int(i64(m, "confirmed")),
+		Overridden: int(i64(m, "overridden")),
+		Pending:    int(i64(m, "pending")),
+	}
+	decided := stats.Confirmed + stats.Overridden
+	if decided > 0 {
+		stats.OverrideRate = float64(stats.Overridden) / float64(decided)
+	}
+	return stats, nil
 }

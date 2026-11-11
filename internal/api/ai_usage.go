@@ -38,3 +38,14 @@ func (s *Server) handleAIUsage(w http.ResponseWriter, r *http.Request) {
 		"budget_exhausted": exhausted,
 	})
 }
+
+// handleAutoAcceptStats: GET /api/auto-accept/stats — how often automatic acceptance was
+// confirmed or overridden by a human.
+func (s *Server) handleAutoAcceptStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.Store.AutoAcceptStats(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}

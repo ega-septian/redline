@@ -43,6 +43,7 @@ type fakeStore struct {
 	apiKeys            []store.APIKey
 	apiKeyErr          error
 	spend              float64
+	autoAccept         store.AutoAcceptStats
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
 	runErrors          []store.Run
@@ -496,6 +497,10 @@ func (f *fakeStore) GetGroup(_ context.Context, _ string) (store.Group, []store.
 	}
 	return store.Group{}, nil, store.ErrNotFound
 }
+func (f *fakeStore) AutoAcceptStats(context.Context) (store.AutoAcceptStats, error) {
+	return f.autoAccept, nil
+}
+
 func (f *fakeStore) GetAnalysis(context.Context, string, string) (store.Analysis, error) {
 	if f.analysis != nil {
 		return *f.analysis, nil
