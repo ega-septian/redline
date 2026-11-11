@@ -164,6 +164,8 @@ Everything has a working default. The settings you are most likely to change:
 
 `AI_MODE=always` only changes how requested analyses are decided; it does not analyze every ingest automatically. Run `REDLINE_AI=1 npx playwright test` (or `npx redline analyze`) to request AI analysis. `AI_MAX_PER_RUN` caps that run and falls back to rules after the limit; the reporter also has its own `REDLINE_AI_MAX` (default 10).
 
+Measured accuracy and cost for each mode: [Benchmark](docs/benchmark.md).
+
 Full list and examples: [`.env.example`](.env.example).
 
 ## Commands
@@ -198,6 +200,7 @@ Full list and examples: [`.env.example`](.env.example).
 - [Development](docs/development.md)
 - [Roadmap](docs/roadmap.md)
 - [Knowledge graph](docs/kag.md)
+- [Benchmark of AI modes](docs/benchmark.md)
 - [Releases](https://github.com/ega-septian/redline/releases)
 
 ## License
