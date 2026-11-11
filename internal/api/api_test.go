@@ -42,6 +42,7 @@ type fakeStore struct {
 	channels           map[string]store.NotificationChannel
 	apiKeys            []store.APIKey
 	apiKeyErr          error
+	spend              float64
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
 	runErrors          []store.Run
@@ -465,6 +466,9 @@ func (f *fakeStore) CreateAPIKey(_ context.Context, key store.APIKey) (store.API
 	key.CreatedAt = time.Now()
 	f.apiKeys = append([]store.APIKey{key}, f.apiKeys...)
 	return key, nil
+}
+func (f *fakeStore) SpendSince(context.Context, time.Time) (float64, error) {
+	return f.spend, nil
 }
 func (f *fakeStore) ListAPIKeys(context.Context) ([]store.APIKey, error) {
 	return f.apiKeys, f.apiKeyErr

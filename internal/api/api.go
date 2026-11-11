@@ -74,6 +74,7 @@ type Store interface {
 	RecordNotificationDelivery(ctx context.Context, delivery store.NotificationDelivery) error
 	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
 	NotificationDeliveries(ctx context.Context, limit int) ([]store.NotificationDelivery, error)
+	SpendSince(ctx context.Context, since time.Time) (float64, error)
 	CreateAPIKey(ctx context.Context, key store.APIKey) (store.APIKey, error)
 	ListAPIKeys(ctx context.Context) ([]store.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id string) (store.APIKey, error)
@@ -152,6 +153,17 @@ type Server struct {
 	SourceCheck func(context.Context, string) contract.SourceCheck
 	// Notifier delivers failure summaries to the configured webhook; nil disables delivery.
 	Notifier notify.Sender
+	// AI describes the configured analysis mode for the usage panel. nil means AI is not configured.
+	AI *AISettings
+}
+
+// AISettings is the non-secret AI configuration shown in Config.
+type AISettings struct {
+	Enabled        bool
+	Mode           string
+	Model          string
+	DailyBudgetUSD float64
+	MaxPerRun      int
 }
 
 // APIVersion naik kalau ada perubahan yang tidak kompatibel pada /api. Paket redline-playwright
@@ -198,6 +210,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/config/notifications/projects/{project}", s.handleDeleteNotificationChannel)
 	mux.HandleFunc("POST /api/config/notifications/test", s.handleTestNotification)
 	mux.HandleFunc("GET /api/config/notifications/deliveries", s.handleNotificationDeliveries)
+	mux.HandleFunc("GET /api/ai/usage", s.handleAIUsage)
 	mux.HandleFunc("GET /api/keys", s.handleListAPIKeys)
 	mux.HandleFunc("POST /api/keys", s.handleCreateAPIKey)
 	mux.HandleFunc("DELETE /api/keys/{id}", s.handleRevokeAPIKey)

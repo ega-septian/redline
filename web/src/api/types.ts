@@ -536,3 +536,14 @@ export type ApiCreatedKey = {
   key: string;
   api_key: ApiKey;
 };
+
+export type ApiAIUsage = {
+  enabled: boolean;
+  mode: string;
+  model: string;
+  daily_budget_usd: number;
+  spent_today_usd: number;
+  remaining_usd?: number | null;
+  max_per_run: number;
+  budget_exhausted: boolean;
+};

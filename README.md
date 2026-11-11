@@ -130,7 +130,7 @@ Full deployment and GitHub Actions guides: [deploy](docs/deploy.md) and [PR comm
 - **Suite load errors** — failures before a test can run, classified by cause.
 - **Quarantine** — owner, reason, expiry calendar and evidence-based suggestions.
 - **Coverage** — contract endpoints vs recorded calls.
-- **Config** — contract sources, API keys and Discord notifications.
+- **Config** — contract sources, AI usage and cost, API keys and Discord notifications.
 
 [Feature details →](docs/features.md)
 

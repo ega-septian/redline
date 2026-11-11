@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Send,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -217,6 +218,8 @@ export function ConfigPage() {
           Neo4j volume to keep this configuration.
         </div>
       </Card>
+
+      <AIUsageCard />
 
       <APIKeysCard />
 
@@ -588,6 +591,131 @@ function CheckPanel({
       )}
     </div>
   );
+}
+
+function AIUsageCard() {
+  const query = useQuery({
+    queryKey: ["ai-usage"],
+    queryFn: api.aiUsage,
+    refetchInterval: 30_000,
+  });
+  const usage = query.data;
+  const budget = usage?.daily_budget_usd ?? 0;
+  const spent = usage?.spent_today_usd ?? 0;
+  const percent = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <Sparkles className="h-3.5 w-3.5 text-brand" />
+        <span className="text-[12.5px] font-semibold">AI usage</span>
+        {usage && (
+          <>
+            <Badge tone={usage.enabled ? "flaky" : "neutral"}>{usage.enabled ? "AI on" : "AI off"}</Badge>
+            <Badge tone={usage.mode === "always" ? "brand" : "neutral"}>{usage.mode}</Badge>
+          </>
+        )}
+        <Button
+          className="ml-auto"
+          size="icon"
+          variant="ghost"
+          onClick={() => query.refetch()}
+          disabled={query.isFetching}
+          aria-label="Refresh AI usage"
+          title="Refresh AI usage"
+        >
+          <RefreshCw className={cn("h-3 w-3", query.isFetching && "animate-spin")} />
+        </Button>
+      </div>
+
+      {query.isPending ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-muted">Loading AI usage…</div>
+      ) : query.isError ? (
+        <div className="px-3.5 py-6 text-center text-[11.5px] text-danger">
+          Cannot load AI usage: {messageOf(query.error)}
+          <Button className="ml-2" variant="outline" onClick={() => query.refetch()}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <div className="px-3.5 py-3">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <UsageMetric label="Model" value={usage?.model || "not configured"} />
+            <UsageMetric label="Spent today" value={money(spent)} />
+            <UsageMetric label="Daily budget" value={budget > 0 ? money(budget, 2) : "Unlimited"} />
+            <UsageMetric
+              label="Remaining"
+              value={usage?.remaining_usd == null ? "Unlimited" : money(usage.remaining_usd)}
+            />
+          </div>
+
+          {budget > 0 && (
+            <div className="mt-3">
+              <div className="mb-1 flex items-center justify-between text-[10px] text-faint">
+                <span>Today&apos;s AI budget</span>
+                <span>{Math.round(percent)}% used</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[#21262d]">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    usage?.budget_exhausted ? "bg-danger" : percent >= 80 ? "bg-warn" : "bg-brand",
+                  )}
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-faint">
+            <span>
+              Per-run cap:{" "}
+              <span className="font-mono text-muted">
+                {usage?.max_per_run ? `${usage.max_per_run} analyses` : "unlimited"}
+              </span>
+            </span>
+            <span>
+              Mode:{" "}
+              <span className="font-mono text-muted">
+                {usage?.mode === "always" ? "AI for every group" : "AI only when rules are unsure"}
+              </span>
+            </span>
+          </div>
+
+          {usage && !usage.enabled && (
+            <div className="mt-3 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-[10.5px] text-muted">
+              AI is disabled. Set <span className="font-mono">ANTHROPIC_API_KEY</span> on the server to
+              enable analysis; rules still run.
+            </div>
+          )}
+          {usage?.budget_exhausted && (
+            <div className="mt-3 rounded-md border border-danger/40 bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-[#ffb3ad]">
+              Daily AI budget reached. Requested analyses fall back to rules until tomorrow.
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function UsageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-line bg-[#0f141a] px-2.5 py-2">
+      <div className="text-[9.5px] uppercase tracking-[0.7px] text-faint">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[11.5px] text-ink" title={value}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function money(value: number, maximumFractionDigits = 4): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits,
+  }).format(value);
 }
 
 function APIKeysCard() {
