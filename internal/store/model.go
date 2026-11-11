@@ -458,6 +458,13 @@ type Group struct {
 	AnalysisModel   string     `json:"analysis_model,omitempty"`
 	AnalysisSummary string     `json:"analysis_summary,omitempty"`
 	AnalyzedAt      *time.Time `json:"analyzed_at,omitempty"`
+
+	// Auto-accepted analysis: high-confidence rules/AI. This is deliberately not HumanLabel,
+	// so the scoreboard and rule learning still require human confirmation or a proven experiment.
+	AcceptedCategory   string     `json:"accepted_category,omitempty"`
+	AcceptedBy         string     `json:"accepted_by,omitempty"` // rule / ai
+	AcceptedConfidence string     `json:"accepted_confidence,omitempty"`
+	AcceptedAt         *time.Time `json:"accepted_at,omitempty"`
 }
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.

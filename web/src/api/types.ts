@@ -40,6 +40,10 @@ export type ApiGroup = {
   analysis_model?: string;
   analysis_summary?: string;
   analyzed_at?: string;
+  accepted_category?: string;
+  accepted_by?: string;
+  accepted_confidence?: string;
+  accepted_at?: string | null;
 };
 
 export type ApiAnalysis = {

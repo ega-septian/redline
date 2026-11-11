@@ -160,6 +160,35 @@ func TestLoad_RejectsInvalidAIMode(t *testing.T) {
 	}
 }
 
+func TestLoad_AutoAccept(t *testing.T) {
+	t.Setenv("AUTO_ACCEPT", "off")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AutoAccept != "off" {
+		t.Errorf("AUTO_ACCEPT = %q, want off", cfg.AutoAccept)
+	}
+}
+
+func TestLoad_AutoAcceptDefault(t *testing.T) {
+	t.Setenv("AUTO_ACCEPT", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AutoAccept != "high" {
+		t.Errorf("AUTO_ACCEPT default = %q, want high", cfg.AutoAccept)
+	}
+}
+
+func TestLoad_RejectsInvalidAutoAccept(t *testing.T) {
+	t.Setenv("AUTO_ACCEPT", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid AUTO_ACCEPT must be rejected")
+	}
+}
+
 func TestLoad_RejectsInvalidAIMaxPerRun(t *testing.T) {
 	for _, raw := range []string{"-1", "many"} {
 		t.Run(raw, func(t *testing.T) {

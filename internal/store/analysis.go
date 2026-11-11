@@ -306,11 +306,31 @@ func (s *Store) SetLabel(ctx context.Context, fingerprint, label, note, by strin
 		MATCH (f:Failure {id: $id})
 		SET f.manualCategory = $label, f.manualNote = $note, f.labeledBy = $by,
 			f.labeledAt = CASE WHEN $label IS NULL THEN null ELSE datetime() END
+		REMOVE f.acceptedCategory, f.acceptedBy, f.acceptedConfidence, f.acceptedAt
 		RETURN count(f) AS n`, map[string]any{"id": fingerprint, "label": labelArg, "note": note, "by": by})
 	if err != nil {
 		return err
 	}
 	// count() selalu menghasilkan satu baris; 0 berarti kelompoknya tidak ada.
+	if n, _ := res.Records[0].Get("n"); n.(int64) == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetAcceptance records a high-confidence analysis as accepted without making it human truth.
+// Empty category clears the acceptance. It never touches manualCategory, so the scoreboard and
+// rule learning keep using human labels and proven experiments only.
+func (s *Store) SetAcceptance(ctx context.Context, fingerprint, category, by, confidence string) error {
+	res, err := s.query(ctx, `
+		MATCH (f:Failure {id: $id})
+		SET f.acceptedCategory = $category, f.acceptedBy = $by, f.acceptedConfidence = $confidence,
+			f.acceptedAt = CASE WHEN $category = '' THEN null ELSE datetime() END
+		RETURN count(f) AS n`,
+		map[string]any{"id": fingerprint, "category": category, "by": by, "confidence": confidence})
+	if err != nil {
+		return err
+	}
 	if n, _ := res.Records[0].Get("n"); n.(int64) == 0 {
 		return ErrNotFound
 	}

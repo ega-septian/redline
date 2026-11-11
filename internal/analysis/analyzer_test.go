@@ -150,6 +150,114 @@ func TestAnalyze_MatrixRules(t *testing.T) {
 	}
 }
 
+func TestAnalyze_AutoAcceptHighConfidence(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	a := &Analyzer{Store: s, AutoAccept: "high"}
+
+	brand, _, err := a.Analyze(ctx, fps["brands punya slug"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if brand.Source != "rule" || brand.Confidence != "high" {
+		t.Fatalf("expected a high-confidence rule, got %+v", brand)
+	}
+	g, _, err := s.GetGroup(ctx, fps["brands punya slug"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.HumanLabel != "" {
+		t.Errorf("auto-accept must not create a human label: %q", g.HumanLabel)
+	}
+	if g.AcceptedCategory != "backend_bug" || g.AcceptedBy != "rule" || g.AcceptedConfidence != "high" || g.AcceptedAt == nil {
+		t.Errorf("high-confidence rule must be accepted: %+v", g)
+	}
+}
+
+func TestAnalyze_AutoAcceptAIAnalysis(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fake := &fakeLLM{verdict: verdict{
+		Category: "backend_bug", Confidence: "high", Summary: "Nilai berubah.",
+		Evidence: []string{"Test code changed: no"}, NextStep: "Laporkan ke backend.",
+	}}
+	a := &Analyzer{Store: s, LLM: fake, Model: "claude-haiku-5-5", AutoAccept: "high"}
+	res, _, err := a.Analyze(ctx, fps["order dibayar"], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Source != "ai" || res.Confidence != "high" {
+		t.Fatalf("expected a high-confidence AI result, got %+v", res)
+	}
+	g, _, err := s.GetGroup(ctx, fps["order dibayar"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.AcceptedCategory != "backend_bug" || g.AcceptedBy != "ai" || g.AcceptedConfidence != "high" {
+		t.Errorf("high-confidence AI result must be accepted: %+v", g)
+	}
+	if g.HumanLabel != "" {
+		t.Errorf("auto-accept must not create a human label: %q", g.HumanLabel)
+	}
+}
+
+func TestAnalyze_AutoAcceptClearsBelowHigh(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fp := fps["order dibayar"]
+	if err := s.SetAcceptance(ctx, fp, "test_bug", "ai", "high"); err != nil {
+		t.Fatal(err)
+	}
+	// No rule/AI result: AnalyzeLocal stores source none and must clear the stale acceptance.
+	a := &Analyzer{Store: s, AutoAccept: "high"}
+	if _, err := a.AnalyzeLocal(ctx, fp, false); err != nil {
+		t.Fatal(err)
+	}
+	g, _, err := s.GetGroup(ctx, fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.AcceptedCategory != "" || g.AcceptedBy != "" || g.AcceptedAt != nil {
+		t.Errorf("low-confidence/none analysis must clear acceptance: %+v", g)
+	}
+}
+
+func TestAnalyze_AutoAcceptHumanLabelWins(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	fp := fps["brands punya slug"]
+	if err := s.SetLabel(ctx, fp, "test_bug", "manual", "ega"); err != nil {
+		t.Fatal(err)
+	}
+	a := &Analyzer{Store: s, AutoAccept: "high"}
+	if _, _, err := a.Analyze(ctx, fp, false); err != nil {
+		t.Fatal(err)
+	}
+	g, _, err := s.GetGroup(ctx, fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.HumanLabel != "test_bug" || g.AcceptedCategory != "" || g.AcceptedBy != "" {
+		t.Errorf("human label must win and clear acceptance: %+v", g)
+	}
+}
+
+func TestAnalyze_AutoAcceptOff(t *testing.T) {
+	s, fps := setup(t)
+	ctx := context.Background()
+	a := &Analyzer{Store: s, AutoAccept: "off"}
+	if _, _, err := a.Analyze(ctx, fps["brands punya slug"], false); err != nil {
+		t.Fatal(err)
+	}
+	g, _, err := s.GetGroup(ctx, fps["brands punya slug"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.AcceptedCategory != "" || g.AcceptedBy != "" {
+		t.Errorf("AUTO_ACCEPT=off must not accept: %+v", g)
+	}
+}
+
 func TestAnalyzeLocalNeedsAI(t *testing.T) {
 	s, fps := setup(t)
 	ctx := context.Background()
