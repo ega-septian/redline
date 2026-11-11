@@ -53,3 +53,13 @@ func TestAIUsageUnlimitedBudget(t *testing.T) {
 		t.Fatalf("usage = %+v", body)
 	}
 }
+
+func TestAIUsageBudgetExhausted(t *testing.T) {
+	body := getAIUsage(t, &Server{
+		Store: &fakeStore{spend: 1.5},
+		AI:    &AISettings{Enabled: true, Mode: "always", DailyBudgetUSD: 1},
+	})
+	if !body.BudgetExhausted || body.RemainingUSD == nil || *body.RemainingUSD != 0 {
+		t.Fatalf("usage = %+v", body)
+	}
+}
