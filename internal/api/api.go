@@ -75,6 +75,7 @@ type Store interface {
 	LastNotificationDelivery(ctx context.Context) (*store.NotificationDelivery, error)
 	NotificationDeliveries(ctx context.Context, limit int) ([]store.NotificationDelivery, error)
 	SpendSince(ctx context.Context, since time.Time) (float64, error)
+	SpendSinceProject(ctx context.Context, since time.Time, project string) (float64, error)
 	CreateAPIKey(ctx context.Context, key store.APIKey) (store.APIKey, error)
 	ListAPIKeys(ctx context.Context) ([]store.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id string) (store.APIKey, error)
@@ -94,7 +95,8 @@ type Store interface {
 	SaveExperiment(ctx context.Context, e store.Experiment) (int64, error)
 	ListExperiments(ctx context.Context, groupID string) ([]store.Experiment, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
-	ShadowStats(ctx context.Context) ([]store.ShadowStat, error)
+	GetRule(ctx context.Context, id int64) (store.LearnedRule, error)
+	ShadowStats(ctx context.Context, project string) ([]store.ShadowStat, error)
 	ListRuleCandidates(ctx context.Context, fingerprint, status string) ([]store.RuleCandidate, error)
 	DecideRule(ctx context.Context, id int64, status, by string) (store.LearnedRule, error)
 	Scores(ctx context.Context, groupID string, limit int) (*store.Scoreboard, error)
@@ -239,6 +241,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/rules/candidates/promote", s.handlePromoteCandidates)
 	mux.HandleFunc("POST /api/rules/propose", s.handleProposeRules)
 	mux.HandleFunc("PUT /api/rules/{id}", s.handleDecideRule)
+	mux.HandleFunc("POST /api/rules/{id}/promote-shadow", s.handlePromoteShadow)
 	mux.HandleFunc("GET /api/scoreboard", s.handleScoreboard)
 	mux.HandleFunc("GET /api/load-errors", s.handleListLoadErrors)
 	mux.HandleFunc("PUT /api/load-errors/{id}/triage", s.handleTriageLoadError)
@@ -1296,6 +1299,14 @@ func (s *Server) handleConfirmAcceptanceBulk(w http.ResponseWriter, r *http.Requ
 		s.serverError(w, err)
 		return
 	}
+	// Match the per-group label path: a confirmed label can promote rule candidates.
+	if s.Analyzer != nil {
+		for _, id := range ids {
+			if _, err := s.Analyzer.PromoteCandidates(r.Context(), id); err != nil && s.Log != nil {
+				s.Log.Warn("candidate promotion after bulk accept failed", "fingerprint", id, "err", err)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"confirmed": n})
 }
 
@@ -1435,12 +1446,78 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 
 // handleShadowStats: GET /api/rules/shadow/stats — shadow matches compared with human labels.
 func (s *Server) handleShadowStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.Store.ShadowStats(r.Context())
+	stats, err := s.Store.ShadowStats(r.Context(), r.URL.Query().Get("project"))
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// handlePromoteShadow: POST /api/rules/{id}/promote-shadow {"by":"ega"}
+// A shadow rule becomes proposed only after enough matches and agreement with human labels.
+func (s *Server) handlePromoteShadow(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "rule id must be a number")
+		return
+	}
+	var body struct {
+		By string `json:"by"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body)
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.By = strings.TrimSpace(body.By)
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person promoting the rule")
+		return
+	}
+	rule, err := s.Store.GetRule(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "rule not found")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if rule.Status != "shadow" {
+		writeError(w, http.StatusConflict, "rule is not in shadow mode")
+		return
+	}
+	stats, err := s.Store.ShadowStats(r.Context(), "")
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	var stat *store.ShadowStat
+	for i := range stats {
+		if stats[i].RuleID == id {
+			stat = &stats[i]
+			break
+		}
+	}
+	if stat == nil || !stat.Ready {
+		matches, rate := 0, 0.0
+		if stat != nil {
+			matches, rate = stat.Matches, stat.AgreementRate
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "shadow rule is not ready", "matches": matches, "agreement_rate": rate,
+			"required_matches": store.ShadowMinMatches, "required_agreement": store.ShadowMinAgreement,
+		})
+		return
+	}
+	updated, err := s.Store.DecideRule(r.Context(), id, "proposed", body.By)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // handleListRuleCandidates: GET /api/rules/candidates?status=draft|promoted|rejected|expired

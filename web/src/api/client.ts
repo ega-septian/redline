@@ -221,7 +221,8 @@ export const api = {
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
   config: () => request<ApiConfig>("/api/config"),
-  aiUsage: () => request<ApiAIUsage>("/api/ai/usage"),
+  aiUsage: (project: string) =>
+    request<ApiAIUsage>(`/api/ai/usage${project ? `?project=${encodeURIComponent(project)}` : ""}`),
   autoAcceptStats: (project: string) =>
     request<ApiAutoAcceptStats>(
       `/api/auto-accept/stats${project ? `?project=${encodeURIComponent(project)}` : ""}`,

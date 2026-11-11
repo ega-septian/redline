@@ -360,6 +360,19 @@ func (s *Store) ListRules(ctx context.Context, status string) ([]LearnedRule, er
 	return out, nil
 }
 
+// GetRule returns one learned rule by id.
+func (s *Store) GetRule(ctx context.Context, id int64) (LearnedRule, error) {
+	res, err := s.query(ctx, `MATCH (r:Rule {id: $id}) RETURN r`, map[string]any{"id": id})
+	if err != nil {
+		return LearnedRule{}, err
+	}
+	if len(res.Records) == 0 {
+		return LearnedRule{}, ErrNotFound
+	}
+	node, _ := res.Records[0].Get("r")
+	return toRule(node), nil
+}
+
 // ActiveRules mengembalikan aturan yang sudah disetujui, yang lama dulu supaya hasil stabil.
 func (s *Store) ActiveRules(ctx context.Context) ([]LearnedRule, error) {
 	rules, err := s.ListRules(ctx, "active")
@@ -390,17 +403,18 @@ func (s *Store) RecordShadowMatch(ctx context.Context, r LearnedRule, groupID, t
 }
 
 // ShadowStats compares shadow matches with human labels. Pending means no human label yet.
-func (s *Store) ShadowStats(ctx context.Context) ([]ShadowStat, error) {
+func (s *Store) ShadowStats(ctx context.Context, project string) ([]ShadowStat, error) {
 	res, err := s.query(ctx, `
 		MATCH (m:ShadowMatch)-[:FROM_RULE]->(r:Rule)
 		OPTIONAL MATCH (m)-[:SHADOW_OF]->(f:Failure)
-		WITH r, m, coalesce(f.manualCategory, '') AS human
-		RETURN r.id AS id, r.pattern AS pattern, r.category AS category, r.summary AS summary,
+		WITH r, m, f, coalesce(f.manualCategory, '') AS human
+		WHERE $project = '' OR f.project = $project
+		RETURN r.id AS id, r.status AS status, r.pattern AS pattern, r.category AS category, r.summary AS summary,
 			count(m) AS matches,
 			sum(CASE WHEN human <> '' AND human = m.category THEN 1 ELSE 0 END) AS confirmed,
 			sum(CASE WHEN human <> '' AND human <> m.category THEN 1 ELSE 0 END) AS overridden,
 			sum(CASE WHEN human = '' THEN 1 ELSE 0 END) AS pending
-		ORDER BY r.id`, nil)
+		ORDER BY r.id`, map[string]any{"project": project})
 	if err != nil {
 		return nil, err
 	}
@@ -408,8 +422,8 @@ func (s *Store) ShadowStats(ctx context.Context) ([]ShadowStat, error) {
 	for _, rec := range res.Records {
 		m := rec.AsMap()
 		stat := ShadowStat{
-			RuleID: i64(m, "id"), Pattern: str(m, "pattern"), Category: str(m, "category"),
-			Summary: str(m, "summary"), Matches: int(i64(m, "matches")),
+			RuleID: i64(m, "id"), Status: str(m, "status"), Pattern: str(m, "pattern"),
+			Category: str(m, "category"), Summary: str(m, "summary"), Matches: int(i64(m, "matches")),
 			Confirmed: int(i64(m, "confirmed")), Overridden: int(i64(m, "overridden")),
 			Pending: int(i64(m, "pending")),
 		}
@@ -417,6 +431,8 @@ func (s *Store) ShadowStats(ctx context.Context) ([]ShadowStat, error) {
 		if decided > 0 {
 			stat.AgreementRate = float64(stat.Confirmed) / float64(decided)
 		}
+		stat.Ready = stat.Status == "shadow" && stat.Matches >= ShadowMinMatches &&
+			decided >= ShadowMinDecided && stat.AgreementRate >= ShadowMinAgreement
 		out = append(out, stat)
 	}
 	return out, nil

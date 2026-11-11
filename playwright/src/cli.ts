@@ -14,7 +14,8 @@
  *   npx redline analyze --run <id> --rules  analisis lokal tanpa AI (rule + needs_ai)
  *   npx redline rules                  daftar aturan
  *   npx redline shadow <id>            jalankan aturan dalam mode shadow (tanpa mengubah hasil)
- *   npx redline shadow --stats         agreement shadow rule vs human label
+ *   npx redline shadow --stats         agreement shadow rule vs human label (--project=<name> scopes it)
+ *   npx redline shadow --promote <id>  usulkan rule shadow menjadi proposed (butuh match/agreement)
  *   npx redline approve <id>           aktifkan aturan (reject <id> untuk menolak)
  *   npx redline score                  rapor: seberapa sering tebakan aturan dan AI terbukti benar
  *   npx redline score --project=name   kalibrasi auto-accept untuk satu project
@@ -135,6 +136,7 @@ type Promotion = {
 };
 type ShadowStat = {
   rule_id: number;
+  status: string;
   pattern: string;
   category: string;
   summary: string;
@@ -143,6 +145,7 @@ type ShadowStat = {
   overridden: number;
   pending: number;
   agreement_rate: number;
+  ready: boolean;
 };
 
 const env = (name: string, fallback: number) => Number(process.env[name] || fallback);
@@ -1083,7 +1086,11 @@ async function rules() {
 
 async function shadow(args: string[]) {
   if (args.includes("--stats")) {
-    const stats = await api<ShadowStat[]>("GET", "/api/rules/shadow/stats");
+    const project = args.find((a) => a.startsWith("--project="))?.split("=")[1] ?? "";
+    const stats = await api<ShadowStat[]>(
+      "GET",
+      `/api/rules/shadow/stats${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+    );
     if (stats.length === 0) {
       console.log("No shadow matches yet. Put a rule in shadow, then let failures be analyzed.");
       return;
@@ -1092,11 +1099,20 @@ async function shadow(args: string[]) {
     for (const s of stats) {
       const decided = s.confirmed + s.overridden;
       const rate = decided > 0 ? `${Math.round(s.agreement_rate * 100)}%` : "-";
+      const ready = s.ready ? " · READY TO PROMOTE" : "";
       console.log(
         `  #${s.rule_id} [${s.category}] /${s.pattern}/  matches ${s.matches}, ` +
-          `confirmed ${s.confirmed}, overridden ${s.overridden}, pending ${s.pending}, agreement ${rate}`,
+          `confirmed ${s.confirmed}, overridden ${s.overridden}, pending ${s.pending}, agreement ${rate}${ready}`,
       );
     }
+    return;
+  }
+  if (args.includes("--promote")) {
+    const target = args.find((a) => /^\d+$/.test(a));
+    if (!target) throw new Error("usage: npx redline shadow --promote <id>");
+    const r = await api<Rule>("POST", `/api/rules/${target}/promote-shadow`, { by: who() });
+    printRule(r);
+    console.log("Promoted to proposed. Activate it with: npx redline approve " + target);
     return;
   }
   const id = args[0];

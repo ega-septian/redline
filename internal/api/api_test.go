@@ -43,8 +43,10 @@ type fakeStore struct {
 	apiKeys            []store.APIKey
 	apiKeyErr          error
 	spend              float64
+	projectSpend       float64
 	autoAccept         store.AutoAcceptStats
 	shadowStats        []store.ShadowStat
+	rules              []store.LearnedRule
 	bulkConfirmed      int
 	healthRows         []store.TestHealthRow
 	testTrend          []store.TestHealthPoint
@@ -499,13 +501,17 @@ func (f *fakeStore) GetGroup(_ context.Context, _ string) (store.Group, []store.
 	}
 	return store.Group{}, nil, store.ErrNotFound
 }
+func (f *fakeStore) SpendSinceProject(context.Context, time.Time, string) (float64, error) {
+	return f.projectSpend, nil
+}
+
 func (f *fakeStore) AutoAcceptStats(_ context.Context, project string) (store.AutoAcceptStats, error) {
 	stats := f.autoAccept
 	stats.Project = project
 	return stats, nil
 }
 
-func (f *fakeStore) ShadowStats(context.Context) ([]store.ShadowStat, error) {
+func (f *fakeStore) ShadowStats(context.Context, string) ([]store.ShadowStat, error) {
 	return f.shadowStats, nil
 }
 
@@ -555,6 +561,14 @@ func (f *fakeStore) ListExperiments(context.Context, string) ([]store.Experiment
 func (f *fakeStore) ListRules(context.Context, string) ([]store.LearnedRule, error) {
 	return []store.LearnedRule{}, nil
 }
+func (f *fakeStore) GetRule(_ context.Context, id int64) (store.LearnedRule, error) {
+	for _, rule := range f.rules {
+		if rule.ID == id {
+			return rule, nil
+		}
+	}
+	return store.LearnedRule{}, store.ErrNotFound
+}
 func (f *fakeStore) ListRuleCandidates(context.Context, string, string) ([]store.RuleCandidate, error) {
 	return []store.RuleCandidate{}, nil
 }
@@ -586,8 +600,9 @@ func (f *fakeStore) ImpactOfEndpoint(_ context.Context, endpoint string) ([]stor
 }
 
 type fakeAnalyzer struct {
-	force bool
-	err   error
+	force    bool
+	err      error
+	promoted []string
 }
 
 func (a *fakeAnalyzer) Analyze(_ context.Context, fp string, force bool) (*store.Analysis, bool, error) {
@@ -614,7 +629,8 @@ func (a *fakeAnalyzer) AnalyzeLocal(_ context.Context, fp string, _ bool) (*stor
 	return &store.Analysis{Fingerprint: fp, Source: "none", Category: "unknown"}, nil
 }
 
-func (a *fakeAnalyzer) PromoteCandidates(context.Context, string) (*analysis.PromotionResult, error) {
+func (a *fakeAnalyzer) PromoteCandidates(_ context.Context, fingerprint string) (*analysis.PromotionResult, error) {
+	a.promoted = append(a.promoted, fingerprint)
 	return &analysis.PromotionResult{Promoted: []store.LearnedRule{}, Rejected: []analysis.RejectedCandidate{}}, nil
 }
 
@@ -990,6 +1006,43 @@ func TestTriage(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/api/groups/accept",
 		strings.NewReader(`{"fingerprints":[],"by":"ega"}`)); rec.Code != http.StatusBadRequest {
 		t.Errorf("bulk accept tanpa fingerprint = %d, want 400", rec.Code)
+	}
+}
+
+func TestPromoteShadowRule(t *testing.T) {
+	fs := &fakeStore{
+		rules: []store.LearnedRule{{ID: 3, Status: "shadow", Category: "test_bug"}},
+		shadowStats: []store.ShadowStat{{RuleID: 3, Status: "shadow", Matches: 10,
+			Confirmed: 9, Overridden: 1, AgreementRate: 0.9, Ready: true}},
+	}
+	h := (&Server{Store: fs, Analyzer: &fakeAnalyzer{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
+	rec := do(h, http.MethodPost, "/api/rules/3/promote-shadow", strings.NewReader(`{"by":"ega"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("promote shadow = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"status": "proposed"`) {
+		t.Errorf("status = %s", rec.Body)
+	}
+
+	fs.shadowStats[0].Ready = false
+	rec = do(h, http.MethodPost, "/api/rules/3/promote-shadow", strings.NewReader(`{"by":"ega"}`))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "not ready") {
+		t.Errorf("not ready = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestBulkAcceptPromotesCandidates(t *testing.T) {
+	an := &fakeAnalyzer{}
+	h := (&Server{Store: &fakeStore{bulkConfirmed: 2}, Analyzer: an,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Routes()
+	rec := do(h, http.MethodPost, "/api/groups/accept",
+		strings.NewReader(`{"fingerprints":["a","b"],"by":"ega"}`))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"confirmed": 2`) {
+		t.Fatalf("bulk accept = %d: %s", rec.Code, rec.Body)
+	}
+	if len(an.promoted) != 2 || an.promoted[0] != "a" || an.promoted[1] != "b" {
+		t.Errorf("candidate promotion after bulk accept = %v", an.promoted)
 	}
 }
 

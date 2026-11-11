@@ -180,7 +180,7 @@ Full list and examples: [`.env.example`](.env.example).
 | `npx redline fix <id>` | Turn a proven test fix into a branch and a PR; reuses a stored proof unless `--force`, and `--dry-run` prints the plan (`--base=<branch>` overrides `main`). |
 | `npx redline impact schemas/brand.ts` | Tests affected by a file or endpoint. |
 | `npx redline score` | How often Redline's guesses were right, plus auto-accept calibration (`--project=<name>` scopes it). |
-| `npx redline shadow <id>` | Evaluate a learned rule without changing analyses; `shadow --stats` shows agreement. |
+| `npx redline shadow <id>` | Evaluate a learned rule without changing analyses; `shadow --stats [--project=<name>]` shows agreement, `shadow --promote <id>` proposes a ready rule. |
 | `npx redline comment` | Create or update a sticky PR comment. |
 | `npx redline analyze --run 112` | Analyze an existing run without rerunning tests. |
 

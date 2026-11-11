@@ -76,7 +76,8 @@ Config is the only place to manage runtime configuration:
 
 - **Contract sources** — OpenAPI JSON URLs, validated from the server and applied without a restart.
 - **API keys** — create, list and revoke Bearer keys for CI and other projects. The secret is shown once; only its SHA-256 hash is stored.
-- **AI usage** — mode, model, daily spend, remaining budget and per-run cap.
+- **AI usage** — mode, model, global and selected-project spend, remaining budget and per-run cap.
+- **Auto-accept calibration** — accepted/confirmed/overridden/pending and the override-rate warning.
 - **Notifications** — a default Discord webhook and optional per-project overrides, with delivery history.
 
 The configuration lives in Neo4j, so backing up the database also backs up these settings.
@@ -92,7 +93,7 @@ The patch is saved to `test-results/redline/<id>.patch`. Patches that remove ass
 
 `npx redline fix <id>` takes a **proven `test_bug` patch** (reusing a stored experiment unless `--force`), creates a branch from `HEAD`, commits it, pushes it, and opens a PR against `main` (override with `REDLINE_PR_BASE` or `--base=<branch>`). The PR body carries the cause, evidence, curl, experiment, patch and a note that it was not auto-merged. Use `--dry-run` to print the branch and body without pushing. The command refuses patches that touch `.env`, CI workflows, secrets or generated directories, and requires `GITHUB_TOKEN` or an authenticated `gh`.
 
-Shadow rules are the safe next step for rule learning: `npx redline shadow <id>` evaluates a rule against new failures and records what it would say, but never changes the analysis. `npx redline shadow --stats` compares those matches with human labels; promotion to an active rule is still a human decision.
+Shadow rules are the safe next step for rule learning: `npx redline shadow <id>` evaluates a rule against new failures and records what it would say, but never changes the analysis. `npx redline shadow --stats [--project=<name>]` compares those matches with human labels. A rule is ready to promote after at least 10 matches, 5 decided cases and 90% agreement; `npx redline shadow --promote <id>` moves it to `proposed`, and activating it is still a human `approve`.
 
 ## Reports
 
