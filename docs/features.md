@@ -54,7 +54,7 @@ A quarantine is an explicit, expiring exception for a known flaky or broken test
 - Expiry is not a release: a test that is still failing will fail the gate again after its `until` date.
 - The Health page suggests quarantines using evidence: at least 5 runs, a recent failure and repeated pass/fail flips. Nothing is quarantined automatically.
 
-## Coverage and impact
+## Coverage
 
 Coverage compares the newest OpenAPI snapshot with the calls recorded by the Redline fixture:
 
@@ -63,7 +63,6 @@ Coverage compares the newest OpenAPI snapshot with the calls recorded by the Red
 - contract changes between runs;
 - which tests call each endpoint.
 
-The Impact page answers the reverse question: which tests import a file (including transitive imports) or call an endpoint. That is useful before changing a shared schema or an API route.
 
 ## Config
 

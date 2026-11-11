@@ -12,7 +12,7 @@ Status: agreed after v0.6.0. Phase 1 shipped in v1.13.0; pilot metrics still ope
 **Scope**
 
 - Read-only UI in the same repository (`web/`, React + TypeScript + Vite, embedded with
-  `go:embed`): Failures list and detail, Runs, Rules, Impact, Scoreboard.
+  `go:embed`): Failures list and detail, Runs, Health, Quarantine, Coverage, Config.
 - Auth: admin username/password for the UI, per-project API keys from Config, and the Bearer key for
   API/CLI. No key in `localStorage`.
 - Labels and rule approval from the UI (the endpoints already exist). This is the first write path.

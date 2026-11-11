@@ -18,7 +18,7 @@ evidence — backend bug, test bug, environment or flaky — before you open the
   backend regression from an outdated test.
 - **Rules first, AI optional.** Deterministic rules run free on every run; Claude is only asked when the
   rules cannot decide.
-- **Tracks the suite over time.** Flake rate, slow tests, quarantines, contract coverage and impact.
+- **Tracks the suite over time.** Flake rate, slow tests, quarantines and contract coverage.
 
 ## A quick look
 
@@ -129,7 +129,7 @@ Full deployment and GitHub Actions guides: [deploy](docs/deploy.md) and [PR comm
 - **Test health** — pass/flake rate, flips, slowest tests, duration regressions.
 - **Suite load errors** — failures before a test can run, classified by cause.
 - **Quarantine** — owner, reason, expiry calendar and evidence-based suggestions.
-- **Coverage and impact** — contract endpoints vs calls, affected tests.
+- **Coverage** — contract endpoints vs recorded calls.
 - **Config** — contract sources, API keys and Discord notifications.
 
 [Feature details →](docs/features.md)

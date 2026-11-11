@@ -9,7 +9,6 @@ import {
   Layers,
   Settings2,
   ShieldOff,
-  Waypoints,
   type LucideIcon,
 } from "lucide-react";
 
@@ -46,7 +45,8 @@ const nav = [
   { label: "Health", icon: Activity, to: "/health" as const },
   { label: "Load errors", icon: FileWarning, to: "/load-errors" as const },
   { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const },
-  { label: "Impact", icon: Waypoints, to: "/impact" as const },
+  // Impact is intentionally hidden from the sidebar; its route and API remain available for
+  // `npx redline impact` and CI.
   { label: "Coverage", icon: Layers, to: "/coverage" as const },
   // Rules and Scoreboard are intentionally hidden from the sidebar for rules-only/AI-optional
   // deployments. Their routes and API remain available for later.
@@ -117,7 +117,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 8).map((item) => (
+          {items.slice(0, 7).map((item) => (
             <NavItem
               key={item.label}
               {...item}
@@ -127,7 +127,7 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Settings
           </div>
-          {items.slice(8).map((item) => (
+          {items.slice(7).map((item) => (
             <NavItem
               key={item.label}
               {...item}
