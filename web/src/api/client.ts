@@ -9,6 +9,7 @@ import type {
   ApiNotificationDelivery,
   ApiSourceCheckEvent,
   ApiCoverage,
+  ApiAIUsage,
   ApiConfig,
   ApiContractSource,
   ApiCreatedKey,
@@ -213,6 +214,7 @@ export const api = {
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
   config: () => request<ApiConfig>("/api/config"),
+  aiUsage: () => request<ApiAIUsage>("/api/ai/usage"),
   sourceHistory: (project: string, limit = 20) =>
     request<ApiSourceCheckEvent[]>(
       `/api/config/contracts/history?project=${encodeURIComponent(project)}&limit=${limit}`,

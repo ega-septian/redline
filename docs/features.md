@@ -70,6 +70,7 @@ Config is the only place to manage runtime configuration:
 
 - **Contract sources** — OpenAPI JSON URLs, validated from the server and applied without a restart.
 - **API keys** — create, list and revoke Bearer keys for CI and other projects. The secret is shown once; only its SHA-256 hash is stored.
+- **AI usage** — mode, model, daily spend, remaining budget and per-run cap.
 - **Notifications** — a default Discord webhook and optional per-project overrides, with delivery history.
 
 The configuration lives in Neo4j, so backing up the database also backs up these settings.
