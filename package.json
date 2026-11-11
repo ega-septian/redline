@@ -1,6 +1,6 @@
 {
   "name": "redline-playwright",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Playwright reporter, fixture and CLI for Redline, the failure-triage server",
   "license": "MIT",
   "author": "Ega Septian",
