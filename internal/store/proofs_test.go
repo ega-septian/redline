@@ -202,6 +202,12 @@ func testShadowRules(t *testing.T, b *store.Store) {
 	if err != nil || len(shadow) != 1 || shadow[0].ID != id {
 		t.Fatalf("shadow rules = %+v, %v", shadow, err)
 	}
+	if got, err := b.GetRule(ctx, id); err != nil || got.Status != "shadow" {
+		t.Errorf("GetRule = %+v, %v", got, err)
+	}
+	if _, err := b.GetRule(ctx, 9999); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("missing rule = %v, want ErrNotFound", err)
+	}
 	if active, _ := b.ActiveRules(ctx); len(active) != 0 {
 		t.Errorf("shadow tidak boleh aktif: %+v", active)
 	}
@@ -225,14 +231,20 @@ func testShadowRules(t *testing.T, b *store.Store) {
 	if err := b.SetLabel(ctx, brands, "backend_bug", "beda", "ega"); err != nil {
 		t.Fatal(err)
 	}
-	stats, err := b.ShadowStats(ctx)
+	stats, err := b.ShadowStats(ctx, "")
 	if err != nil || len(stats) != 1 {
 		t.Fatalf("shadow stats = %+v, %v", stats, err)
 	}
 	got := stats[0]
-	if got.RuleID != id || got.Matches != 3 || got.Confirmed != 1 || got.Overridden != 1 ||
-		got.Pending != 1 || got.AgreementRate != 0.5 {
+	if got.RuleID != id || got.Status != "shadow" || got.Matches != 3 || got.Confirmed != 1 ||
+		got.Overridden != 1 || got.Pending != 1 || got.AgreementRate != 0.5 || got.Ready {
 		t.Errorf("shadow stats salah: %+v", got)
+	}
+	if projectStats, err := b.ShadowStats(ctx, "toolshop"); err != nil || len(projectStats) != 1 {
+		t.Errorf("shadow stats project = %+v, %v", projectStats, err)
+	}
+	if other, err := b.ShadowStats(ctx, "other-project"); err != nil || len(other) != 0 {
+		t.Errorf("shadow stats project lain = %+v, %v", other, err)
 	}
 }
 

@@ -550,6 +550,8 @@ export type ApiAIUsage = {
   model: string;
   daily_budget_usd: number;
   spent_today_usd: number;
+  project?: string;
+  project_spent_today_usd?: number;
   remaining_usd?: number | null;
   max_per_run: number;
   budget_exhausted: boolean;

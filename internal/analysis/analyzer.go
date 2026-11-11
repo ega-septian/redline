@@ -49,7 +49,7 @@ type Store interface {
 	SaveRunContract(ctx context.Context, runID int64, project, sourceURL, document string) (string, error)
 	RunContract(ctx context.Context, runID int64, project string) (id, document string, err error)
 	RecordSourceCheck(ctx context.Context, project string, record store.SourceCheckRecord) error
-	RecordSpend(ctx context.Context, costUSD float64) error
+	RecordSpend(ctx context.Context, project string, costUSD float64) error
 	SpendSince(ctx context.Context, since time.Time) (float64, error)
 }
 
@@ -271,7 +271,7 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	// Biaya dicatat terpisah dari Analysis, karena SaveAnalysis menimpa analisis lama dan analisis
 	// ulang (?force=1) tetap harus terhitung di batas harian.
 	if res.Source == "ai" && res.CostUSD > 0 {
-		if err := a.Store.RecordSpend(ctx, res.CostUSD); err != nil {
+		if err := a.Store.RecordSpend(ctx, facts.Group.Project, res.CostUSD); err != nil {
 			a.logger().Warn("failed to record AI cost", "err", err)
 		}
 	}

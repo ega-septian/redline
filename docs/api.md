@@ -17,10 +17,11 @@ Redline exposes a small HTTP API for the reporter, CLI and custom integrations. 
 | `GET /api/tests`                                                   | Test health: pass/flake rates, top failures, slowest tests, duration regressions and per-test rows |
 | `GET /api/tests/trend?days=30&project=...&limit=20`                | One point per run: passed, failed, flaky, skipped and rates    |
 | `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
-| `GET /api/ai/usage`                                                | AI mode, model, daily budget, spend and per-run cap            |
+| `GET /api/ai/usage?project=...`                                    | AI mode, model, daily budget, global/project spend and per-run cap |
 | `GET /api/auto-accept/stats?project=...`                           | Accepted, confirmed, overridden, pending, override rate and warning |
 | `POST /api/groups/accept`                                          | Confirm auto-accepted groups: `{"fingerprints": [...], "by": "..."}` |
-| `GET /api/rules/shadow/stats`                                      | Shadow rule matches vs human labels and agreement rate          |
+| `GET /api/rules/shadow/stats?project=...`                          | Shadow matches vs human labels, agreement and readiness         |
+| `POST /api/rules/{id}/promote-shadow`                              | Promote a ready shadow rule to `proposed`: `{"by": "..."}`      |
 | `GET /api/tests/quarantine`                                        | Active quarantined tests (`?project=...` scopes them)          |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |

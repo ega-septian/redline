@@ -69,7 +69,7 @@ func (a *Analyzer) AnalyzeLoadError(ctx context.Context, message string) (triage
 	}
 	cost := a.Pricing.Cost(resp.Usage)
 	if cost > 0 {
-		if err := a.Store.RecordSpend(ctx, cost); err != nil {
+		if err := a.Store.RecordSpend(ctx, "", cost); err != nil {
 			a.logger().Warn("failed to record AI load-error cost", "err", err)
 		}
 	}

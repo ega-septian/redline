@@ -672,9 +672,10 @@ function AutoAcceptCard() {
 }
 
 function AIUsageCard() {
+  const { project } = useProject();
   const query = useQuery({
-    queryKey: ["ai-usage"],
-    queryFn: api.aiUsage,
+    queryKey: ["ai-usage", project],
+    queryFn: () => api.aiUsage(project),
     refetchInterval: 30_000,
   });
   const usage = query.data;
@@ -716,9 +717,13 @@ function AIUsageCard() {
         </div>
       ) : (
         <div className="px-3.5 py-3">
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-5">
             <UsageMetric label="Model" value={usage?.model || "not configured"} />
             <UsageMetric label="Spent today" value={money(spent)} />
+            <UsageMetric
+              label={`Project spent${project ? ` (${project})` : ""}`}
+              value={money(usage?.project_spent_today_usd ?? 0)}
+            />
             <UsageMetric label="Daily budget" value={budget > 0 ? money(budget, 2) : "Unlimited"} />
             <UsageMetric
               label="Remaining"

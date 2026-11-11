@@ -496,6 +496,7 @@ const (
 // ShadowStat is the agreement of one shadow rule with human labels.
 type ShadowStat struct {
 	RuleID        int64   `json:"rule_id"`
+	Status        string  `json:"status"`
 	Pattern       string  `json:"pattern"`
 	Category      string  `json:"category"`
 	Summary       string  `json:"summary"`
@@ -504,7 +505,16 @@ type ShadowStat struct {
 	Overridden    int     `json:"overridden"`
 	Pending       int     `json:"pending"`
 	AgreementRate float64 `json:"agreement_rate"`
+	Ready         bool    `json:"ready"`
 }
+
+const (
+	// ShadowMinMatches and ShadowMinDecided keep a tiny sample from promoting a rule.
+	ShadowMinMatches = 10
+	ShadowMinDecided = 5
+	// ShadowMinAgreement is the minimum confirmed share among decided matches.
+	ShadowMinAgreement = 0.90
+)
 
 // Occurrence adalah satu kemunculan kegagalan di satu run.
 type Occurrence struct {

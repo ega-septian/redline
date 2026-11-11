@@ -19,6 +19,15 @@ func (s *Server) handleAIUsage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	project := r.URL.Query().Get("project")
+	projectSpent := spent
+	if project != "" {
+		projectSpent, err = s.Store.SpendSinceProject(r.Context(), start, project)
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+	}
 
 	var remaining *float64
 	exhausted := false
@@ -28,14 +37,16 @@ func (s *Server) handleAIUsage(w http.ResponseWriter, r *http.Request) {
 		exhausted = spent >= settings.DailyBudgetUSD
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":          settings.Enabled,
-		"mode":             settings.Mode,
-		"model":            settings.Model,
-		"daily_budget_usd": settings.DailyBudgetUSD,
-		"spent_today_usd":  spent,
-		"remaining_usd":    remaining,
-		"max_per_run":      settings.MaxPerRun,
-		"budget_exhausted": exhausted,
+		"enabled":                 settings.Enabled,
+		"mode":                    settings.Mode,
+		"model":                   settings.Model,
+		"daily_budget_usd":        settings.DailyBudgetUSD,
+		"spent_today_usd":         spent,
+		"project":                 project,
+		"project_spent_today_usd": projectSpent,
+		"remaining_usd":           remaining,
+		"max_per_run":             settings.MaxPerRun,
+		"budget_exhausted":        exhausted,
 	})
 }
 
