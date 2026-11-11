@@ -44,6 +44,9 @@ export type Failure = {
   acceptedBy: "" | "rule" | "ai";
   acceptedConfidence: Confidence | "";
   acceptedAt?: string;
+  acceptedOutcome: "" | "confirmed" | "overridden";
+  acceptedDecidedAt?: string;
+  acceptedDecidedBy: string;
   summary: string;
   evidence: string[];
   nextStep: string;
@@ -222,6 +225,12 @@ export function toFailure(
         ? group.accepted_confidence
         : "",
     acceptedAt: group.accepted_at ?? undefined,
+    acceptedOutcome:
+      group.accepted_outcome === "confirmed" || group.accepted_outcome === "overridden"
+        ? group.accepted_outcome
+        : "",
+    acceptedDecidedAt: group.accepted_decided_at ?? undefined,
+    acceptedDecidedBy: group.accepted_decided_by ?? "",
     model: analysis?.model,
     summary:
       group.human_label && group.human_note

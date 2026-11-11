@@ -44,6 +44,9 @@ export type ApiGroup = {
   accepted_by?: string;
   accepted_confidence?: string;
   accepted_at?: string | null;
+  accepted_outcome?: string;
+  accepted_decided_at?: string | null;
+  accepted_decided_by?: string;
 };
 
 export type ApiAnalysis = {

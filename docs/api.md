@@ -18,6 +18,7 @@ Redline exposes a small HTTP API for the reporter, CLI and custom integrations. 
 | `GET /api/tests/trend?days=30&project=...&limit=20`                | One point per run: passed, failed, flaky, skipped and rates    |
 | `GET /api/tests/history?test=...`                                  | One test's run timeline (`@TC-` ID or test key)                |
 | `GET /api/ai/usage`                                                | AI mode, model, daily budget, spend and per-run cap            |
+| `GET /api/auto-accept/stats`                                       | Accepted, confirmed, overridden, pending and override rate     |
 | `GET /api/tests/quarantine`                                        | Active quarantined tests (`?project=...` scopes them)          |
 | `PUT /api/tests/quarantine`                                        | Quarantine a test: `{"test": "TC-...", "owner": "...", "reason": "...", "days": 7}` |
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |

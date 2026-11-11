@@ -6,6 +6,7 @@
  *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
  *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
  *   npx redline fix <id> --dry-run     tampilkan branch dan PR body tanpa push
+ *   npx redline fix <id> --force       buktikan ulang walau sudah ada eksperimen yang lulus
  *   npx redline learn                  promosikan candidate yang terbukti, lalu AI mengusulkan aturan baru
  *   npx redline candidates             daftar rule candidate (draft/proposed/rejected)
  *   npx redline analyze --run <id>     analisis failure pada run yang sudah ada (butuh AI di server)
@@ -77,6 +78,18 @@ type Fix = {
 };
 type Attempt = { hypothesis: string; patch: string; result: string };
 type RunResult = { runs: number; passes: number; error: string };
+type Experiment = {
+  id: number;
+  group_id: string;
+  kind: string;
+  outcome: string;
+  category: string;
+  hypothesis: string;
+  patch: string;
+  runs: number;
+  passes: number;
+  created_at: string;
+};
 type VerifyOutcome = {
   cost: number;
   proven: boolean;
@@ -210,9 +223,48 @@ async function verify(args: string[]) {
 async function fix(args: string[]) {
   const targets = args.filter((a) => !a.startsWith("--"));
   if (targets.length !== 1) {
-    throw new Error("usage: npx redline fix <fingerprint> [--dry-run]");
+    throw new Error("usage: npx redline fix <fingerprint> [--dry-run] [--force]");
+  }
+  const force = args.includes("--force");
+  const dryRun = args.includes("--dry-run");
+  if (!force) {
+    const proof = await storedProof(targets[0]);
+    if (proof) {
+      console.log(`  using stored experiment #${proof.experimentId}; no rerun or AI call.`);
+      try {
+        await openPullRequest(proof, dryRun);
+      } catch (e) {
+        console.log(`  ✗ PR failed: ${(e as Error).message}`);
+      }
+      return;
+    }
   }
   return verify([...args, "--pr"]);
+}
+
+/** Reuse the latest passed patch experiment, so `fix` does not rerun or call AI again. */
+async function storedProof(fp: string): Promise<VerifyOutcome | null> {
+  const detail = await api<{
+    group: { test: string; test_case_id?: string };
+    experiments?: Experiment[];
+  }>("GET", `/api/groups/${fp}`);
+  const proof = (detail.experiments ?? [])
+    .filter((e) => e.kind === "patch" && e.outcome === "passed" && e.patch)
+    .sort((a, b) => b.id - a.id)[0];
+  if (!proof) return null;
+  return {
+    cost: 0,
+    proven: true,
+    failure: {
+      fingerprint: fp,
+      test: detail.group.test,
+      id: detail.group.test_case_id,
+    },
+    patch: proof.patch,
+    category: proof.category,
+    hypothesis: proof.hypothesis,
+    experimentId: proof.id,
+  };
 }
 
 async function groupAsFailure(fp: string): Promise<Failure> {
@@ -934,6 +986,24 @@ async function score() {
     console.log(
       `  ${sourceName(s.source).padEnd(7)} ${s.correct}/${s.graded} correct (${pct})${unknown}`,
     );
+  }
+  try {
+    const auto = await api<{
+      accepted: number;
+      confirmed: number;
+      overridden: number;
+      pending: number;
+      override_rate: number;
+    }>("GET", "/api/auto-accept/stats");
+    if (auto.accepted > 0) {
+      const rate = Math.round(auto.override_rate * 100);
+      console.log(
+        `\nAuto-accept: ${auto.confirmed} confirmed, ${auto.overridden} overridden, ${auto.pending} pending` +
+          ` (override ${rate}% of decided)`,
+      );
+    }
+  } catch {
+    // Older servers do not have the endpoint; the scoreboard is still useful.
   }
   if (board.entries.length === 0) {
     console.log("\nNo predictions to grade yet. Run: npx redline verify");

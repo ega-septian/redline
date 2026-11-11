@@ -127,6 +127,13 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Info("retention disabled (RETENTION_DAYS=0); all test details are kept")
 	}
+	if cfg.AutoAccept == "high" {
+		if n, err := db.BackfillAcceptance(ctx); err != nil {
+			log.Warn("auto-accept backfill failed", "err", err)
+		} else if n > 0 {
+			log.Info("backfilled accepted analyses", "groups", n)
+		}
+	}
 
 	analyzer := &analysis.Analyzer{Store: db, Model: cfg.AnthropicModel, Log: log,
 		AIMode: cfg.AIMode, AutoAccept: cfg.AutoAccept, MaxAIPerRun: cfg.AIMaxPerRun}

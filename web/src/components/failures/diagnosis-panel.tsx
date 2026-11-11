@@ -109,6 +109,14 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
               <>
                 <Badge tone="brand">Confirmed by human</Badge>
                 <span className="text-[11px] text-faint">{categoryLabel[category]}</span>
+                {failure.acceptedOutcome === "confirmed" && (
+                  <span className="text-[10.5px] text-faint">AI suggestion confirmed</span>
+                )}
+                {failure.acceptedOutcome === "overridden" && (
+                  <span className="text-[10.5px] text-faint">
+                    AI suggested {categoryLabel[failure.acceptedCategory || "unclear"]}, overridden
+                  </span>
+                )}
               </>
             )}
             {needsAI && (

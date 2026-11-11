@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"redline/internal/store"
 )
 
 type aiUsageBody struct {
@@ -51,6 +53,25 @@ func TestAIUsageUnlimitedBudget(t *testing.T) {
 	body := getAIUsage(t, &Server{Store: &fakeStore{spend: 0.5}})
 	if body.Enabled || body.Mode != "fallback" || body.RemainingUSD != nil || body.BudgetExhausted {
 		t.Fatalf("usage = %+v", body)
+	}
+}
+
+func TestAutoAcceptStats(t *testing.T) {
+	srv := &Server{Store: &fakeStore{autoAccept: store.AutoAcceptStats{
+		Accepted: 4, Confirmed: 2, Overridden: 1, Pending: 1, OverrideRate: 1.0 / 3.0,
+	}}}
+	rec := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/auto-accept/stats", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var body store.AutoAcceptStats
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Accepted != 4 || body.Confirmed != 2 || body.Overridden != 1 || body.Pending != 1 ||
+		body.OverrideRate != 1.0/3.0 {
+		t.Fatalf("stats = %+v", body)
 	}
 }
 

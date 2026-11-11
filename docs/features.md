@@ -19,7 +19,9 @@ The Failures page is the main workspace:
 
 Analyses are requested by `REDLINE_AI=1 npx playwright test`, `npx redline analyze`, or the Analyze action in the UI. The server does not call AI for every ingest automatically. `AI_MAX_PER_RUN` defaults to 20 and falls back to rules after the limit; `AI_DAILY_BUDGET_USD` caps the total daily spend.
 
-`AUTO_ACCEPT=high` (default) marks high-confidence rule/AI results as **accepted**, so the Failures page does not ask for confirmation on clear cases. Accepted is not human truth: it is a separate field, and the scoreboard and rule learning still use only human labels and proven experiments. Lower-confidence re-analysis clears a stale acceptance; a human label always wins.
+`AUTO_ACCEPT=high` (default) marks high-confidence rule/AI results as **accepted**, so the Failures page does not ask for confirmation on clear cases. Accepted is not human truth: it is a separate field, and the scoreboard and rule learning still use only human labels and proven experiments. Lower-confidence re-analysis clears a stale acceptance; a human label always wins. On startup Redline backfills existing high-confidence analyses, so groups created before the feature get the same state without a manual re-analysis.
+
+Calibration is available from `GET /api/auto-accept/stats` and `npx redline score`: how many groups were accepted, confirmed by a human, overridden to another category, still pending, and the override rate of decided cases. Use a high override rate as a signal to set `AUTO_ACCEPT=off` or tighten the confidence rule.
 
 ## Runs and comparison
 
