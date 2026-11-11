@@ -4,6 +4,8 @@
  *
  *   npx redline verify                 eksperimen untuk kegagalan run terakhir
  *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
+ *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
+ *   npx redline fix <id> --dry-run     tampilkan branch dan PR body tanpa push
  *   npx redline learn                  promosikan candidate yang terbukti, lalu AI mengusulkan aturan baru
  *   npx redline candidates             daftar rule candidate (draft/proposed/rejected)
  *   npx redline analyze --run <id>     analisis failure pada run yang sudah ada (butuh AI di server)
@@ -30,14 +32,23 @@
  *   REDLINE_VERIFY_ATTEMPTS   percobaan patch per kegagalan, default 2
  *   REDLINE_RERUNS            berapa kali rerun, default 2
  *   REDLINE_KEEP_SANDBOX=1    jangan hapus folder salinan (untuk debug)
- *   GITHUB_TOKEN              token dengan izin pull-requests:write, untuk `comment`
+ *   GITHUB_TOKEN              token dengan izin pull-requests:write, untuk `comment` dan `fix`
  *   GITHUB_REPOSITORY         owner/repo, diisi GitHub Actions
  *   GITHUB_EVENT_PATH         event pull_request, diisi GitHub Actions
  *   REDLINE_PR_NUMBER         override nomor PR kalau tidak lewat Actions
+ *   REDLINE_PR_BASE           base branch untuk `fix`, default main
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { userInfo } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import dotenv from "dotenv";
 import { git, makeSandbox, resetSandbox } from "./sandbox";
@@ -66,6 +77,15 @@ type Fix = {
 };
 type Attempt = { hypothesis: string; patch: string; result: string };
 type RunResult = { runs: number; passes: number; error: string };
+type VerifyOutcome = {
+  cost: number;
+  proven: boolean;
+  failure: Failure;
+  patch?: string;
+  category?: string;
+  hypothesis?: string;
+  experimentId?: number;
+};
 type Rule = {
   id: number;
   pattern: string;
@@ -140,7 +160,9 @@ async function api<T>(method: string, url: string, body?: unknown): Promise<T> {
 
 async function verify(args: string[]) {
   const force = args.includes("--force");
-  const fingerprints = args.filter((a) => a !== "--force");
+  const dryRun = args.includes("--dry-run");
+  const pr = args.includes("--pr") || dryRun;
+  const fingerprints = args.filter((a) => !a.startsWith("--"));
   let targets: Failure[];
   if (fingerprints.length > 0) {
     const known = new Map(lastRun().failures.map((f) => [f.fingerprint, f]));
@@ -169,12 +191,28 @@ async function verify(args: string[]) {
       `\n━━ ${i + 1}/${targets.length} ${f.id && f.id !== "-" ? f.id + " " : ""}${f.test}`,
     );
     try {
-      cost += await verifyOne(f, force);
+      const outcome = await verifyOne(f, force);
+      cost += outcome.cost;
+      if (pr && outcome.proven && outcome.patch) {
+        try {
+          await openPullRequest(outcome, dryRun);
+        } catch (e) {
+          console.log(`  ✗ PR failed: ${(e as Error).message}`);
+        }
+      }
     } catch (e) {
       console.log(`  ✗ experiment failed to run: ${(e as Error).message}`);
     }
   }
   if (cost > 0) console.log(`\nAI cost: $${cost.toFixed(5)}`);
+}
+
+async function fix(args: string[]) {
+  const targets = args.filter((a) => !a.startsWith("--"));
+  if (targets.length !== 1) {
+    throw new Error("usage: npx redline fix <fingerprint> [--dry-run]");
+  }
+  return verify([...args, "--pr"]);
 }
 
 async function groupAsFailure(fp: string): Promise<Failure> {
@@ -205,7 +243,7 @@ function specPath(file: string): string {
   throw new Error(`file ${file} does not exist in this project`);
 }
 
-async function verifyOne(f: Failure, force: boolean): Promise<number> {
+async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
   const { project, title, ...key } = parseTestKey(f.test);
   const file = specPath(key.file);
 
@@ -217,7 +255,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
     if (a.source === "experiment" && !force) {
       console.log(`  already proven: ${categoryName(a.category)}. ${a.summary}`);
       console.log(`  (repeat the experiment with: npx redline verify --force)`);
-      return 0;
+      return { cost, failure: f, proven: false };
     }
     if (!guess.cached && a.source === "ai") cost += a.cost_usd;
     console.log(
@@ -260,7 +298,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
         `  ⚠ INCONSISTENT: the test passed when rerun. Likely flaky or a transient condition.`,
       );
       printVerdicts(rerunSaved.verdicts);
-      return cost;
+      return { cost, failure: f, proven: false, category: "flaky" };
     }
 
     // 2. Patch dari AI, beberapa percobaan.
@@ -287,7 +325,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
           passes: 0,
           cost_usd: fix.cost_usd,
         });
-        return cost;
+        return { cost, failure: f, proven: false, category: fix.category };
       }
 
       const applied = applyEdits(sandbox, files, fix.edits);
@@ -335,8 +373,19 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
         console.log(`  ✓ PROVEN: test passed after the patch.\n`);
         console.log(indent(patch, "      "));
         console.log(`\n      Terapkan: git apply ${path.relative(ROOT, out)}`);
+        if (fix.category === "test_bug") {
+          console.log(`      Buka PR: npx redline fix ${f.fingerprint}`);
+        }
         printVerdicts(saved.verdicts);
-        return cost;
+        return {
+          cost,
+          failure: f,
+          proven: true,
+          patch,
+          category: fix.category,
+          hypothesis: fix.hypothesis,
+          experimentId: saved.id,
+        };
       }
       attempts.push({ hypothesis: fix.hypothesis, patch, result: result.error });
       resetSandbox(sandbox);
@@ -344,10 +393,183 @@ async function verifyOne(f: Failure, force: boolean): Promise<number> {
     console.log(
       `  ✗ Not proven after ${maxAttempts} attempts. The failed hypothesis is stored in Redline.`,
     );
-    return cost;
+    return { cost, failure: f, proven: false };
   } finally {
     if (process.env.REDLINE_KEEP_SANDBOX === "1") console.log(`  (copy saved at ${sandbox})`);
     else rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+// ---------- fix -> PR ----------
+
+type PullRequestPlan = {
+  repo: string;
+  base: string;
+  branch: string;
+  title: string;
+  body: string;
+  patch: string;
+};
+
+function shortTest(test: string): string {
+  const parts = test.split(" › ");
+  return parts.slice(2).join(" › ") || test;
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+function githubRepo(): string {
+  if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
+  const remote = git(ROOT, ["remote", "get-url", "origin"]).trim();
+  const match = remote.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (!match) throw new Error("cannot detect the GitHub repo; set GITHUB_REPOSITORY=owner/repo");
+  return `${match[1]}/${match[2]}`;
+}
+
+function githubToken(): string {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  const r = spawnSync("gh", ["auth", "token"], { encoding: "utf8" });
+  if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+  throw new Error("GITHUB_TOKEN (or an authenticated `gh`) is required to open a PR");
+}
+
+/** Reject patches that touch secrets, CI, or generated files. */
+function assertSafePatch(patch: string) {
+  if (!patch.trim()) throw new Error("patch is empty");
+  if (/^(<<<<<<<|=======|>>>>>>>)/m.test(patch)) throw new Error("patch contains conflict markers");
+  const forbidden = [
+    ".env",
+    ".github/workflows/",
+    ".git/",
+    "secrets/",
+    "credentials",
+    "node_modules/",
+    "test-results/",
+  ];
+  const unsafe = (file: string) =>
+    forbidden.some((prefix) => file === prefix || file.startsWith(prefix));
+  for (const line of patch.split("\n")) {
+    for (const prefix of ["+++ b/", "--- a/", "rename from ", "rename to "]) {
+      if (!line.startsWith(prefix)) continue;
+      const file = line.slice(prefix.length);
+      if (unsafe(file)) throw new Error(`refusing to open a PR that changes ${file}`);
+    }
+  }
+}
+
+function pullRequestPlan(outcome: VerifyOutcome): PullRequestPlan {
+  if (!outcome.patch) throw new Error("no proven patch to open");
+  if (outcome.category !== "test_bug") {
+    throw new Error(`only proven test_bug patches can open a PR, got ${outcome.category ?? "unknown"}`);
+  }
+  assertSafePatch(outcome.patch);
+  const repo = githubRepo();
+  const base = process.env.REDLINE_PR_BASE || "main";
+  const test = shortTest(outcome.failure.test);
+  const id = outcome.failure.id && outcome.failure.id !== "-" ? outcome.failure.id : "";
+  const branch = `redline/fix-${slug(id || outcome.failure.fingerprint.slice(0, 8))}-${Date.now().toString(36)}`;
+  const title = `fix(test): ${id ? id + " " : ""}${test}`.slice(0, 72);
+  const patch = outcome.patch.length > 50_000 ? outcome.patch.slice(0, 50_000) + "\n… (truncated)" : outcome.patch;
+  const body = `## Cause
+
+${outcome.hypothesis ?? "Proven test fix."}
+
+- Category: \`test_bug\`
+- Test: \`${outcome.failure.test}\`
+- Fingerprint: \`${outcome.failure.fingerprint}\`
+${outcome.experimentId ? `- Redline experiment: #${outcome.experimentId}` : ""}
+
+## Verification
+
+- Redline reran the test with this patch: **1/1 passed**.
+- Redline rejects patches that remove assertions, add skip/only/retry, or wrap errors in try/catch.
+- This PR was created by Redline and is **not auto-merged**. A human reviews and merges it.
+
+## Patch
+
+\`\`\`diff
+${patch}
+\`\`\`
+
+## Reproduce
+
+\`\`\`bash
+npx redline verify ${outcome.failure.fingerprint} --force
+\`\`\`
+`;
+  return { repo, base, branch, title, body, patch: outcome.patch };
+}
+
+async function openPullRequest(outcome: VerifyOutcome, dryRun: boolean) {
+  const plan = pullRequestPlan(outcome);
+  console.log(`\n  PR plan: ${plan.repo} ${plan.branch} -> ${plan.base}`);
+  console.log(`  ${plan.title}`);
+  if (dryRun) {
+    console.log(`\n${plan.body}`);
+    console.log("  (dry run: no branch, push, or PR was created)");
+    return;
+  }
+  const dirty = git(ROOT, ["status", "--porcelain"])
+    .split("\n")
+    .filter((line) => line.trim() && !line.startsWith("??"));
+  if (dirty.length > 0) {
+    throw new Error("commit or stash tracked changes before opening a PR");
+  }
+  const token = githubToken();
+  const patchFile = path.join(tmpdir(), `redline-${Date.now().toString(36)}.patch`);
+  const worktree = mkdtempSync(path.join(tmpdir(), "redline-pr-"));
+  rmSync(worktree, { recursive: true, force: true });
+  writeFileSync(patchFile, plan.patch);
+  try {
+    git(ROOT, ["worktree", "add", "-b", plan.branch, worktree, "HEAD"]);
+    git(worktree, ["apply", "--check", patchFile]);
+    git(worktree, ["apply", patchFile]);
+    git(worktree, ["add", "-A"]);
+    git(worktree, ["diff", "--cached", "--check"]);
+    git(worktree, [
+      "-c",
+      "user.name=redline",
+      "-c",
+      "user.email=redline@localhost",
+      "commit",
+      "-m",
+      plan.title,
+    ]);
+    git(worktree, ["push", "-u", "origin", plan.branch]);
+    const response = await fetch(`https://api.github.com/repos/${plan.repo}/pulls`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "redline-playwright",
+      },
+      body: JSON.stringify({
+        title: plan.title,
+        head: plan.branch,
+        base: plan.base,
+        body: plan.body,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as { html_url?: string; message?: string };
+    if (!response.ok) {
+      throw new Error(`GitHub rejected the PR (${response.status}): ${data.message ?? "unknown error"}`);
+    }
+    console.log(`  ✓ PR opened: ${data.html_url ?? `${plan.repo}#${plan.branch}`}`);
+  } finally {
+    try {
+      git(ROOT, ["worktree", "remove", "--force", worktree]);
+    } catch {
+      // The worktree is only a temporary copy; a cleanup failure must not hide the PR result.
+    }
+    rmSync(patchFile, { force: true });
   }
 }
 
@@ -845,6 +1067,8 @@ async function main() {
   switch (cmd) {
     case "verify":
       return verify(args);
+    case "fix":
+      return fix(args);
     case "analyze":
       return analyzeRun(args);
     case "learn":

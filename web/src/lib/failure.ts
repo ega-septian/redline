@@ -40,6 +40,10 @@ export type Failure = {
   triageNote: string;
   triageUpdatedBy: string;
   triageUpdatedAt?: string;
+  acceptedCategory: Category | "";
+  acceptedBy: "" | "rule" | "ai";
+  acceptedConfidence: Confidence | "";
+  acceptedAt?: string;
   summary: string;
   evidence: string[];
   nextStep: string;
@@ -206,6 +210,18 @@ export function toFailure(
     triageNote: group.triage_note ?? "",
     triageUpdatedBy: group.triage_updated_by ?? "",
     triageUpdatedAt: group.triage_updated_at ?? undefined,
+    acceptedCategory: categories.includes(group.accepted_category as Category)
+      ? (group.accepted_category as Category)
+      : "",
+    acceptedBy:
+      group.accepted_by === "rule" || group.accepted_by === "ai" ? group.accepted_by : "",
+    acceptedConfidence:
+      group.accepted_confidence === "high" ||
+      group.accepted_confidence === "medium" ||
+      group.accepted_confidence === "low"
+        ? group.accepted_confidence
+        : "",
+    acceptedAt: group.accepted_at ?? undefined,
     model: analysis?.model,
     summary:
       group.human_label && group.human_note

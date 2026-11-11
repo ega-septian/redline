@@ -68,6 +68,7 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
   const proven = failure.source === "experiment";
   const confirmed = failure.source === "human";
   const needsAI = failure.source === "none";
+  const accepted = failure.acceptedBy !== "" && !confirmed && !proven;
   const canConfirm = hasDiagnosis && initial !== "unknown";
   const category = failure.category;
 
@@ -91,6 +92,11 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
                 <span className="text-[11px] text-faint">
                   {failure.source === "ai" ? "suggested by AI" : "suggested by rule"}
                 </span>
+                {accepted && (
+                  <Badge tone="brand">
+                    Accepted by {failure.acceptedBy === "ai" ? "AI" : "rule"}
+                  </Badge>
+                )}
               </>
             )}
             {proven && (
@@ -112,11 +118,26 @@ export function DiagnosisPanel({ failure }: { failure: Failure }) {
             )}
           </div>
 
+          {accepted && (
+            <p className="mt-1.5 text-[10.5px] text-faint">
+              High confidence, so no confirmation is needed. Confirm it only when you want this to
+              become human truth for the scoreboard and rule learning.
+            </p>
+          )}
+
           <div className="mt-2 flex flex-wrap gap-1.5">
             {canConfirm && (
-              <Button variant="default" onClick={confirm} disabled={mutation.isPending}>
+              <Button
+                variant={accepted ? "outline" : "default"}
+                onClick={confirm}
+                disabled={mutation.isPending}
+              >
                 <Check className="h-3.5 w-3.5" />
-                {mutation.isPending ? "Saving…" : "Confirm diagnosis"}
+                {mutation.isPending
+                  ? "Saving…"
+                  : accepted
+                    ? "Confirm as truth"
+                    : "Confirm diagnosis"}
               </Button>
             )}
             {confirmed || needsAI ? (

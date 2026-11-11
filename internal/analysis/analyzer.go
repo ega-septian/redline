@@ -30,6 +30,7 @@ type Store interface {
 	Knowledge(ctx context.Context, fingerprint string) (*store.Knowledge, error)
 	GetAnalysis(ctx context.Context, fingerprint, promptVersion string) (store.Analysis, error)
 	SaveAnalysis(ctx context.Context, a store.Analysis) error
+	SetAcceptance(ctx context.Context, fingerprint, category, by, confidence string) error
 	LatestProof(ctx context.Context, groupID string) (store.Experiment, error)
 	ActiveRules(ctx context.Context) ([]store.LearnedRule, error)
 	ListRules(ctx context.Context, status string) ([]store.LearnedRule, error)
@@ -72,6 +73,9 @@ type Analyzer struct {
 	// AIMode: "fallback" (default) or "always". Always calls AI even when a rule is confident,
 	// keeping the rule result as fallback if AI is unavailable.
 	AIMode string
+	// AutoAccept: "high" (default) marks high-confidence rule/AI results as accepted, so the UI
+	// does not ask for confirmation. Empty/off disables it. It never writes human labels.
+	AutoAccept string
 	// MaxAIPerRun limits AI calls per failing run (0 = unlimited).
 	MaxAIPerRun int
 
@@ -121,6 +125,8 @@ func (a *Analyzer) AnalyzeLocal(ctx context.Context, fingerprint string, force b
 			res := fromProof(proof)
 			res.Fingerprint = fingerprint
 			res.PromptVersion = PromptVersion
+			// A proven experiment is stronger than an automatic acceptance.
+			_ = a.Store.SetAcceptance(ctx, fingerprint, "", "", "")
 			return res, nil
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return nil, err
@@ -164,7 +170,30 @@ func (a *Analyzer) saveLocal(ctx context.Context, res *store.Analysis) error {
 	}
 	// Tebakan rule/eksperimen tetap masuk rapor; source none/human diabaikan oleh SavePrediction.
 	_ = a.Store.SavePrediction(ctx, *res)
+	a.accept(ctx, res)
 	return nil
+}
+
+// accept records a high-confidence rule/AI result as accepted for the UI. It deliberately does not
+// write manualCategory: only a human label or a passing experiment is truth for the scoreboard and
+// rule learning. Lower-confidence results clear a stale acceptance.
+func (a *Analyzer) accept(ctx context.Context, res *store.Analysis) {
+	if a.AutoAccept != "high" {
+		return
+	}
+	high := (res.Source == "rule" || res.Source == "ai") && res.Confidence == "high" &&
+		res.Category != "" && res.Category != "unknown" && res.Category != "flaky"
+	if high {
+		if err := a.Store.SetAcceptance(ctx, res.Fingerprint, res.Category, res.Source, res.Confidence); err != nil {
+			a.logger().Warn("failed to store accepted analysis", "fingerprint", res.Fingerprint, "err", err)
+		}
+		return
+	}
+	// A human label or a proven experiment is stronger than an automatic acceptance; anything
+	// else means the previous acceptance is stale.
+	if err := a.Store.SetAcceptance(ctx, res.Fingerprint, "", "", ""); err != nil {
+		a.logger().Warn("failed to clear accepted analysis", "fingerprint", res.Fingerprint, "err", err)
+	}
 }
 
 func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.Facts, force bool) (res *store.Analysis, cached bool, err error) {
@@ -181,6 +210,7 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	// force (misalnya kelompok regressed): bukti lama belum tentu berlaku, jadi dilewati.
 	if !force {
 		if proof, err := a.Store.LatestProof(ctx, fingerprint); err == nil {
+			_ = a.Store.SetAcceptance(ctx, fingerprint, "", "", "")
 			return fromProof(proof), false, nil
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return nil, false, err
@@ -244,6 +274,7 @@ func (a *Analyzer) decide(ctx context.Context, fingerprint string, facts *store.
 	if err := a.Store.SaveAnalysis(ctx, *res); err != nil {
 		return nil, false, fmt.Errorf("store analysis: %w", err)
 	}
+	a.accept(ctx, res)
 	// Rapor: tebakan dicatat supaya nanti bisa dibandingkan dengan bukti. Gagal mencatat tidak menggagalkan analisis.
 	if err := a.Store.SavePrediction(ctx, *res); err != nil {
 		a.logger().Warn("failed to record prediction", "fingerprint", fingerprint, "err", err)

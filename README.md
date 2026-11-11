@@ -158,11 +158,14 @@ Everything has a working default. The settings you are most likely to change:
 | `ARTIFACT_DIR` | `./artifacts` | Trace and screenshot storage. |
 | `ANTHROPIC_API_KEY` | empty | AI analysis and patches; empty = rules only. |
 | `AI_MODE` | `fallback` | `fallback` calls AI only when rules are unsure; `always` calls AI for every failure group. |
+| `AUTO_ACCEPT` | `high` | Mark high-confidence rule/AI results as accepted in the UI; `off` asks for confirmation. Accepted is not human truth. |
 | `AI_MAX_PER_RUN` | `20` | Maximum AI calls per run; rules take over after the limit. |
 | `AI_DAILY_BUDGET_USD` | `0` | Stop AI calls after this daily budget. |
 | `VOYAGE_API_KEY` | empty | Find similar past proven cases. |
 
 `AI_MODE=always` only changes how requested analyses are decided; it does not analyze every ingest automatically. Run `REDLINE_AI=1 npx playwright test` (or `npx redline analyze`) to request AI analysis. `AI_MAX_PER_RUN` caps that run and falls back to rules after the limit; the reporter also has its own `REDLINE_AI_MAX` (default 10).
+
+With `AUTO_ACCEPT=high` (default), high-confidence rule/AI results are marked **accepted** so the UI does not ask for confirmation. Accepted is separate from a human label: the scoreboard and rule learning still use only human labels and proven experiments. Set `AUTO_ACCEPT=off` to require confirmation for every failure.
 
 Measured accuracy and cost for each mode: [Benchmark](docs/benchmark.md).
 
@@ -174,6 +177,7 @@ Full list and examples: [`.env.example`](.env.example).
 | --- | --- |
 | `REDLINE_AI=1 npx playwright test` | Run tests and explain each failure. |
 | `npx redline verify` | Prove the cause of the last run's failures. |
+| `npx redline fix <id>` | Turn a proven test fix into a branch and a PR; `--dry-run` prints the plan. |
 | `npx redline impact schemas/brand.ts` | Tests affected by a file or endpoint. |
 | `npx redline score` | How often Redline's guesses were right. |
 | `npx redline comment` | Create or update a sticky PR comment. |

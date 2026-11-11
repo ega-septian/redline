@@ -48,6 +48,10 @@ type Config struct {
 	// AIMode: "fallback" (default) calls AI only when rules are not high-confidence; "always"
 	// calls AI for every new/regressed group while keeping rules as fallback.
 	AIMode string
+	// AutoAccept: "high" (default) records high-confidence rule/AI results as accepted so the UI
+	// does not ask for confirmation. It never becomes human truth and never feeds rule learning.
+	// "off" disables the automatic acceptance.
+	AutoAccept string
 	// AIMaxPerRun limits AI calls per run ID (0 = unlimited). It protects against a run with
 	// hundreds of distinct causes; rules remain available as fallback.
 	AIMaxPerRun int
@@ -127,6 +131,10 @@ func Load() (Config, error) {
 	if aiMode != "fallback" && aiMode != "always" {
 		return Config{}, fmt.Errorf("AI_MODE must be fallback or always, got %q", aiMode)
 	}
+	autoAccept := strings.ToLower(strings.TrimSpace(getenv("AUTO_ACCEPT", "high")))
+	if autoAccept != "high" && autoAccept != "off" {
+		return Config{}, fmt.Errorf("AUTO_ACCEPT must be high or off, got %q", autoAccept)
+	}
 	aiMaxPerRun, err := intEnv("AI_MAX_PER_RUN", 20)
 	if err != nil {
 		return Config{}, err
@@ -158,6 +166,7 @@ func Load() (Config, error) {
 		AnthropicInputPrice:  inputPrice,
 		AnthropicOutputPrice: outputPrice,
 		AIMode:               aiMode,
+		AutoAccept:           autoAccept,
 		AIMaxPerRun:          aiMaxPerRun,
 		AIDailyBudgetUSD:     budget,
 

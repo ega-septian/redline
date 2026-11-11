@@ -19,6 +19,8 @@ The Failures page is the main workspace:
 
 Analyses are requested by `REDLINE_AI=1 npx playwright test`, `npx redline analyze`, or the Analyze action in the UI. The server does not call AI for every ingest automatically. `AI_MAX_PER_RUN` defaults to 20 and falls back to rules after the limit; `AI_DAILY_BUDGET_USD` caps the total daily spend.
 
+`AUTO_ACCEPT=high` (default) marks high-confidence rule/AI results as **accepted**, so the Failures page does not ask for confirmation on clear cases. Accepted is not human truth: it is a separate field, and the scoreboard and rule learning still use only human labels and proven experiments. Lower-confidence re-analysis clears a stale acceptance; a human label always wins.
+
 ## Runs and comparison
 
 The Runs page lists every uploaded run with branch, commit, source, result counts, duration and who triggered it. Open a run to see:
@@ -83,6 +85,8 @@ The configuration lives in Neo4j, so backing up the database also backs up these
 2. ask Claude for the smallest patch and rerun; if it passes, the cause is proven.
 
 The patch is saved to `test-results/redline/<id>.patch`. Patches that remove assertions or add `skip`, `try/catch` or retries are rejected.
+
+`npx redline fix <id>` takes a **proven `test_bug` patch**, creates a branch from `HEAD`, commits it, pushes it, and opens a PR against `main` (override with `REDLINE_PR_BASE`). The PR body carries the cause, experiment, patch and a note that it was not auto-merged. Use `--dry-run` to print the branch and body without pushing. The command refuses patches that touch `.env`, CI workflows, secrets or generated directories, and requires `GITHUB_TOKEN` or an authenticated `gh`.
 
 ## Reports
 

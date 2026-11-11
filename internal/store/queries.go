@@ -145,6 +145,8 @@ func toGroup(rec *neo4j.Record) Group {
 		LocalOnly:    p["localOnly"] == true,
 		TriageStatus: str(p, "triageStatus"), TriageOwner: str(p, "triageOwner"),
 		TriageNote: str(p, "triageNote"), TriageUpdatedBy: str(p, "triageUpdatedBy"),
+		AcceptedCategory: str(p, "acceptedCategory"), AcceptedBy: str(p, "acceptedBy"),
+		AcceptedConfidence: str(p, "acceptedConfidence"),
 	}
 	if g.TriageStatus == "" {
 		g.TriageStatus = "open"
@@ -152,6 +154,10 @@ func toGroup(rec *neo4j.Record) Group {
 	if v, ok := p["triageUpdatedAt"]; ok && v != nil {
 		t := local(v)
 		g.TriageUpdatedAt = &t
+	}
+	if v, ok := p["acceptedAt"]; ok && v != nil {
+		t := local(v)
+		g.AcceptedAt = &t
 	}
 	g.TestKey = g.Project + " › " + g.File + " › " + g.Title
 	g.Summary = Summarize(g.SampleError)
