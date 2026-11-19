@@ -77,6 +77,14 @@ Coverage compares the newest OpenAPI snapshot with the calls recorded by the Red
 
 A documented status code that has never been observed is shown as a gray status. It can be **ignored** with a reason: the code stays visible, is excluded from the status-code gap count, and can be undone from the row or the endpoint detail. Use it for documented-but-unreachable responses such as `404` on a collection endpoint or `405` on a `GET` operation.
 
+Coverage also shows deterministic **status hints**:
+
+- `GET` + `404` + no path parameter → likely unreachable (404 belongs to a detail endpoint);
+- `GET` + `404` + a path parameter → reachable with an unknown id;
+- `GET` + `405` → likely unreachable (405 requires a non-GET method).
+
+Hints are suggestions only. They never auto-ignore; the operator still clicks Ignore and provides the reason.
+
 Test generation from a gray status is intentionally hidden until the Phase 2 `npx redline generate` command ships. The command preview and dialog code remain in the UI code, but no button is shown while the command does not exist.
 
 

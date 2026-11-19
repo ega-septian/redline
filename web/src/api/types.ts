@@ -390,6 +390,12 @@ export type TestHistory = {
   runs: TestRunPoint[];
 };
 
+export type ApiCoverageStatusHint = {
+  status: string;
+  hint: "likely_unreachable" | "reachable" | "unknown" | string;
+  reason: string;
+};
+
 export type ApiCoverageEndpoint = {
   method: string;
   path: string;
@@ -397,6 +403,7 @@ export type ApiCoverageEndpoint = {
   status_codes: string[];
   observed_status_codes: string[];
   ignored_status_codes: string[];
+  status_hints: ApiCoverageStatusHint[];
   covered: boolean;
   tests: number;
   test_keys?: string[];

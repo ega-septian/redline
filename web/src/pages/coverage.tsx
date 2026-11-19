@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, Copy, EyeOff, Layers, Search, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, Copy, EyeOff, Info, Layers, Search, Sparkles, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
@@ -470,6 +470,7 @@ function EndpointRow({
 }) {
   const observed = new Set(endpoint.observed_status_codes);
   const ignored = new Set(endpoint.ignored_status_codes);
+  const hints = new Map((endpoint.status_hints ?? []).map((hint) => [hint.status, hint]));
   return (
     <div
       role="button"
@@ -541,8 +542,22 @@ function EndpointRow({
                     <Sparkles className="h-2.5 w-2.5" />
                   </button>
                 ) : (
-                  <span className="rounded border border-line-soft bg-canvas px-1 py-0.5 font-mono text-[9.5px] text-faint">
+                  <span
+                    title={hints.get(code)?.reason || "documented but not seen"}
+                    className={cn(
+                      "inline-flex items-center gap-0.5 rounded border px-1 py-0.5 font-mono text-[9.5px]",
+                      hints.get(code)?.hint === "likely_unreachable"
+                        ? "border-warn/40 bg-warn/10 text-warn"
+                        : "border-line-soft bg-canvas text-faint",
+                    )}
+                  >
                     {code}
+                    {hints.get(code)?.hint === "likely_unreachable" && (
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                    )}
+                    {hints.get(code)?.hint === "reachable" && (
+                      <Info className="h-2.5 w-2.5 text-muted" />
+                    )}
                   </span>
                 )}
                 <button
@@ -582,6 +597,11 @@ function EndpointDetail({
 }) {
   const observed = new Set(endpoint.observed_status_codes);
   const ignored = new Set(endpoint.ignored_status_codes);
+  const hints = new Map((endpoint.status_hints ?? []).map((hint) => [hint.status, hint]));
+  const activeHints = (endpoint.status_hints ?? []).filter(
+    (hint) =>
+      hint.hint !== "unknown" && !observed.has(hint.status) && !ignored.has(hint.status),
+  );
   const tests = endpoint.test_keys ?? [];
   return (
     <Card className="overflow-hidden xl:sticky xl:top-4 xl:self-start">
@@ -652,8 +672,22 @@ function EndpointDetail({
                         <Sparkles className="h-2.5 w-2.5" />
                       </button>
                     ) : (
-                      <span className="rounded border border-line-soft bg-canvas px-1 py-0.5 font-mono text-[9.5px] text-faint">
+                      <span
+                        title={hints.get(code)?.reason || "documented but not seen"}
+                        className={cn(
+                          "inline-flex items-center gap-0.5 rounded border px-1 py-0.5 font-mono text-[9.5px]",
+                          hints.get(code)?.hint === "likely_unreachable"
+                            ? "border-warn/40 bg-warn/10 text-warn"
+                            : "border-line-soft bg-canvas text-faint",
+                        )}
+                      >
                         {code}
+                        {hints.get(code)?.hint === "likely_unreachable" && (
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                        )}
+                        {hints.get(code)?.hint === "reachable" && (
+                          <Info className="h-2.5 w-2.5 text-muted" />
+                        )}
                       </span>
                     )}
                     <button
@@ -670,6 +704,21 @@ function EndpointDetail({
               )
             )}
           </div>
+          {activeHints.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {activeHints.map((hint) => (
+                <p key={hint.status} className="text-[10px] leading-relaxed text-faint">
+                  <span className="font-mono text-muted">{hint.status}</span>{" "}
+                  {hint.hint === "likely_unreachable" ? (
+                    <span className="text-warn">likely unreachable</span>
+                  ) : (
+                    <span className="text-ok">reachable</span>
+                  )}{" "}
+                  — {hint.reason}
+                </p>
+              ))}
+            </div>
+          )}
           <p className="mt-1.5 text-[10px] text-faint">
             Gray status codes can be ignored. Ignored codes stay visible and can be undone; test
             generation arrives with the Phase 2 generator.
