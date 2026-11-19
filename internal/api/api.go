@@ -143,6 +143,8 @@ type Server struct {
 	User func(*http.Request) string
 	// Version: versi build server, ditampilkan di /healthz dan header respons.
 	Version string
+	// Profile: "full" or "simple". The UI uses it to keep only the main flow visible.
+	Profile string
 	// Ready memeriksa kesiapan server (biasanya database). nil = /readyz membalas 503.
 	Ready func(context.Context) error
 	// Session: true when the request carries a valid UI session cookie.
@@ -182,11 +184,18 @@ func (s *Server) version() string {
 	return s.Version
 }
 
+func (s *Server) profile() string {
+	if s.Profile == "" {
+		return "full"
+	}
+	return s.Profile
+}
+
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok", "version": s.version(), "api": APIVersion,
+			"status": "ok", "version": s.version(), "profile": s.profile(), "api": APIVersion,
 			"auth": s.AuthEnabled || s.APIKey != "" || s.Session != nil || s.keyAuth.Load(),
 		})
 	})

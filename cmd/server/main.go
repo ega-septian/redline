@@ -121,6 +121,9 @@ func run(log *slog.Logger) error {
 	} else {
 		log.Info("only this run may change group status; other runs are previews", "source", cfg.StatusSources)
 	}
+	if cfg.Profile == "simple" {
+		log.Info("simple UI profile: Failures, Runs, Coverage and Config")
+	}
 
 	if cfg.RetentionDays > 0 {
 		go pruneLoop(ctx, db, cfg.RetentionDays, log)
@@ -190,7 +193,7 @@ func run(log *slog.Logger) error {
 
 	srv := &api.Server{Store: db, Analyzer: analyzer, Log: log, MaxBodySize: cfg.MaxReportMB << 20, APIKey: cfg.APIKey,
 		ArtifactDir: cfg.ArtifactDir, MaxArtifactSize: cfg.MaxArtifactMB << 20, Version: buildVersion(),
-		Contracts: registry, Notifier: notify.NewDiscord()}
+		Profile: cfg.Profile, Contracts: registry, Notifier: notify.NewDiscord()}
 	srv.AI = &api.AISettings{
 		Enabled: analyzer.LLM != nil, Mode: cfg.AIMode, Model: cfg.AnthropicModel,
 		DailyBudgetUSD: cfg.AIDailyBudgetUSD, MaxPerRun: cfg.AIMaxPerRun,

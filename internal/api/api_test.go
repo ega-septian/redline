@@ -1335,7 +1335,7 @@ func TestReadyz_NotConfigured(t *testing.T) {
 }
 
 func TestVersionHeaders(t *testing.T) {
-	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "9.9.9"}).Routes()
+	h := (&Server{Store: &fakeStore{}, Analyzer: &fakeAnalyzer{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Version: "9.9.9", Profile: "simple"}).Routes()
 	rec := do(h, "GET", "/healthz", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("healthz status %d", rec.Code)
@@ -1349,12 +1349,13 @@ func TestVersionHeaders(t *testing.T) {
 	var body struct {
 		Status  string `json:"status"`
 		Version string `json:"version"`
+		Profile string `json:"profile"`
 		API     int    `json:"api"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("body healthz bukan JSON: %v", err)
 	}
-	if body.Status != "ok" || body.Version != "9.9.9" || body.API != APIVersion {
+	if body.Status != "ok" || body.Version != "9.9.9" || body.Profile != "simple" || body.API != APIVersion {
 		t.Errorf("body healthz = %+v", body)
 	}
 }

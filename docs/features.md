@@ -2,6 +2,12 @@
 
 This page explains what each Redline screen does. For setup, see the [README](../README.md); for HTTP endpoints, see the [API reference](api.md).
 
+## Simple profile
+
+`REDLINE_PROFILE=simple` keeps the UI to the main flow: **Failures**, **Runs**, **Coverage** and **Config**. Overview, Health, Load errors, Quarantine, Impact, Rules and Scoreboard remain available by URL and API, but are not in the sidebar. The profile is only a UI default; it does not disable any analysis, rule or contract feature.
+
+Use `REDLINE_PROFILE=full` (the default) to show every page.
+
 ## Failures and triage
 
 The Failures page is the main workspace:

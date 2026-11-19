@@ -27,6 +27,9 @@ type Config struct {
 	RetentionDays int
 	// StatusSources: source run yang boleh mengubah status kelompok bersama. Kosong = semua.
 	StatusSources []string
+	// Profile: "full" (default) shows every page, "simple" keeps the main flow:
+	// Failures, Runs, Coverage and Config. Routes/APIs for advanced pages stay available.
+	Profile string
 	// Timezone untuk semua waktu yang dikeluarkan server (JSON dan log).
 	Timezone string
 	// APIKey: kalau diisi, setiap request /api/... wajib membawa "Authorization: Bearer <key>". Kosong = terbuka
@@ -147,11 +150,16 @@ func Load() (Config, error) {
 			}
 		}
 	}
+	profile := strings.ToLower(strings.TrimSpace(getenv("REDLINE_PROFILE", "full")))
+	if profile != "full" && profile != "simple" {
+		return Config{}, fmt.Errorf("REDLINE_PROFILE must be full or simple, got %q", profile)
+	}
 	return Config{
 		Host:          host,
 		Port:          getenv("PORT", "8787"),
 		RetentionDays: retention,
 		StatusSources: sources,
+		Profile:       profile,
 		Timezone:      getenv("TIMEZONE", "Asia/Jakarta"),
 		MaxReportMB:   maxMB,
 		ArtifactDir:   getenv("ARTIFACT_DIR", "./artifacts"),
