@@ -46,6 +46,7 @@ type fakeStore struct {
 	projectSpend       float64
 	autoAccept         store.AutoAcceptStats
 	shadowStats        []store.ShadowStat
+	coverageIgnores    []store.CoverageIgnore
 	rules              []store.LearnedRule
 	bulkConfirmed      int
 	healthRows         []store.TestHealthRow
@@ -513,6 +514,33 @@ func (f *fakeStore) AutoAcceptStats(_ context.Context, project string) (store.Au
 
 func (f *fakeStore) ShadowStats(context.Context, string) ([]store.ShadowStat, error) {
 	return f.shadowStats, nil
+}
+
+func (f *fakeStore) CoverageIgnores(_ context.Context, project string) ([]store.CoverageIgnore, error) {
+	out := []store.CoverageIgnore{}
+	for _, ignore := range f.coverageIgnores {
+		if ignore.Project == project {
+			out = append(out, ignore)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) SetCoverageIgnore(_ context.Context, ignore store.CoverageIgnore) (store.CoverageIgnore, error) {
+	f.coverageIgnores = append(f.coverageIgnores, ignore)
+	return ignore, nil
+}
+
+func (f *fakeStore) DeleteCoverageIgnore(_ context.Context, project, method, path, status string) error {
+	out := f.coverageIgnores[:0]
+	for _, ignore := range f.coverageIgnores {
+		if ignore.Project == project && ignore.Method == method && ignore.Path == path && ignore.Status == status {
+			continue
+		}
+		out = append(out, ignore)
+	}
+	f.coverageIgnores = out
+	return nil
 }
 
 func (f *fakeStore) ConfirmAcceptanceBulk(context.Context, []string, string) (int, error) {
@@ -1731,6 +1759,25 @@ func TestIngestSendsDiscordNotification(t *testing.T) {
 	if len(fs.deliveries) != 1 || !fs.deliveries[0].OK || fs.deliveries[0].RunID != 7 ||
 		fs.deliveries[0].Event != "new_failure" {
 		t.Errorf("delivery ingest tidak tercatat: %+v", fs.deliveries)
+	}
+}
+
+func TestCoverageIgnoreAPI(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(fs, 0)
+	rec := do(h, http.MethodPost, "/api/coverage/ignores",
+		strings.NewReader(`{"project":"toolshop","method":"get","path":"/brands","status":"404","reason":"no list input","by":"ega"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ignore status = %d: %s", rec.Code, rec.Body)
+	}
+	if len(fs.coverageIgnores) != 1 || fs.coverageIgnores[0].Method != "GET" ||
+		fs.coverageIgnores[0].Status != "404" || fs.coverageIgnores[0].Reason != "no list input" {
+		t.Fatalf("stored ignore = %+v", fs.coverageIgnores)
+	}
+	rec = do(h, http.MethodDelete,
+		"/api/coverage/ignores?project=toolshop&method=GET&path=/brands&status=404", nil)
+	if rec.Code != http.StatusOK || len(fs.coverageIgnores) != 0 {
+		t.Fatalf("delete ignore = %d: %s (%d left)", rec.Code, rec.Body, len(fs.coverageIgnores))
 	}
 }
 

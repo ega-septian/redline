@@ -7,6 +7,39 @@ import (
 	"redline/internal/store"
 )
 
+func TestCoverageIgnores(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	ignore := store.CoverageIgnore{
+		Project: "toolshop", Method: "GET", Path: "/brands", Status: "404",
+		Reason: "No list input can trigger 404", By: "ega",
+	}
+	got, err := s.SetCoverageIgnore(ctx, ignore)
+	if err != nil || got.Project != "toolshop" || got.Status != "404" || got.CreatedAt.IsZero() {
+		t.Fatalf("ignore = %+v, %v", got, err)
+	}
+	ignore.Reason = "updated"
+	if _, err := s.SetCoverageIgnore(ctx, ignore); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.CoverageIgnores(ctx, "toolshop")
+	if err != nil || len(list) != 1 || list[0].Reason != "updated" || list[0].By != "ega" {
+		t.Fatalf("ignores = %+v, %v", list, err)
+	}
+	if other, err := s.CoverageIgnores(ctx, "other"); err != nil || len(other) != 0 {
+		t.Errorf("project lain harus kosong: %+v %v", other, err)
+	}
+	if err := s.DeleteCoverageIgnore(ctx, "toolshop", "GET", "/brands", "404"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := s.CoverageIgnores(ctx, "toolshop"); len(list) != 0 {
+		t.Errorf("ignore harus terhapus: %+v", list)
+	}
+	if err := s.DeleteCoverageIgnore(ctx, "toolshop", "GET", "/brands", "404"); err != nil {
+		t.Errorf("delete idempotent: %v", err)
+	}
+}
+
 func TestContractCoverageData(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

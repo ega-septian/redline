@@ -58,6 +58,9 @@ type Store interface {
 	SuggestionDismissals(ctx context.Context) (map[string]time.Time, error)
 	ContractSnapshots(ctx context.Context, project string, limit int) ([]store.ContractSnapshot, error)
 	EndpointCalls(ctx context.Context, project string) ([]store.EndpointCall, error)
+	CoverageIgnores(ctx context.Context, project string) ([]store.CoverageIgnore, error)
+	SetCoverageIgnore(ctx context.Context, ignore store.CoverageIgnore) (store.CoverageIgnore, error)
+	DeleteCoverageIgnore(ctx context.Context, project, method, path, status string) error
 	ContractSources(ctx context.Context) ([]store.ContractSource, error)
 	ContractSource(ctx context.Context, project string) (store.ContractSource, error)
 	SetContractSource(ctx context.Context, src store.ContractSource) (store.ContractSource, error)
@@ -213,6 +216,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tests/quarantine/suggestions", s.handleQuarantineSuggestions)
 	mux.HandleFunc("POST /api/tests/quarantine/suggestions/dismiss", s.handleDismissQuarantineSuggestion)
 	mux.HandleFunc("GET /api/coverage", s.handleCoverage)
+	mux.HandleFunc("POST /api/coverage/ignores", s.handleSetCoverageIgnore)
+	mux.HandleFunc("DELETE /api/coverage/ignores", s.handleDeleteCoverageIgnore)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config/contracts", s.handleSaveContract)
 	mux.HandleFunc("DELETE /api/config/contracts", s.handleDeleteContract)
