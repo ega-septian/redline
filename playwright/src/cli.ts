@@ -1274,9 +1274,7 @@ Commands
   npx redline impact <file|METHOD /path>  affected tests
   npx redline comment                update the PR comment
 
-More:
-  npx redline rules | candidates | shadow --stats | learn
-  npx redline approve <id> | reject <id> | score --project=<name>`);
+Run \`npx redline --help\` for advanced commands.`);
 }
 
 async function status() {
