@@ -7,7 +7,7 @@
 **Failure triage for Playwright.** Redline groups failing tests, finds the likely cause, and shows the
 evidence — backend bug, test bug, environment or flaky — before you open the trace.
 
-![Redline failures and triage](docs/screenshots/failures.png)
+![Redline failures and triage](docs/screenshots/failures.png?v=2)
 
 ## Why Redline?
 
@@ -25,12 +25,12 @@ evidence — backend bug, test bug, environment or flaky — before you open the
 
 | Failures | Runs |
 | --- | --- |
-| [![Failures](docs/screenshots/failures.png)](docs/screenshots/failures.png) | [![Runs](docs/screenshots/runs.png)](docs/screenshots/runs.png) |
+| [![Failures](docs/screenshots/failures.png?v=2)](docs/screenshots/failures.png?v=2) | [![Runs](docs/screenshots/runs.png?v=2)](docs/screenshots/runs.png?v=2) |
 | Grouped failures with evidence and a suggested cause. | Every run with its branch, results and duration. |
 
 | Coverage | Config |
 | --- | --- |
-| [![Coverage](docs/screenshots/coverage.png)](docs/screenshots/coverage.png) | [![Config](docs/screenshots/config.png)](docs/screenshots/config.png) |
+| [![Coverage](docs/screenshots/coverage.png?v=2)](docs/screenshots/coverage.png?v=2) | [![Config](docs/screenshots/config.png?v=2)](docs/screenshots/config.png?v=2) |
 | Contract endpoints versus the calls your tests recorded. | Contract sources, AI usage and API keys. |
 
 [See all screenshots →](docs/screenshots/README.md)
