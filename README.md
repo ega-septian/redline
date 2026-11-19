@@ -177,6 +177,8 @@ Full list and examples: [`.env.example`](.env.example).
 | Command | What it does |
 | --- | --- |
 | `REDLINE_AI=1 npx playwright test` | Run tests and explain each failure. |
+| `npx redline` | Show server, package, contract and AI status plus the main commands. |
+| `npx redline doctor` | Check server, package, reporter, fixture, last run, contract and baseURL. `--json` and `--strict` are available. |
 | `npx redline verify` | Prove the cause of the last run's failures. |
 | `npx redline fix <id>` | Turn a proven test fix into a branch and a PR; reuses a stored proof unless `--force`, and `--dry-run` prints the plan (`--base=<branch>` overrides `main`). |
 | `npx redline impact schemas/brand.ts` | Tests affected by a file or endpoint. |
