@@ -2,6 +2,7 @@
 /**
  * CLI Redline: membuktikan penyebab kegagalan dengan eksperimen, dan mengajari Redline aturan baru.
  *
+ *   npx redline                        status singkat: server, versi, contract, AI, command
  *   npx redline verify                 eksperimen untuk kegagalan run terakhir
  *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
  *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
@@ -1227,10 +1228,125 @@ async function comment(args: string[]) {
   console.log(`[redline] PR comment ${existing ? "updated" : "created"}: ${repo}#${pr}`);
 }
 
+// ---------- status ----------
+
+type Health = {
+  status?: string;
+  version?: string;
+  profile?: string;
+  api?: number;
+  auth?: boolean;
+};
+
+function packageVersion(): string {
+  try {
+    const raw = readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8");
+    return (JSON.parse(raw) as { version?: string }).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function quickJSON<T>(url: string, timeoutMs = 3000): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (process.env.REDLINE_API_KEY) headers.Authorization = `Bearer ${process.env.REDLINE_API_KEY}`;
+  const response = await fetch(baseURL() + url, {
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as T;
+}
+
+function printCommands() {
+  console.log(`
+Commands
+  npx redline verify                 prove the last run's failures
+  npx redline fix <id>               open a PR from a proven fix
+  npx redline analyze --run <id>     analyze an existing run
+  npx redline score                  accuracy and auto-accept calibration
+  npx redline impact <file|METHOD /path>  affected tests
+  npx redline comment                update the PR comment
+
+More:
+  npx redline rules | candidates | shadow --stats | learn
+  npx redline approve <id> | reject <id> | score --project=<name>`);
+}
+
+async function status() {
+  const pkg = packageVersion();
+  const url = baseURL();
+  console.log(`Redline ${pkg}`);
+
+  let health: Health;
+  try {
+    health = await quickJSON<Health>("/healthz");
+  } catch (e) {
+    console.log(`  server   ✗ cannot reach ${url}`);
+    console.log(`           ${(e as Error).message}`);
+    printCommands();
+    return;
+  }
+
+  const serverVersion = health.version ?? "dev";
+  const profile = health.profile ? ` · ${health.profile}` : "";
+  console.log(`  server   ✓ ${url} · ${serverVersion} · api ${health.api ?? "?"}${profile}`);
+
+  if (serverVersion !== "dev" && serverVersion !== pkg) {
+    console.log(`  version  ⚠ package ${pkg}, server ${serverVersion}`);
+  } else {
+    console.log(`  version  ✓ ${pkg}`);
+  }
+
+  if (health.auth && !process.env.REDLINE_API_KEY) {
+    console.log(`  auth     ⚠ server requires REDLINE_API_KEY`);
+  } else if (health.auth) {
+    console.log(`  auth     ✓ API key set`);
+  } else {
+    console.log(`  auth     ○ open (no API key)`);
+  }
+
+  if (health.auth && !process.env.REDLINE_API_KEY) {
+    console.log(`  contract ? skipped (no API key)`);
+    console.log(`  AI       ? skipped (no API key)`);
+    printCommands();
+    return;
+  }
+
+  const [config, ai] = await Promise.allSettled([
+    quickJSON<{ contracts?: Array<{ project?: string }> }>("/api/config"),
+    quickJSON<{ enabled?: boolean; mode?: string; model?: string }>("/api/ai/usage"),
+  ]);
+
+  if (config.status === "fulfilled") {
+    const projects = (config.value.contracts ?? [])
+      .map((source) => source.project)
+      .filter((project): project is string => Boolean(project));
+    console.log(
+      `  contract ${projects.length > 0 ? `✓ ${projects.join(", ")}` : "⚠ none configured"}`,
+    );
+  } else {
+    console.log(`  contract ⚠ cannot read config`);
+  }
+
+  if (ai.status === "fulfilled") {
+    if (ai.value.enabled) {
+      console.log(`  AI       ✓ ${ai.value.mode ?? "fallback"} · ${ai.value.model ?? "unknown"}`);
+    } else {
+      console.log(`  AI       ○ disabled (rules only)`);
+    }
+  } else {
+    console.log(`  AI       ⚠ cannot read usage`);
+  }
+
+  printCommands();
+}
+
 // ---------- main ----------
 
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
+  if (!cmd) return status();
   switch (cmd) {
     case "verify":
       return verify(args);
