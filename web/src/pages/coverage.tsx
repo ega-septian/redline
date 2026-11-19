@@ -17,6 +17,10 @@ type CoverageFilter = "all" | "covered" | "uncovered" | "ignored";
 type GenerateTarget = { endpoint: ApiCoverageEndpoint; status: string };
 type IgnoreTarget = GenerateTarget;
 
+// The generate command lands in Phase 2. Keep the dialog code ready, but do not offer a
+// button that copies a command which does not exist yet.
+const GENERATOR_READY = false;
+
 export function CoveragePage() {
   const { project } = useProject();
   const [search, setSearch] = useState("");
@@ -523,18 +527,24 @@ function EndpointRow({
               </button>
             ) : (
               <span key={code} className="inline-flex items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onGenerate(code);
-                  }}
-                  title={`Generate a test for ${code}`}
-                  className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
-                >
-                  {code}
-                  <Sparkles className="h-2.5 w-2.5" />
-                </button>
+                {GENERATOR_READY ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onGenerate(code);
+                    }}
+                    title={`Generate a test for ${code}`}
+                    className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                  >
+                    {code}
+                    <Sparkles className="h-2.5 w-2.5" />
+                  </button>
+                ) : (
+                  <span className="rounded border border-line-soft bg-canvas px-1 py-0.5 font-mono text-[9.5px] text-faint">
+                    {code}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={(event) => {
@@ -631,15 +641,21 @@ function EndpointDetail({
                   </button>
                 ) : (
                   <span key={code} className="inline-flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onGenerate(code)}
-                      title={`Generate a test for ${code}`}
-                      className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
-                    >
-                      {code}
-                      <Sparkles className="h-2.5 w-2.5" />
-                    </button>
+                    {GENERATOR_READY ? (
+                      <button
+                        type="button"
+                        onClick={() => onGenerate(code)}
+                        title={`Generate a test for ${code}`}
+                        className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                      >
+                        {code}
+                        <Sparkles className="h-2.5 w-2.5" />
+                      </button>
+                    ) : (
+                      <span className="rounded border border-line-soft bg-canvas px-1 py-0.5 font-mono text-[9.5px] text-faint">
+                        {code}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => onIgnore(code)}
@@ -655,8 +671,8 @@ function EndpointDetail({
             )}
           </div>
           <p className="mt-1.5 text-[10px] text-faint">
-            Gray status codes can be generated or ignored. Ignored codes stay visible and can be
-            undone.
+            Gray status codes can be ignored. Ignored codes stay visible and can be undone; test
+            generation arrives with the Phase 2 generator.
           </p>
         </div>
 
