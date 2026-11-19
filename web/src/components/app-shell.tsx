@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
-type Health = { status: string; version?: string; api?: number; auth?: boolean };
+type Health = { status: string; version?: string; profile?: string; api?: number; auth?: boolean };
 
 async function fetchHealth(): Promise<Health> {
   const response = await fetch("/healthz");
@@ -39,18 +39,18 @@ const pages = [
 ] as const;
 
 const nav = [
-  { label: "Overview", icon: LayoutDashboard, to: "/overview" as const },
-  { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0 },
-  { label: "Runs", icon: GitBranch, to: "/runs" as const },
-  { label: "Health", icon: Activity, to: "/health" as const },
-  { label: "Load errors", icon: FileWarning, to: "/load-errors" as const },
-  { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const },
+  { label: "Overview", icon: LayoutDashboard, to: "/overview" as const, section: "workspace", simple: false },
+  { label: "Failures", icon: AlertTriangle, to: "/" as const, count: 0, section: "workspace", simple: true },
+  { label: "Runs", icon: GitBranch, to: "/runs" as const, section: "workspace", simple: true },
+  { label: "Health", icon: Activity, to: "/health" as const, section: "workspace", simple: false },
+  { label: "Load errors", icon: FileWarning, to: "/load-errors" as const, section: "workspace", simple: false },
+  { label: "Quarantine", icon: ShieldOff, to: "/quarantine" as const, section: "workspace", simple: false },
   // Impact is intentionally hidden from the sidebar; its route and API remain available for
   // `npx redline impact` and CI.
-  { label: "Coverage", icon: Layers, to: "/coverage" as const },
+  { label: "Coverage", icon: Layers, to: "/coverage" as const, section: "workspace", simple: true },
   // Rules and Scoreboard are intentionally hidden from the sidebar for rules-only/AI-optional
   // deployments. Their routes and API remain available for later.
-  { label: "Config", icon: Settings2, to: "/config" as const },
+  { label: "Config", icon: Settings2, to: "/config" as const, section: "settings", simple: true },
 ];
 
 export function AppShell() {
@@ -65,9 +65,14 @@ export function AppShell() {
     queryKey: ["groups", project],
     queryFn: () => api.groups(project),
   });
-  const items = nav.map((item) =>
-    item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
-  );
+  const simple = health.data?.profile === "simple";
+  const items = nav
+    .filter((item) => !simple || item.simple)
+    .map((item) =>
+      item.label === "Failures" ? { ...item, count: groups.data?.length ?? 0 } : item,
+    );
+  const workspaceItems = items.filter((item) => item.section === "workspace");
+  const settingsItems = items.filter((item) => item.section === "settings");
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const currentPage = pages.find((page) => pathname.startsWith(page.path));
   const title = currentPage?.title ?? "Failures";
@@ -89,7 +94,9 @@ export function AppShell() {
           <div className="h-[26px] w-[26px] rounded-[7px] bg-gradient-to-br from-danger via-violet to-brand shadow-[inset_0_0_0_1px_#ffffff1a]" />
           <div>
             <div className="text-[15px] font-semibold leading-4">Redline</div>
-            <div className="mt-0.5 text-[11px] text-faint">failure triage</div>
+            <div className="mt-0.5 text-[11px] text-faint">
+              {simple ? "simple mode" : "failure triage"}
+            </div>
           </div>
         </div>
 
@@ -117,23 +124,27 @@ export function AppShell() {
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.9px] text-faint">
             Workspace
           </div>
-          {items.slice(0, 7).map((item) => (
+          {workspaceItems.map((item) => (
             <NavItem
               key={item.label}
               {...item}
               active={"to" in item && isActive(item.to)}
             />
           ))}
-          <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
-            Settings
-          </div>
-          {items.slice(7).map((item) => (
-            <NavItem
-              key={item.label}
-              {...item}
-              active={"to" in item && isActive(item.to)}
-            />
-          ))}
+          {settingsItems.length > 0 && (
+            <>
+              <div className="px-2.5 pb-1 pt-3 text-[10.5px] uppercase tracking-[0.9px] text-faint">
+                Settings
+              </div>
+              {settingsItems.map((item) => (
+                <NavItem
+                  key={item.label}
+                  {...item}
+                  active={"to" in item && isActive(item.to)}
+                />
+              ))}
+            </>
+          )}
         </nav>
 
         <div className="mt-auto border-t border-line pt-3 text-[11px] leading-relaxed text-faint">

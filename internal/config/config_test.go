@@ -160,6 +160,35 @@ func TestLoad_RejectsInvalidAIMode(t *testing.T) {
 	}
 }
 
+func TestLoad_Profile(t *testing.T) {
+	t.Setenv("REDLINE_PROFILE", "simple")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Profile != "simple" {
+		t.Errorf("REDLINE_PROFILE = %q, want simple", cfg.Profile)
+	}
+}
+
+func TestLoad_ProfileDefault(t *testing.T) {
+	t.Setenv("REDLINE_PROFILE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Profile != "full" {
+		t.Errorf("REDLINE_PROFILE default = %q, want full", cfg.Profile)
+	}
+}
+
+func TestLoad_RejectsInvalidProfile(t *testing.T) {
+	t.Setenv("REDLINE_PROFILE", "tiny")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid REDLINE_PROFILE must be rejected")
+	}
+}
+
 func TestLoad_AutoAccept(t *testing.T) {
 	t.Setenv("AUTO_ACCEPT", "off")
 	cfg, err := Load()

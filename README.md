@@ -152,6 +152,7 @@ Everything has a working default. The settings you are most likely to change:
 | `PORT` | `8787` | HTTP port. |
 | `REDLINE_API_KEY` | empty | Bootstrap key for `/api/...`. |
 | `STATUS_FROM` | `ci` | Which runs may open or close a failure: `ci`, `local`, `all`. |
+| `REDLINE_PROFILE` | `full` | `full` shows every page; `simple` keeps Failures, Runs, Coverage and Config. |
 | `RETENTION_DAYS` | `30` | Delete old test details and artifacts (`0` = never). |
 | `TIMEZONE` | `Asia/Jakarta` | Time zone for responses and logs. |
 | `MAX_REPORT_MB` | `50` | Largest accepted Playwright report. |
