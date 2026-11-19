@@ -77,6 +77,8 @@ Coverage compares the newest OpenAPI snapshot with the calls recorded by the Red
 
 A documented status code that has never been observed is shown as a gray **Generate** action. Selecting it opens a dialog with suggested cases and a copyable command for the Phase 2 generator (`npx redline generate --operation ... --status ...`). The dialog does not change coverage; a status code turns green only after a stored run actually observes it.
 
+Gray status codes can also be **ignored** with a reason. An ignored code stays visible, is excluded from the status-code gap count, and can be undone from the row or the endpoint detail. Use it for documented-but-unreachable responses such as `404` on a collection endpoint or `405` on a `GET` operation.
+
 
 ## Config
 

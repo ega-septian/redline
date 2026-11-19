@@ -27,7 +27,9 @@ Redline exposes a small HTTP API for the reporter, CLI and custom integrations. 
 | `DELETE /api/tests/quarantine?test=...`                            | Release a quarantine                                           |
 | `GET /api/tests/quarantine/suggestions?days=30`                    | Evidence-based candidates: flips, flake rate, last failure     |
 | `POST /api/tests/quarantine/suggestions/dismiss`                   | Snooze a suggestion: `{"test": "TC-...", "days": 7}`           |
-| `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes, changes and the last 20 run points |
+| `GET /api/coverage?project=...`                                    | Contract endpoints vs recorded calls, status codes, ignored codes, changes and history |
+| `POST /api/coverage/ignores`                                       | Ignore a status code: `{"project":"...","method":"GET","path":"/brands","status":"404","reason":"...","by":"..."}` |
+| `DELETE /api/coverage/ignores?project=...&method=...&path=...&status=...` | Undo an ignored status code                                    |
 | `GET /api/config`                                                  | Contract sources, default/project notification channels and the last delivery |
 | `PUT /api/config/contracts`                                        | Validate and save a source: `{"project": "toolshop", "url": "https://.../docs"}` |
 | `POST /api/config/contracts/validate`                              | Check a URL without saving it                                  |

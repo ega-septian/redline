@@ -220,6 +220,26 @@ export const api = {
     }),
   coverage: (project: string) =>
     request<ApiCoverage>(`/api/coverage?project=${encodeURIComponent(project)}`),
+  ignoreCoverageStatus: (
+    project: string,
+    method: string,
+    path: string,
+    status: string,
+    reason: string,
+  ) =>
+    request<{ project: string; method: string; path: string; status: string }>(
+      "/api/coverage/ignores",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify({ project, method, path, status, reason, by: "ui" }),
+      },
+    ),
+  unignoreCoverageStatus: (project: string, method: string, path: string, status: string) =>
+    request<{ removed: boolean }>(
+      `/api/coverage/ignores?${new URLSearchParams({ project, method, path, status })}`,
+      { method: "DELETE", headers: { "X-CSRF-Token": csrfToken() } },
+    ),
   config: () => request<ApiConfig>("/api/config"),
   aiUsage: (project: string) =>
     request<ApiAIUsage>(`/api/ai/usage${project ? `?project=${encodeURIComponent(project)}` : ""}`),

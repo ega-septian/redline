@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -18,6 +19,7 @@ type coverageEndpoint struct {
 	Summary             string     `json:"summary,omitempty"`
 	StatusCodes         []string   `json:"status_codes"`
 	ObservedStatusCodes []string   `json:"observed_status_codes"`
+	IgnoredStatusCodes  []string   `json:"ignored_status_codes"`
 	Covered             bool       `json:"covered"`
 	Tests               int        `json:"tests"`
 	TestKeys            []string   `json:"test_keys"`
@@ -30,6 +32,7 @@ type coverageSummary struct {
 	Uncovered             int `json:"uncovered"`
 	StatusCodesDocumented int `json:"status_codes_documented"`
 	StatusCodesSeen       int `json:"status_codes_seen"`
+	StatusCodesIgnored    int `json:"status_codes_ignored"`
 	Changes               int `json:"changes"`
 }
 
@@ -105,6 +108,19 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	ignores, err := s.Store.CoverageIgnores(r.Context(), project)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	ignored := map[string]map[string]bool{}
+	for _, ignore := range ignores {
+		key := ignore.Method + " " + ignore.Path
+		if ignored[key] == nil {
+			ignored[key] = map[string]bool{}
+		}
+		ignored[key][ignore.Status] = true
+	}
 
 	coveredTests := map[string]map[string]bool{}
 	observed := map[string]map[string]bool{}
@@ -179,10 +195,17 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		if len(testKeys) > 20 {
 			testKeys = testKeys[:20]
 		}
+		ignoredStatuses := []string{}
+		for _, code := range endpoint.StatusCodes {
+			if ignored[key][code] && !observed[key][code] {
+				ignoredStatuses = append(ignoredStatuses, code)
+			}
+		}
 		row := coverageEndpoint{
 			Method: endpoint.Method, Path: endpoint.Path, Summary: endpoint.Summary,
 			StatusCodes: endpoint.StatusCodes, ObservedStatusCodes: statuses,
-			Tests: len(coveredTests[key]), TestKeys: testKeys,
+			IgnoredStatusCodes: ignoredStatuses,
+			Tests:              len(coveredTests[key]), TestKeys: testKeys,
 			Covered: len(coveredTests[key]) > 0,
 		}
 		if at := lastTested[key]; !at.IsZero() {
@@ -190,6 +213,7 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		}
 		response.Summary.Documented++
 		response.Summary.StatusCodesDocumented += len(endpoint.StatusCodes)
+		response.Summary.StatusCodesIgnored += len(ignoredStatuses)
 		for _, code := range endpoint.StatusCodes {
 			if observed[key][code] {
 				response.Summary.StatusCodesSeen++
@@ -202,6 +226,73 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Summary.Uncovered = response.Summary.Documented - response.Summary.Covered
 	writeJSON(w, http.StatusOK, response)
+}
+
+// handleSetCoverageIgnore: POST /api/coverage/ignores
+// {"project":"toolshop","method":"GET","path":"/brands","status":"404","reason":"...","by":"ega"}
+func (s *Server) handleSetCoverageIgnore(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Project string `json:"project"`
+		Method  string `json:"method"`
+		Path    string `json:"path"`
+		Status  string `json:"status"`
+		Reason  string `json:"reason"`
+		By      string `json:"by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "request body must be JSON")
+		return
+	}
+	if s.User != nil {
+		if user := s.User(r); user != "" {
+			body.By = user
+		}
+	}
+	body.Project = strings.TrimSpace(body.Project)
+	body.Method = strings.ToUpper(strings.TrimSpace(body.Method))
+	body.Path = strings.TrimSpace(body.Path)
+	body.Status = strings.TrimSpace(body.Status)
+	body.Reason = strings.TrimSpace(body.Reason)
+	body.By = strings.TrimSpace(body.By)
+	if body.Project == "" || body.Method == "" || body.Path == "" || body.Status == "" {
+		writeError(w, http.StatusBadRequest, "project, method, path and status are required")
+		return
+	}
+	if body.Reason == "" {
+		writeError(w, http.StatusBadRequest, "reason is required")
+		return
+	}
+	if body.By == "" {
+		writeError(w, http.StatusBadRequest, "set \"by\" to the name of the person ignoring the status")
+		return
+	}
+	ignore, err := s.Store.SetCoverageIgnore(r.Context(), store.CoverageIgnore{
+		Project: body.Project, Method: body.Method, Path: body.Path, Status: body.Status,
+		Reason: body.Reason, By: body.By,
+	})
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ignore)
+}
+
+// handleDeleteCoverageIgnore: DELETE /api/coverage/ignores?project=...&method=...&path=...&status=...
+func (s *Server) handleDeleteCoverageIgnore(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	project := strings.TrimSpace(q.Get("project"))
+	method := strings.ToUpper(strings.TrimSpace(q.Get("method")))
+	path := strings.TrimSpace(q.Get("path"))
+	status := strings.TrimSpace(q.Get("status"))
+	if project == "" || method == "" || path == "" || status == "" {
+		writeError(w, http.StatusBadRequest, "project, method, path and status are required")
+		return
+	}
+	if err := s.Store.DeleteCoverageIgnore(r.Context(), project, method, path, status); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": true})
 }
 
 // coverageHistory builds one point per stored snapshot, oldest first, using only the calls recorded

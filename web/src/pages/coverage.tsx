@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, Copy, Layers, Search, Sparkles, X } from "lucide-react";
+import { Check, Copy, EyeOff, Layers, Search, Sparkles, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
@@ -13,8 +13,9 @@ import { Input } from "@/components/ui/input";
 import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
-type CoverageFilter = "all" | "covered" | "uncovered";
+type CoverageFilter = "all" | "covered" | "uncovered" | "ignored";
 type GenerateTarget = { endpoint: ApiCoverageEndpoint; status: string };
+type IgnoreTarget = GenerateTarget;
 
 export function CoveragePage() {
   const { project } = useProject();
@@ -22,6 +23,8 @@ export function CoveragePage() {
   const [filter, setFilter] = useState<CoverageFilter>("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [generateTarget, setGenerateTarget] = useState<GenerateTarget | null>(null);
+  const [ignoreTarget, setIgnoreTarget] = useState<IgnoreTarget | null>(null);
+  const queryClient = useQueryClient();
 
   const coverageQuery = useQuery({
     queryKey: ["coverage", project],
@@ -35,6 +38,7 @@ export function CoveragePage() {
     return (coverage?.endpoints ?? []).filter((endpoint) => {
       if (filter === "covered" && !endpoint.covered) return false;
       if (filter === "uncovered" && endpoint.covered) return false;
+      if (filter === "ignored" && endpoint.ignored_status_codes.length === 0) return false;
       if (!needle) return true;
       return `${endpoint.method} ${endpoint.path} ${endpoint.summary ?? ""}`.toLowerCase().includes(needle);
     });
@@ -44,6 +48,12 @@ export function CoveragePage() {
     () => endpoints.find((endpoint) => `${endpoint.method} ${endpoint.path}` === selected) ?? null,
     [endpoints, selected],
   );
+
+  const unignore = useMutation({
+    mutationFn: (target: IgnoreTarget) =>
+      api.unignoreCoverageStatus(project, target.endpoint.method, target.endpoint.path, target.status),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["coverage", project] }),
+  });
 
   if (project === "") {
     return <State>Select a project in the sidebar to see its contract coverage.</State>;
@@ -85,10 +95,9 @@ export function CoveragePage() {
 
   const summary = coverage.summary;
   const documentedRatio = summary.documented === 0 ? "—" : `${summary.covered}/${summary.documented}`;
+  const statusTotal = Math.max(0, summary.status_codes_documented - summary.status_codes_ignored);
   const statusRatio =
-    summary.status_codes_documented === 0
-      ? "—"
-      : `${summary.status_codes_seen}/${summary.status_codes_documented}`;
+    statusTotal === 0 ? "—" : `${summary.status_codes_seen}/${statusTotal}`;
 
   return (
     <>
@@ -111,6 +120,7 @@ export function CoveragePage() {
           <option value="all">All endpoints</option>
           <option value="covered">Covered</option>
           <option value="uncovered">Uncovered</option>
+          <option value="ignored">With ignored status</option>
         </select>
         <div className="ml-auto flex min-w-[180px] flex-1 items-center gap-1.5 rounded-md border border-line bg-canvas px-2.5 text-faint sm:max-w-xs">
           <Search className="h-3.5 w-3.5" />
@@ -136,8 +146,8 @@ export function CoveragePage() {
         <Kpi
           label="Status codes"
           value={statusRatio}
-          hint="documented responses seen"
-          tone={summary.status_codes_seen === summary.status_codes_documented ? "ok" : "warn"}
+          hint={`${summary.status_codes_ignored} ignored · documented responses seen`}
+          tone={summary.status_codes_seen === statusTotal ? "ok" : "warn"}
         />
         <Kpi label="Contract changes" value={String(summary.changes)} hint="since the previous snapshot" tone="warn" />
       </section>
@@ -177,6 +187,8 @@ export function CoveragePage() {
                       active={selected === key}
                       onSelect={() => setSelected(selected === key ? null : key)}
                       onGenerate={(status) => setGenerateTarget({ endpoint, status })}
+                      onIgnore={(status) => setIgnoreTarget({ endpoint, status })}
+                      onUnignore={(status) => unignore.mutate({ endpoint, status })}
                     />
                   );
                 })
@@ -190,6 +202,8 @@ export function CoveragePage() {
             endpoint={selectedEndpoint}
             onClose={() => setSelected(null)}
             onGenerate={(status) => setGenerateTarget({ endpoint: selectedEndpoint, status })}
+            onIgnore={(status) => setIgnoreTarget({ endpoint: selectedEndpoint, status })}
+            onUnignore={(status) => unignore.mutate({ endpoint: selectedEndpoint, status })}
           />
         ) : (
           <ContractChanges coverage={coverage} />
@@ -207,6 +221,19 @@ export function CoveragePage() {
           key={`${generateTarget.endpoint.method}-${generateTarget.endpoint.path}-${generateTarget.status}`}
           target={generateTarget}
           onClose={() => setGenerateTarget(null)}
+        />
+      )}
+
+      {ignoreTarget && (
+        <IgnoreDialog
+          key={`${ignoreTarget.endpoint.method}-${ignoreTarget.endpoint.path}-${ignoreTarget.status}`}
+          project={project}
+          target={ignoreTarget}
+          onClose={() => setIgnoreTarget(null)}
+          onIgnored={() => {
+            setIgnoreTarget(null);
+            queryClient.invalidateQueries({ queryKey: ["coverage", project] });
+          }}
         />
       )}
     </>
@@ -316,6 +343,98 @@ function GenerateDialog({
   );
 }
 
+function IgnoreDialog({
+  project,
+  target,
+  onClose,
+  onIgnored,
+}: {
+  project: string;
+  target: IgnoreTarget;
+  onClose: () => void;
+  onIgnored: () => void;
+}) {
+  const { endpoint, status } = target;
+  const [reason, setReason] = useState(defaultIgnoreReason(status));
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.ignoreCoverageStatus(project, endpoint.method, endpoint.path, status, reason.trim()),
+    onSuccess: onIgnored,
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-[10px] border border-line bg-surface shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ignore-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-2 border-b border-line bg-[#12171e] px-3.5 py-3">
+          <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+          <div className="min-w-0 flex-1">
+            <h2 id="ignore-title" className="text-[12.5px] font-semibold text-ink">
+              Ignore status code
+            </h2>
+            <p className="mt-0.5 break-all font-mono text-[10.5px] text-faint">
+              {endpoint.method} {endpoint.path}{" "}
+              <span className="rounded border border-line-soft px-1 py-0.5 text-[9.5px]">{status}</span>
+            </p>
+          </div>
+          <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close ignore dialog">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="px-3.5 py-3">
+          <p className="text-[11px] leading-relaxed text-muted">
+            This status code stays visible but no longer counts as a coverage gap. You can undo it
+            later.
+          </p>
+          <label className="mt-3 block text-[10px] uppercase tracking-[0.8px] text-faint">
+            Reason
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              rows={3}
+              className="mt-1.5 w-full resize-y rounded-md border border-line bg-canvas px-2 py-1.5 text-[11px] text-ink outline-none placeholder:text-faint focus-visible:border-brand/60"
+              placeholder="Why is this status code not applicable?"
+            />
+          </label>
+          {mutation.isError && (
+            <p className="mt-2 text-[11px] text-danger">
+              {mutation.error instanceof Error ? mutation.error.message : "Failed to ignore"}
+            </p>
+          )}
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              variant="default"
+              onClick={() => mutation.mutate()}
+              disabled={mutation.isPending || reason.trim() === ""}
+            >
+              {mutation.isPending ? "Saving…" : "Ignore status"}
+            </Button>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function defaultIgnoreReason(status: string): string {
+  if (status === "404") return "No path parameter or lookup input can produce 404 on this endpoint.";
+  if (status === "405") return "405 requires a different HTTP method; this operation cannot observe it.";
+  return "This status code is documented but not applicable for this operation.";
+}
+
 function scenariosFor(status: string): string[] {
   if (status === "400" || status === "422") return ["missing required field", "wrong type", "empty body"];
   if (status === "401") return ["missing token", "invalid token"];
@@ -335,13 +454,18 @@ function EndpointRow({
   active,
   onSelect,
   onGenerate,
+  onIgnore,
+  onUnignore,
 }: {
   endpoint: ApiCoverageEndpoint;
   active: boolean;
   onSelect: () => void;
   onGenerate: (status: string) => void;
+  onIgnore: (status: string) => void;
+  onUnignore: (status: string) => void;
 }) {
   const observed = new Set(endpoint.observed_status_codes);
+  const ignored = new Set(endpoint.ignored_status_codes);
   return (
     <div
       role="button"
@@ -383,20 +507,47 @@ function EndpointRow({
               >
                 {code}
               </span>
-            ) : (
+            ) : ignored.has(code) ? (
               <button
                 key={code}
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onGenerate(code);
+                  onUnignore(code);
                 }}
-                title={`Generate a test for ${code}`}
-                className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                title="Ignored — click to undo"
+                className="inline-flex items-center gap-1 rounded border border-dashed border-line px-1 py-0.5 font-mono text-[9.5px] text-faint hover:border-brand/50 hover:text-brand"
               >
                 {code}
-                <Sparkles className="h-2.5 w-2.5" />
+                <EyeOff className="h-2.5 w-2.5" />
               </button>
+            ) : (
+              <span key={code} className="inline-flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onGenerate(code);
+                  }}
+                  title={`Generate a test for ${code}`}
+                  className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                >
+                  {code}
+                  <Sparkles className="h-2.5 w-2.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onIgnore(code);
+                  }}
+                  title={`Ignore ${code} for this endpoint`}
+                  aria-label={`Ignore ${code}`}
+                  className="rounded border border-line px-1 py-0.5 text-faint hover:border-brand/50 hover:text-brand"
+                >
+                  <EyeOff className="h-2.5 w-2.5" />
+                </button>
+              </span>
             ),
           )
         )}
@@ -410,12 +561,17 @@ function EndpointDetail({
   endpoint,
   onClose,
   onGenerate,
+  onIgnore,
+  onUnignore,
 }: {
   endpoint: ApiCoverageEndpoint;
   onClose: () => void;
   onGenerate: (status: string) => void;
+  onIgnore: (status: string) => void;
+  onUnignore: (status: string) => void;
 }) {
   const observed = new Set(endpoint.observed_status_codes);
+  const ignored = new Set(endpoint.ignored_status_codes);
   const tests = endpoint.test_keys ?? [];
   return (
     <Card className="overflow-hidden xl:sticky xl:top-4 xl:self-start">
@@ -462,23 +618,45 @@ function EndpointDetail({
                   >
                     {code}
                   </span>
-                ) : (
+                ) : ignored.has(code) ? (
                   <button
                     key={code}
                     type="button"
-                    onClick={() => onGenerate(code)}
-                    title={`Generate a test for ${code}`}
-                    className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                    onClick={() => onUnignore(code)}
+                    title="Ignored — click to undo"
+                    className="inline-flex items-center gap-1 rounded border border-dashed border-line px-1 py-0.5 font-mono text-[9.5px] text-faint hover:border-brand/50 hover:text-brand"
                   >
-                    {code}
-                    <Sparkles className="h-2.5 w-2.5" />
+                    {code} · ignored
+                    <EyeOff className="h-2.5 w-2.5" />
                   </button>
+                ) : (
+                  <span key={code} className="inline-flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onGenerate(code)}
+                      title={`Generate a test for ${code}`}
+                      className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                    >
+                      {code}
+                      <Sparkles className="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onIgnore(code)}
+                      title={`Ignore ${code} for this endpoint`}
+                      aria-label={`Ignore ${code}`}
+                      className="rounded border border-line px-1 py-0.5 text-faint hover:border-brand/50 hover:text-brand"
+                    >
+                      <EyeOff className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
                 ),
               )
             )}
           </div>
           <p className="mt-1.5 text-[10px] text-faint">
-            Click a gray status code to prepare a generator command for that case.
+            Gray status codes can be generated or ignored. Ignored codes stay visible and can be
+            undone.
           </p>
         </div>
 

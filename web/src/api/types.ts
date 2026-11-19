@@ -396,6 +396,7 @@ export type ApiCoverageEndpoint = {
   summary?: string;
   status_codes: string[];
   observed_status_codes: string[];
+  ignored_status_codes: string[];
   covered: boolean;
   tests: number;
   test_keys?: string[];
@@ -440,6 +441,7 @@ export type ApiCoverage = {
     uncovered: number;
     status_codes_documented: number;
     status_codes_seen: number;
+    status_codes_ignored: number;
     changes: number;
   };
   endpoints: ApiCoverageEndpoint[];

@@ -493,6 +493,18 @@ const (
 	AutoAcceptMinDecided = 10
 )
 
+// CoverageIgnore marks a documented status code as intentionally not applicable for one operation.
+// It is scoped by project, method and path so the same code can still be tested elsewhere.
+type CoverageIgnore struct {
+	Project   string    `json:"project"`
+	Method    string    `json:"method"`
+	Path      string    `json:"path"`
+	Status    string    `json:"status"`
+	Reason    string    `json:"reason"`
+	By        string    `json:"by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // ShadowStat is the agreement of one shadow rule with human labels.
 type ShadowStat struct {
 	RuleID        int64   `json:"rule_id"`
