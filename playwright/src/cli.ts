@@ -3,6 +3,9 @@
  * CLI Redline: membuktikan penyebab kegagalan dengan eksperimen, dan mengajari Redline aturan baru.
  *
  *   npx redline                        status singkat: server, versi, contract, AI, command
+ *   npx redline doctor                 cek setup server, project dan AI
+ *   npx redline doctor --json          output untuk automation/UI
+ *   npx redline doctor --strict        warning dianggap gagal (untuk CI)
  *   npx redline verify                 eksperimen untuk kegagalan run terakhir
  *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
  *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
@@ -35,6 +38,7 @@
  * Env (opsional):
  *   REDLINE_URL               default dari redline-last-run.json, lalu http://localhost:8787
  *   REDLINE_API_KEY           kalau server Redline memakai API key (dibaca juga dari .env)
+ *   REDLINE_APP_URL           baseURL aplikasi yang dicek `doctor` (opsional)
  *   REDLINE_VERIFY_MAX        kegagalan yang diuji per perintah, default 3
  *   REDLINE_VERIFY_ATTEMPTS   percobaan patch per kegagalan, default 2
  *   REDLINE_RERUNS            berapa kali rerun, default 2
@@ -51,6 +55,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -1261,6 +1266,7 @@ async function quickJSON<T>(url: string, timeoutMs = 3000): Promise<T> {
 function printCommands() {
   console.log(`
 Commands
+  npx redline doctor                 check server, project and AI setup
   npx redline verify                 prove the last run's failures
   npx redline fix <id>               open a PR from a proven fix
   npx redline analyze --run <id>     analyze an existing run
@@ -1342,12 +1348,278 @@ async function status() {
   printCommands();
 }
 
+// ---------- doctor ----------
+
+type DoctorStatus = "ok" | "warn" | "fail";
+type DoctorSection = "Server" | "Project" | "AI";
+type DoctorCheck = {
+  section: DoctorSection;
+  name: string;
+  status: DoctorStatus;
+  detail: string;
+  fix?: string;
+};
+
+function projectDependency(): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    return pkg.devDependencies?.["redline-playwright"] ?? pkg.dependencies?.["redline-playwright"] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function installedPackageVersion(): string | null {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(path.join("node_modules", "redline-playwright", "package.json"), "utf8"),
+    ) as { version?: string };
+    return pkg.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function specFiles(dir: string): string[] {
+  const out: string[] = [];
+  function walk(current: string) {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".spec.ts")) out.push(full);
+    }
+  }
+  try {
+    walk(dir);
+  } catch {
+    // Missing tests dir is reported by the empty list.
+  }
+  return out;
+}
+
+async function doctor(args: string[]) {
+  const checks: DoctorCheck[] = [];
+  const pkg = packageVersion();
+  const serverURL = baseURL();
+
+  let health: Health | undefined;
+  try {
+    health = await quickJSON<Health>("/healthz");
+    const profile = health.profile ? ` · ${health.profile}` : "";
+    checks.push({
+      section: "Server", name: "server reachable", status: "ok",
+      detail: `${serverURL} · ${health.version ?? "dev"} · api ${health.api ?? "?"}${profile}`,
+    });
+    checks.push({
+      section: "Server", name: "package vs server",
+      status: health.version && health.version !== "dev" && health.version !== pkg ? "warn" : "ok",
+      detail:
+        health.version && health.version !== "dev" && health.version !== pkg
+          ? `package ${pkg}, server ${health.version}`
+          : `v${pkg}`,
+      fix: "Use the same tag for the server and redline-playwright.",
+    });
+  } catch (e) {
+    checks.push({
+      section: "Server", name: "server reachable", status: "fail",
+      detail: `cannot reach ${serverURL}: ${(e as Error).message}`,
+      fix: "Start the Redline server and check REDLINE_URL.",
+    });
+  }
+
+  if (health) {
+    if (health.auth && !process.env.REDLINE_API_KEY) {
+      checks.push({
+        section: "Server", name: "API key", status: "fail",
+        detail: "server requires REDLINE_API_KEY, but none is set",
+        fix: "Put the same REDLINE_API_KEY in this project's .env.",
+      });
+    } else {
+      checks.push({
+        section: "Server", name: "API key",
+        status: "ok", detail: health.auth ? "accepted" : "server is open (no key)",
+      });
+    }
+
+    if (!health.auth || process.env.REDLINE_API_KEY) {
+      const [config, ai] = await Promise.allSettled([
+        quickJSON<{ contracts?: Array<{ project?: string }> }>("/api/config"),
+        quickJSON<{ enabled?: boolean; mode?: string; model?: string }>("/api/ai/usage"),
+      ]);
+      if (config.status === "fulfilled") {
+        const projects = (config.value.contracts ?? [])
+          .map((source) => source.project)
+          .filter((project): project is string => Boolean(project));
+        checks.push({
+          section: "Project", name: "contract source",
+          status: projects.length > 0 ? "ok" : "warn",
+          detail: projects.length > 0 ? projects.join(", ") : "none configured",
+          fix: "Add an OpenAPI source in Config.",
+        });
+      } else {
+        checks.push({
+          section: "Server", name: "contract config", status: "fail",
+          detail: "cannot read /api/config; check the API key",
+        });
+      }
+      if (ai.status === "fulfilled") {
+        checks.push({
+          section: "AI", name: "analysis",
+          status: ai.value.enabled ? "ok" : "warn",
+          detail: ai.value.enabled
+            ? `${ai.value.mode ?? "fallback"} · ${ai.value.model ?? "unknown"}`
+            : "disabled (rules only)",
+          fix: "Set ANTHROPIC_API_KEY on the server to enable AI analysis.",
+        });
+      } else {
+        checks.push({
+          section: "AI", name: "usage", status: "warn",
+          detail: "cannot read /api/ai/usage",
+        });
+      }
+    }
+  }
+
+  const dependency = projectDependency();
+  const installed = installedPackageVersion();
+  checks.push({
+    section: "Project", name: "redline-playwright",
+    status: dependency && installed ? "ok" : "fail",
+    detail: dependency
+      ? installed
+        ? `${installed} (declared ${dependency})`
+        : `declared ${dependency}, not installed`
+      : "not declared in package.json",
+    fix: "npm i -D github:ega-septian/redline#<tag>",
+  });
+
+  const configPath = "playwright.config.ts";
+  let config = "";
+  if (!existsSync(configPath)) {
+    checks.push({
+      section: "Project", name: "playwright config", status: "fail",
+      detail: `${configPath} not found`, fix: "Run doctor from the Playwright project root.",
+    });
+  } else {
+    config = readFileSync(configPath, "utf8");
+    checks.push({
+      section: "Project", name: "reporter",
+      status: /redline-playwright\/reporter/.test(config) ? "ok" : "fail",
+      detail: /redline-playwright\/reporter/.test(config)
+        ? "redline-playwright/reporter configured"
+        : "reporter not found in playwright.config.ts",
+      fix: 'Add ["redline-playwright/reporter"] to the reporter array.',
+    });
+  }
+
+  const literalBaseURL = config.match(/baseURL:\s*["'`]([^"'`]+)["'`]/)?.[1] ?? "";
+  const appURL = process.env.REDLINE_APP_URL || process.env.PLAYWRIGHT_BASE_URL || literalBaseURL;
+  if (!appURL || appURL.includes("${")) {
+    checks.push({
+      section: "Project", name: "baseURL", status: "warn",
+      detail: literalBaseURL
+        ? `dynamic value ${literalBaseURL}; set REDLINE_APP_URL to check it`
+        : "not found in playwright.config.ts; set REDLINE_APP_URL to check it",
+      fix: "Set REDLINE_APP_URL (for example https://api.example.com) and rerun doctor.",
+    });
+  } else {
+    try {
+      const response = await fetch(appURL, {
+        method: "GET",
+        signal: AbortSignal.timeout(8000),
+      });
+      checks.push({
+        section: "Project", name: "baseURL", status: response.status >= 500 ? "fail" : "ok",
+        detail: `${appURL} → HTTP ${response.status}`,
+        fix: response.status >= 500 ? "Check the application under test." : undefined,
+      });
+    } catch (e) {
+      checks.push({
+        section: "Project", name: "baseURL", status: "fail",
+        detail: `${appURL} → ${(e as Error).message}`,
+        fix: "Check the URL, DNS, port and that the application is running.",
+      });
+    }
+  }
+
+  const specs = specFiles("tests");
+  const usesFixture = specs.some((file) => {
+    const text = readFileSync(file, "utf8");
+    return /from\s+["'][^"']*fixtures["']/.test(text) || /redline-playwright\/fixture/.test(text);
+  });
+  checks.push({
+    section: "Project", name: "Redline fixture",
+    status: usesFixture ? "ok" : "warn",
+    detail: usesFixture
+      ? `used by ${specs.length} spec${specs.length === 1 ? "" : "s"}`
+      : specs.length === 0
+        ? "no spec files found under tests/"
+        : "no spec imports the fixture",
+    fix: 'Import { test, expect } from "./fixtures" so requests and shapes are recorded.',
+  });
+
+  const lastRunPath = path.join(RESULTS_DIR, "redline-last-run.json");
+  if (!existsSync(lastRunPath)) {
+    checks.push({
+      section: "Project", name: "last run", status: "warn",
+      detail: "redline-last-run.json not found",
+      fix: "Run npx playwright test once.",
+    });
+  } else {
+    const ageHours = (Date.now() - statSync(lastRunPath).mtimeMs) / 3_600_000;
+    let runID = "";
+    try {
+      const raw = JSON.parse(readFileSync(lastRunPath, "utf8")) as { run_id?: number };
+      runID = raw.run_id ? `run #${raw.run_id}` : "run file";
+    } catch {
+      // Keep the file name in the detail.
+    }
+    checks.push({
+      section: "Project", name: "last run",
+      status: ageHours > 24 * 7 ? "warn" : "ok",
+      detail: `${runID || "last run"} · ${ageHours < 1 ? "less than 1h ago" : `${Math.round(ageHours)}h ago`}`,
+      fix: "Send a fresh run if this project changed.",
+    });
+  }
+
+  const problems = checks.filter((check) => check.status === "fail").length;
+  const warnings = checks.filter((check) => check.status === "warn").length;
+  const strict = args.includes("--strict");
+  const failed = problems > 0 || (strict && warnings > 0);
+
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ version: pkg, checks, problems, warnings }, null, 2));
+  } else {
+    console.log(`Redline doctor · v${pkg}\n`);
+    for (const section of ["Server", "Project", "AI"] as DoctorSection[]) {
+      const rows = checks.filter((check) => check.section === section);
+      if (rows.length === 0) continue;
+      console.log(section);
+      for (const check of rows) {
+        const mark = check.status === "ok" ? "✓" : check.status === "warn" ? "⚠" : "✗";
+        console.log(`  ${mark} ${check.name.padEnd(22)} ${check.detail}`);
+        if (check.fix && check.status !== "ok") console.log(`      → ${check.fix}`);
+      }
+      console.log("");
+    }
+    const verdict = problems > 0 ? "FAIL" : warnings > 0 ? "WATCH" : "OK";
+    console.log(`${verdict} · ${problems} failed, ${warnings} warning${warnings === 1 ? "" : "s"}`);
+  }
+  process.exitCode = failed ? 1 : 0;
+}
+
 // ---------- main ----------
 
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   if (!cmd) return status();
   switch (cmd) {
+    case "doctor":
+      return doctor(args);
     case "verify":
       return verify(args);
     case "fix":
