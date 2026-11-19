@@ -18,19 +18,20 @@ evidence — backend bug, test bug, environment or flaky — before you open the
   backend regression from an outdated test.
 - **Rules first, AI optional.** Deterministic rules run free on every run; Claude is only asked when the
   rules cannot decide.
-- **Tracks the suite over time.** Flake rate, slow tests, quarantines and contract coverage.
+- **Verified fixes.** Prove a fix by rerunning the test, then open a PR with the evidence and patch.
+- **Tracks every run.** Compare runs, see which tests changed and which failures came back.
 
 ## A quick look
 
-| Overview | Test health |
+| Failures | Runs |
 | --- | --- |
-| [![Overview](docs/screenshots/overview.png)](docs/screenshots/overview.png) | [![Test health](docs/screenshots/health.png)](docs/screenshots/health.png) |
-| Open failures, recent runs and coverage at a glance. | Pass/flake trends, slow tests and regressions. |
+| [![Failures](docs/screenshots/failures.png)](docs/screenshots/failures.png) | [![Runs](docs/screenshots/runs.png)](docs/screenshots/runs.png) |
+| Grouped failures with evidence and a suggested cause. | Every run with its branch, results and duration. |
 
-| Suite load errors | Config and API keys |
+| Coverage | Config |
 | --- | --- |
-| [![Suite load errors](docs/screenshots/load-errors.png)](docs/screenshots/load-errors.png) | [![Config](docs/screenshots/config.png)](docs/screenshots/config.png) |
-| Broken imports and setup failures, grouped separately. | Contract sources, keys and notifications. |
+| [![Coverage](docs/screenshots/coverage.png)](docs/screenshots/coverage.png) | [![Config](docs/screenshots/config.png)](docs/screenshots/config.png) |
+| Contract endpoints versus the calls your tests recorded. | Contract sources, AI usage and API keys. |
 
 [See all screenshots →](docs/screenshots/README.md)
 
@@ -124,13 +125,10 @@ Full deployment and GitHub Actions guides: [deploy](docs/deploy.md) and [PR comm
 
 ## What you get
 
-- **Failures and triage** — grouped failures, owner, status, aging, run history and evidence.
-- **Runs and comparison** — every run, changed tests, retries and artifacts.
-- **Test health** — pass/flake rate, flips, slowest tests, duration regressions.
-- **Suite load errors** — failures before a test can run, classified by cause.
-- **Quarantine** — owner, reason, expiry calendar and evidence-based suggestions.
-- **Coverage** — contract endpoints vs recorded calls.
-- **Config** — contract sources, AI usage and cost, API keys and Discord notifications.
+- **Failures and triage** — grouped failures, evidence, suggested cause and run history.
+- **Runs and comparison** — every run, changed tests, results and the previous run.
+- **Coverage** — contract endpoints, recorded calls, status-code gaps and ignored codes.
+- **Config** — contract sources, AI usage and cost, and API keys.
 
 [Feature details →](docs/features.md)
 
@@ -152,7 +150,6 @@ Everything has a working default. The settings you are most likely to change:
 | `PORT` | `8787` | HTTP port. |
 | `REDLINE_API_KEY` | empty | Bootstrap key for `/api/...`. |
 | `STATUS_FROM` | `ci` | Which runs may open or close a failure: `ci`, `local`, `all`. |
-| `REDLINE_PROFILE` | `full` | `full` shows every page; `simple` keeps Failures, Runs, Coverage and Config. |
 | `RETENTION_DAYS` | `30` | Delete old test details and artifacts (`0` = never). |
 | `TIMEZONE` | `Asia/Jakarta` | Time zone for responses and logs. |
 | `MAX_REPORT_MB` | `50` | Largest accepted Playwright report. |
@@ -183,7 +180,6 @@ Full list and examples: [`.env.example`](.env.example).
 | `npx redline fix <id>` | Turn a proven test fix into a branch and a PR; reuses a stored proof unless `--force`, and `--dry-run` prints the plan (`--base=<branch>` overrides `main`). |
 | `npx redline impact schemas/brand.ts` | Tests affected by a file or endpoint. |
 | `npx redline score` | How often Redline's guesses were right, plus auto-accept calibration (`--project=<name>` scopes it). |
-| `npx redline shadow <id>` | Evaluate a learned rule without changing analyses; `shadow --stats [--project=<name>]` shows agreement, `shadow --promote <id>` proposes a ready rule. |
 | `npx redline comment` | Create or update a sticky PR comment. |
 | `npx redline analyze --run 112` | Analyze an existing run without rerunning tests. |
 
