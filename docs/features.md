@@ -69,6 +69,8 @@ Coverage compares the newest OpenAPI snapshot with the calls recorded by the Red
 - contract changes between runs;
 - which tests call each endpoint.
 
+A documented status code that has never been observed is shown as a gray **Generate** action. Selecting it opens a dialog with suggested cases and a copyable command for the Phase 2 generator (`npx redline generate --operation ... --status ...`). The dialog does not change coverage; a status code turns green only after a stored run actually observes it.
+
 
 ## Config
 
