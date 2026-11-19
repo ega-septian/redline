@@ -13,17 +13,24 @@ import (
 	"redline/internal/store"
 )
 
+type coverageStatusHint struct {
+	Status string `json:"status"`
+	Hint   string `json:"hint"` // likely_unreachable / reachable / unknown
+	Reason string `json:"reason"`
+}
+
 type coverageEndpoint struct {
-	Method              string     `json:"method"`
-	Path                string     `json:"path"`
-	Summary             string     `json:"summary,omitempty"`
-	StatusCodes         []string   `json:"status_codes"`
-	ObservedStatusCodes []string   `json:"observed_status_codes"`
-	IgnoredStatusCodes  []string   `json:"ignored_status_codes"`
-	Covered             bool       `json:"covered"`
-	Tests               int        `json:"tests"`
-	TestKeys            []string   `json:"test_keys"`
-	LastTestedAt        *time.Time `json:"last_tested_at,omitempty"`
+	Method              string               `json:"method"`
+	Path                string               `json:"path"`
+	Summary             string               `json:"summary,omitempty"`
+	StatusCodes         []string             `json:"status_codes"`
+	ObservedStatusCodes []string             `json:"observed_status_codes"`
+	IgnoredStatusCodes  []string             `json:"ignored_status_codes"`
+	StatusHints         []coverageStatusHint `json:"status_hints"`
+	Covered             bool                 `json:"covered"`
+	Tests               int                  `json:"tests"`
+	TestKeys            []string             `json:"test_keys"`
+	LastTestedAt        *time.Time           `json:"last_tested_at,omitempty"`
 }
 
 type coverageSummary struct {
@@ -62,6 +69,29 @@ type coverageResponse struct {
 	Endpoints []coverageEndpoint      `json:"endpoints"`
 	Changes   []coverageChange        `json:"changes"`
 	History   []coveragePoint         `json:"history"`
+}
+
+// coverageHint applies deterministic rules for documented but unobserved status codes. It is a
+// suggestion for the operator, never an automatic ignore.
+func coverageHint(method, path, status string, observed bool) coverageStatusHint {
+	hint := coverageStatusHint{Status: status, Hint: "unknown"}
+	if observed || method != "GET" {
+		return hint
+	}
+	switch status {
+	case "404":
+		if strings.Contains(path, "{") {
+			hint.Hint = "reachable"
+			hint.Reason = "use an unknown path parameter"
+		} else {
+			hint.Hint = "likely_unreachable"
+			hint.Reason = "no path parameter; 404 belongs to a detail endpoint"
+		}
+	case "405":
+		hint.Hint = "likely_unreachable"
+		hint.Reason = "405 requires a non-GET method"
+	}
+	return hint
 }
 
 // handleCoverage: GET /api/coverage?project=toolshop
@@ -201,11 +231,15 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 				ignoredStatuses = append(ignoredStatuses, code)
 			}
 		}
+		hints := make([]coverageStatusHint, 0, len(endpoint.StatusCodes))
+		for _, code := range endpoint.StatusCodes {
+			hints = append(hints, coverageHint(endpoint.Method, endpoint.Path, code, observed[key][code]))
+		}
 		row := coverageEndpoint{
 			Method: endpoint.Method, Path: endpoint.Path, Summary: endpoint.Summary,
 			StatusCodes: endpoint.StatusCodes, ObservedStatusCodes: statuses,
-			IgnoredStatusCodes: ignoredStatuses,
-			Tests:              len(coveredTests[key]), TestKeys: testKeys,
+			IgnoredStatusCodes: ignoredStatuses, StatusHints: hints,
+			Tests: len(coveredTests[key]), TestKeys: testKeys,
 			Covered: len(coveredTests[key]) > 0,
 		}
 		if at := lastTested[key]; !at.IsZero() {
