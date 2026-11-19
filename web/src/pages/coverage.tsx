@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Layers, Search, X } from "lucide-react";
+import { Check, Copy, Layers, Search, Sparkles, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { api } from "@/api/client";
@@ -14,12 +14,14 @@ import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
 type CoverageFilter = "all" | "covered" | "uncovered";
+type GenerateTarget = { endpoint: ApiCoverageEndpoint; status: string };
 
 export function CoveragePage() {
   const { project } = useProject();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<CoverageFilter>("all");
   const [selected, setSelected] = useState<string | null>(null);
+  const [generateTarget, setGenerateTarget] = useState<GenerateTarget | null>(null);
 
   const coverageQuery = useQuery({
     queryKey: ["coverage", project],
@@ -174,6 +176,7 @@ export function CoveragePage() {
                       endpoint={endpoint}
                       active={selected === key}
                       onSelect={() => setSelected(selected === key ? null : key)}
+                      onGenerate={(status) => setGenerateTarget({ endpoint, status })}
                     />
                   );
                 })
@@ -183,7 +186,11 @@ export function CoveragePage() {
         </div>
 
         {selectedEndpoint ? (
-          <EndpointDetail endpoint={selectedEndpoint} onClose={() => setSelected(null)} />
+          <EndpointDetail
+            endpoint={selectedEndpoint}
+            onClose={() => setSelected(null)}
+            onGenerate={(status) => setGenerateTarget({ endpoint: selectedEndpoint, status })}
+          />
         ) : (
           <ContractChanges coverage={coverage} />
         )}
@@ -194,27 +201,161 @@ export function CoveragePage() {
         status code with no observation is gray; an undocumented call is not counted. Retention limits how far
         back coverage can see.
       </p>
+
+      {generateTarget && (
+        <GenerateDialog
+          key={`${generateTarget.endpoint.method}-${generateTarget.endpoint.path}-${generateTarget.status}`}
+          target={generateTarget}
+          onClose={() => setGenerateTarget(null)}
+        />
+      )}
     </>
   );
+}
+
+function GenerateDialog({
+  target,
+  onClose,
+}: {
+  target: GenerateTarget;
+  onClose: () => void;
+}) {
+  const { endpoint, status } = target;
+  const scenarios = scenariosFor(status);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+  const command = generateCommand(endpoint, status, selected);
+
+  function toggle(scenario: string) {
+    setSelected((current) =>
+      current.includes(scenario) ? current.filter((item) => item !== scenario) : [...current, scenario],
+    );
+    setCopied(false);
+  }
+
+  async function copy() {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-lg overflow-hidden rounded-[10px] border border-line bg-surface shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="generate-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-2 border-b border-line bg-[#12171e] px-3.5 py-3">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+          <div className="min-w-0 flex-1">
+            <h2 id="generate-title" className="text-[12.5px] font-semibold text-ink">
+              Generate a test
+            </h2>
+            <p className="mt-0.5 break-all font-mono text-[10.5px] text-faint">
+              {endpoint.method} {endpoint.path}{" "}
+              <span className="rounded border border-line-soft px-1 py-0.5 text-[9.5px]">{status}</span>
+            </p>
+          </div>
+          <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close generate dialog">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="px-3.5 py-3">
+          <p className="text-[11px] leading-relaxed text-muted">
+            Choose the cases to include. The command targets the Phase 2 generator; it is copied to your
+            clipboard, not executed here.
+          </p>
+
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Suggested cases</div>
+            <div className="mt-1.5 flex flex-col gap-1">
+              {scenarios.map((scenario) => (
+                <label
+                  key={scenario}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-line-soft bg-canvas px-2 py-1.5 text-[11px] text-muted hover:border-[#3d444d]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(scenario)}
+                    onChange={() => toggle(scenario)}
+                    className="h-3.5 w-3.5 accent-[#58a6ff]"
+                  />
+                  {scenario}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Command</div>
+            <pre className="mt-1.5 overflow-x-auto rounded-md border border-line-soft bg-[#0b0f14] p-2.5 font-mono text-[10.5px] leading-relaxed text-[#cdd9e5]">
+              {command}
+            </pre>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <Button variant="default" onClick={copy}>
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy command"}
+            </Button>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function scenariosFor(status: string): string[] {
+  if (status === "400" || status === "422") return ["missing required field", "wrong type", "empty body"];
+  if (status === "401") return ["missing token", "invalid token"];
+  if (status === "403") return ["wrong role"];
+  if (status === "404") return ["unknown id"];
+  if (status === "409") return ["duplicate"];
+  return ["documented case"];
+}
+
+function generateCommand(endpoint: ApiCoverageEndpoint, status: string, cases: string[]): string {
+  const caseArg = cases.length > 0 ? ` --cases "${cases.join(", ")}"` : "";
+  return `npx redline generate --operation "${endpoint.method} ${endpoint.path}" --status ${status}${caseArg}`;
 }
 
 function EndpointRow({
   endpoint,
   active,
   onSelect,
+  onGenerate,
 }: {
   endpoint: ApiCoverageEndpoint;
   active: boolean;
   onSelect: () => void;
+  onGenerate: (status: string) => void;
 }) {
   const observed = new Set(endpoint.observed_status_codes);
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
       title="Show endpoint details"
       className={cn(
-        "grid w-full grid-cols-[minmax(220px,1fr)_82px_92px_210px_54px] gap-3 border-b border-line-soft px-3.5 py-2.5 text-left text-[11px] last:border-b-0 hover:bg-[#1b222b]",
+        "grid w-full cursor-pointer grid-cols-[minmax(220px,1fr)_82px_92px_210px_54px] gap-3 border-b border-line-soft px-3.5 py-2.5 text-left text-[11px] outline-none last:border-b-0 hover:bg-[#1b222b] focus-visible:ring-2 focus-visible:ring-brand/50",
         active && "bg-[#1f6feb14]",
       )}
     >
@@ -233,28 +374,47 @@ function EndpointRow({
         {endpoint.status_codes.length === 0 ? (
           <span className="text-faint">—</span>
         ) : (
-          endpoint.status_codes.map((code) => (
-            <span
-              key={code}
-              className={cn(
-                "rounded border px-1 py-0.5 font-mono text-[9.5px]",
-                observed.has(code)
-                  ? "border-ok/40 bg-ok/10 text-ok"
-                  : "border-line-soft bg-canvas text-faint",
-              )}
-              title={observed.has(code) ? "seen in a stored run" : "documented but not seen"}
-            >
-              {code}
-            </span>
-          ))
+          endpoint.status_codes.map((code) =>
+            observed.has(code) ? (
+              <span
+                key={code}
+                className="rounded border border-ok/40 bg-ok/10 px-1 py-0.5 font-mono text-[9.5px] text-ok"
+                title="seen in a stored run"
+              >
+                {code}
+              </span>
+            ) : (
+              <button
+                key={code}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onGenerate(code);
+                }}
+                title={`Generate a test for ${code}`}
+                className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+              >
+                {code}
+                <Sparkles className="h-2.5 w-2.5" />
+              </button>
+            ),
+          )
         )}
       </span>
       <span className="text-right font-mono text-muted">{endpoint.tests}</span>
-    </button>
+    </div>
   );
 }
 
-function EndpointDetail({ endpoint, onClose }: { endpoint: ApiCoverageEndpoint; onClose: () => void }) {
+function EndpointDetail({
+  endpoint,
+  onClose,
+  onGenerate,
+}: {
+  endpoint: ApiCoverageEndpoint;
+  onClose: () => void;
+  onGenerate: (status: string) => void;
+}) {
   const observed = new Set(endpoint.observed_status_codes);
   const tests = endpoint.test_keys ?? [];
   return (
@@ -293,22 +453,33 @@ function EndpointDetail({ endpoint, onClose }: { endpoint: ApiCoverageEndpoint; 
             {endpoint.status_codes.length === 0 ? (
               <span className="text-[10.5px] text-faint">None documented.</span>
             ) : (
-              endpoint.status_codes.map((code) => (
-                <span
-                  key={code}
-                  className={cn(
-                    "rounded border px-1 py-0.5 font-mono text-[9.5px]",
-                    observed.has(code)
-                      ? "border-ok/40 bg-ok/10 text-ok"
-                      : "border-line-soft bg-canvas text-faint",
-                  )}
-                  title={observed.has(code) ? "seen in a stored run" : "documented but not seen"}
-                >
-                  {code}
-                </span>
-              ))
+              endpoint.status_codes.map((code) =>
+                observed.has(code) ? (
+                  <span
+                    key={code}
+                    className="rounded border border-ok/40 bg-ok/10 px-1 py-0.5 font-mono text-[9.5px] text-ok"
+                    title="seen in a stored run"
+                  >
+                    {code}
+                  </span>
+                ) : (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => onGenerate(code)}
+                    title={`Generate a test for ${code}`}
+                    className="inline-flex items-center gap-1 rounded border border-brand/40 bg-brand/10 px-1 py-0.5 font-mono text-[9.5px] text-brand hover:border-brand hover:bg-brand/15"
+                  >
+                    {code}
+                    <Sparkles className="h-2.5 w-2.5" />
+                  </button>
+                ),
+              )
             )}
           </div>
+          <p className="mt-1.5 text-[10px] text-faint">
+            Click a gray status code to prepare a generator command for that case.
+          </p>
         </div>
 
         <div className="mt-3">
