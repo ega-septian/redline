@@ -1,53 +1,53 @@
 #!/usr/bin/env node
 /**
- * CLI Redline: membuktikan penyebab kegagalan dengan eksperimen, dan mengajari Redline aturan baru.
+ * Redline CLI: prove the cause of a failure with experiments, and teach Redline new rules.
  *
- *   npx redline                        status singkat: server, versi, contract, AI, command
- *   npx redline doctor                 cek setup server, project dan AI
- *   npx redline doctor --json          output untuk automation/UI
- *   npx redline doctor --strict        warning dianggap gagal (untuk CI)
- *   npx redline verify                 eksperimen untuk kegagalan run terakhir
- *   npx redline verify <id>            eksperimen untuk satu kelompok (fingerprint)
- *   npx redline fix <id>               buktikan fix, lalu buka PR dari patch yang lulus
- *   npx redline fix <id> --dry-run     tampilkan branch dan PR body tanpa push
- *   npx redline fix <id> --force       buktikan ulang walau sudah ada eksperimen yang lulus
- *   npx redline fix <id> --base=dev    PR ke branch lain (default main)
- *   npx redline learn                  promosikan candidate yang terbukti, lalu AI mengusulkan aturan baru
- *   npx redline candidates             daftar rule candidate (draft/proposed/rejected)
- *   npx redline analyze --run <id>     analisis failure pada run yang sudah ada (butuh AI di server)
- *   npx redline analyze --run <id> --rules  analisis lokal tanpa AI (rule + needs_ai)
- *   npx redline rules                  daftar aturan
- *   npx redline shadow <id>            jalankan aturan dalam mode shadow (tanpa mengubah hasil)
- *   npx redline shadow --stats         agreement shadow rule vs human label (--project=<name> scopes it)
- *   npx redline shadow --promote <id>  usulkan rule shadow menjadi proposed (butuh match/agreement)
- *   npx redline approve <id>           aktifkan aturan (reject <id> untuk menolak)
- *   npx redline score                  rapor: seberapa sering tebakan aturan dan AI terbukti benar
- *   npx redline score --project=name   kalibrasi auto-accept untuk satu project
- *   npx redline impact <file>          test yang terdampak kalau file ini berubah (import bertingkat ikut)
- *   npx redline impact GET /brands/1   test yang memanggil endpoint ini
- *   npx redline comment                tulis/update komentar PR dengan redline-report.md
+ *   npx redline                        short status: server, version, contract, AI, commands
+ *   npx redline doctor                 check the server, project and AI setup
+ *   npx redline doctor --json          machine-readable output for automation/UI
+ *   npx redline doctor --strict        treat warnings as failures (for CI)
+ *   npx redline verify                 run experiments for the last run's failures
+ *   npx redline verify <id>            run experiments for one failure group (fingerprint)
+ *   npx redline fix <id>               prove a fix, then open a PR from the passing patch
+ *   npx redline fix <id> --dry-run     print the branch and PR body without pushing
+ *   npx redline fix <id> --force       prove again even if a passing experiment exists
+ *   npx redline fix <id> --base=dev    open the PR against another branch (default main)
+ *   npx redline learn                  promote proven candidates, then ask AI for new rules
+ *   npx redline candidates             list rule candidates (draft/proposed/rejected)
+ *   npx redline analyze --run <id>     analyze failures in an existing run (needs AI on the server)
+ *   npx redline analyze --run <id> --rules  local analysis without AI (rules + needs_ai)
+ *   npx redline rules                  list rules
+ *   npx redline shadow <id>            evaluate a rule in shadow mode (without changing results)
+ *   npx redline shadow --stats         shadow rule agreement vs human labels (--project=<name> scopes it)
+ *   npx redline shadow --promote <id>  propose a shadow rule as proposed (requires match/agreement)
+ *   npx redline approve <id>           activate a rule (reject <id> to reject it)
+ *   npx redline score                  scoreboard: how often rule and AI guesses were proven right
+ *   npx redline score --project=name   auto-accept calibration for one project
+ *   npx redline impact <file>          tests affected when this file changes (transitive imports included)
+ *   npx redline impact GET /brands/1   tests that call this endpoint
+ *   npx redline comment                write/update the PR comment with redline-report.md
  *
- * Sebelum eksperimen, tebakan Redline dicatat dulu. Setelah terbukti, tebakan itu dinilai benar atau salah.
- * Kegagalan yang sudah terbukti dilewati; pakai `verify --force` untuk mengulang.
+ * Before an experiment, Redline records its guess. After it is proven, that guess is graded right or wrong.
+ * Already proven failures are skipped; use `verify --force` to repeat.
  *
- * Eksperimen dijalankan di SALINAN project (folder sementara), jadi kode kamu tidak pernah diubah.
- *   1. rerun: test dijalankan ulang apa adanya. Lulus = tidak konsisten (flaky), berhenti di sini.
- *   2. patch: AI membuat hipotesis + patch, test dijalankan dengan patch itu. Lulus = hipotesis terbukti.
- *      Patch yang menghapus assertion, menambah skip/only, try/catch, atau retry/timeout ditolak otomatis.
+ * Experiments run in a COPY of the project (temporary folder), so your code is never modified.
+ *   1. rerun: run the test again unchanged. Passing = inconsistent (flaky), stop here.
+ *   2. patch: AI makes a hypothesis + patch, then runs the test with that patch. Passing = hypothesis proven.
+ *      Patches that remove assertions, add skip/only, try/catch, or retry/timeout are rejected automatically.
  *
- * Env (opsional):
- *   REDLINE_URL               default dari redline-last-run.json, lalu http://localhost:8787
- *   REDLINE_API_KEY           kalau server Redline memakai API key (dibaca juga dari .env)
- *   REDLINE_APP_URL           baseURL aplikasi yang dicek `doctor` (opsional)
- *   REDLINE_VERIFY_MAX        kegagalan yang diuji per perintah, default 3
- *   REDLINE_VERIFY_ATTEMPTS   percobaan patch per kegagalan, default 2
- *   REDLINE_RERUNS            berapa kali rerun, default 2
- *   REDLINE_KEEP_SANDBOX=1    jangan hapus folder salinan (untuk debug)
- *   GITHUB_TOKEN              token dengan izin pull-requests:write, untuk `comment` dan `fix`
- *   GITHUB_REPOSITORY         owner/repo, diisi GitHub Actions
- *   GITHUB_EVENT_PATH         event pull_request, diisi GitHub Actions
- *   REDLINE_PR_NUMBER         override nomor PR kalau tidak lewat Actions
- *   REDLINE_PR_BASE           base branch untuk `fix`, default main
+ * Env (optional):
+ *   REDLINE_URL               default from redline-last-run.json, then http://localhost:8787
+ *   REDLINE_API_KEY           when the Redline server uses an API key (also read from .env)
+ *   REDLINE_APP_URL           baseURL of the app checked by `doctor` (optional)
+ *   REDLINE_VERIFY_MAX        failures tested per command, default 3
+ *   REDLINE_VERIFY_ATTEMPTS   patch attempts per failure, default 2
+ *   REDLINE_RERUNS            how many reruns, default 2
+ *   REDLINE_KEEP_SANDBOX=1    keep the copy folder (for debugging)
+ *   GITHUB_TOKEN              token with pull-requests:write, for `comment` and `fix`
+ *   GITHUB_REPOSITORY         owner/repo, set by GitHub Actions
+ *   GITHUB_EVENT_PATH         pull_request event, set by GitHub Actions
+ *   REDLINE_PR_NUMBER         override the PR number outside Actions
+ *   REDLINE_PR_BASE           base branch for `fix`, default main
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -346,7 +346,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
     }
     if (!guess.cached && a.source === "ai") cost += a.cost_usd;
     console.log(
-      `  0. tebakan Redline: ${categoryName(a.category)} (${sourceName(a.source)}, ${a.confidence})`,
+      `  0. Redline guess: ${categoryName(a.category)} (${sourceName(a.source)}, ${a.confidence})`,
     );
     console.log(`      ${a.summary}`);
     for (const c of a.similar ?? []) {
@@ -401,7 +401,7 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
 
       if (fix.edits.length === 0) {
         console.log(
-          `  ○ AI decided this is not a test bug, so it cannot be proven with a test patch.`,
+          `  ○ AI returned no test patch (${fix.category}); this failure cannot be fixed by editing the test.`,
         );
         await saveExperiment(f.fingerprint, {
           kind: "patch",
@@ -417,11 +417,11 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
 
       const applied = applyEdits(sandbox, files, fix.edits);
       if (typeof applied === "string") {
-        console.log(`      ✗ patch ditolak: ${applied}`);
+        console.log(`      ✗ patch rejected: ${applied}`);
         attempts.push({
           hypothesis: fix.hypothesis,
           patch: JSON.stringify(fix.edits),
-          result: `ditolak: ${applied}`,
+          result: `rejected: ${applied}`,
         });
         await saveExperiment(f.fingerprint, {
           kind: "patch",
@@ -459,9 +459,9 @@ async function verifyOne(f: Failure, force: boolean): Promise<VerifyOutcome> {
         writeFileSync(out, patch);
         console.log(`  ✓ PROVEN: test passed after the patch.\n`);
         console.log(indent(patch, "      "));
-        console.log(`\n      Terapkan: git apply ${path.relative(ROOT, out)}`);
+        console.log(`\n      Apply: git apply ${path.relative(ROOT, out)}`);
         if (fix.category === "test_bug") {
-          console.log(`      Buka PR: npx redline fix ${f.fingerprint}`);
+          console.log(`      Open PR: npx redline fix ${f.fingerprint}`);
         }
         printVerdicts(saved.verdicts);
         return {
@@ -902,12 +902,12 @@ async function learn() {
   try {
     promotion = await api<Promotion>("POST", "/api/rules/candidates/promote");
   } catch (e) {
-    console.log(`(candidate dilewati: ${e instanceof Error ? e.message : e})\n`);
+    console.log(`(candidate skipped: ${e instanceof Error ? e.message : e})\n`);
   }
   if (promotion) {
     console.log(
-      `${promotion.candidates} candidate draft, ${promotion.promoted.length} dipromosikan, ` +
-        `${promotion.rejected.length} ditolak.\n`,
+      `${promotion.candidates} candidate draft, ${promotion.promoted.length} promoted, ` +
+        `${promotion.rejected.length} rejected.\n`,
     );
     for (const r of promotion.promoted) printRule(r);
     for (const r of promotion.rejected) console.log(`  ✗ candidate #${r.id} /${r.pattern}/\n      ${r.reason}\n`);
@@ -928,7 +928,7 @@ async function learn() {
   console.log(`${res.cases} cases are not covered by rules.\n`);
   for (const r of res.proposed) printRule(r);
   for (const r of res.rejected)
-    console.log(`  ✗ ditolak  /${r.pattern}/ → ${r.category}\n             ${r.reason}\n`);
+    console.log(`  ✗ rejected  /${r.pattern}/ → ${r.category}\n             ${r.reason}\n`);
   if (res.proposed.length > 0)
     console.log(`Review the proposals above, then: npx redline approve <id>  (or reject <id>)`);
   if (res.cost_usd) console.log(`AI cost: $${res.cost_usd.toFixed(5)}`);
@@ -1216,7 +1216,7 @@ async function comment(args: string[]) {
 
   const list = await fetch(`${base}/${pr}/comments?per_page=100`, { headers });
   if (!list.ok) {
-    throw new Error(`GitHub menolak daftar komentar (${list.status}): ${(await list.text()).slice(0, 200)}`);
+    throw new Error(`GitHub rejected the comment list (${list.status}): ${(await list.text()).slice(0, 200)}`);
   }
   const comments = (await list.json()) as GithubComment[];
   const existing = comments.find((item) => item.body?.includes(marker));
@@ -1228,7 +1228,7 @@ async function comment(args: string[]) {
     body: JSON.stringify({ body }),
   });
   if (!response.ok) {
-    throw new Error(`GitHub menolak komentar (${response.status}): ${(await response.text()).slice(0, 200)}`);
+    throw new Error(`GitHub rejected the comment (${response.status}): ${(await response.text()).slice(0, 200)}`);
   }
   console.log(`[redline] PR comment ${existing ? "updated" : "created"}: ${repo}#${pr}`);
 }

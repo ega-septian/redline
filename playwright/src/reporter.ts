@@ -298,7 +298,7 @@ export default class RedlineReporter implements Reporter {
     const servedApi = res.headers.get("x-redline-api-version");
     if (servedApi && servedApi !== String(API_VERSION))
       log(
-        `server Redline memakai API v${servedApi}, paket redline-playwright ini mengharapkan v${API_VERSION}. Samakan versi server dan paket.`,
+        `Redline server uses API v${servedApi}, but this redline-playwright package expects v${API_VERSION}. Align the server and package versions.`,
       );
     const summary = (await res.json()) as IngestResult;
     const idOf = (g: GroupChange) => this.ids[g.test] ?? "-";
@@ -390,14 +390,14 @@ export default class RedlineReporter implements Reporter {
         if (res.ok) uploaded++;
         else {
           failed++;
-          log(`artifact ${artifact.name} ditolak (${res.status})`);
+          log(`artifact ${artifact.name} rejected (${res.status})`);
         }
       } catch (e) {
         failed++;
         log(`artifact ${artifact.name} failed to upload: ${e instanceof Error ? e.message : e}`);
       }
     }
-    if (uploaded > 0) log(`${uploaded} trace/screenshot diupload ke Redline.`);
+    if (uploaded > 0) log(`${uploaded} trace/screenshot uploaded to Redline.`);
     if (failed > 0) log(`${failed} artifacts failed to upload.`);
   }
 
@@ -414,7 +414,7 @@ export default class RedlineReporter implements Reporter {
     // CLI ada di paket yang sama (bin "redline"), dijalankan dari folder project.
     const cli = path.join(__dirname, "cli.js");
     if (!existsSync(cli)) {
-      log(`REDLINE_VERIFY butuh ${cli} (CLI Redline). Pasang ulang paket redline-playwright.`);
+      log(`REDLINE_VERIFY needs ${cli} (Redline CLI). Reinstall the redline-playwright package.`);
       return;
     }
     log("proving the failure cause with experiments…");
@@ -451,9 +451,9 @@ async function scoreLine(baseURL: string): Promise<string> {
     };
     const parts = board.sources
       .filter((s) => s.graded > 0)
-      .map((s) => `${sourceLabel[s.source] ?? s.source} ${s.correct}/${s.graded} benar`);
+      .map((s) => `${sourceLabel[s.source] ?? s.source} ${s.correct}/${s.graded} correct`);
     return parts.length > 0
-      ? `rapor tebakan Redline: ${parts.join(" · ")} (detail: npx redline score)`
+      ? `Redline prediction report: ${parts.join(" · ")} (detail: npx redline score)`
       : "";
   } catch {
     return "";
