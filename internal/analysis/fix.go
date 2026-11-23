@@ -119,6 +119,9 @@ func (a *Analyzer) ProposeFix(ctx context.Context, fingerprint string, files []S
 	if err != nil {
 		return nil, err
 	}
+	if err := a.checkBudget(ctx); err != nil {
+		return nil, err
+	}
 
 	resp, err := a.LLM.CreateMessage(ctx, llm.Request{
 		Model:     a.Model,
@@ -166,6 +169,11 @@ func (a *Analyzer) ProposeFix(ctx context.Context, fingerprint string, files []S
 		fix.Model = a.Model
 	}
 	fix.CostUSD = a.Pricing.Cost(resp.Usage)
+	if fix.CostUSD > 0 {
+		if err := a.Store.RecordSpend(ctx, facts.Group.Project, fix.CostUSD); err != nil {
+			a.logger().Warn("failed to record AI cost", "err", err)
+		}
+	}
 	a.logger().Info("AI patch proposal", "fingerprint", fingerprint, "category", fix.Category,
 		"edits", len(fix.Edits), "cost_usd", fix.CostUSD)
 	return &fix, nil

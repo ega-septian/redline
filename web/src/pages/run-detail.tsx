@@ -196,6 +196,8 @@ export function RunDetailPage() {
         <Kpi label="Duration" value={duration(run.duration_ms)} hint="whole run" />
       </section>
 
+      {failedTests.length > 0 && <FailureSummary tests={failedTests} />}
+
       <ComparisonPanel
         comparison={comparisonQuery.data}
         loading={comparisonQuery.isPending}
@@ -311,6 +313,102 @@ export function RunDetailPage() {
         artifacts are served by Redline; local paths remain a fallback for runs from older reporters.
       </p>
     </>
+  );
+}
+
+function firstLine(value: string): string {
+  return value.split("\n").find((line) => line.trim()) ?? value;
+}
+
+type RunIncident = {
+  key: string;
+  fingerprint: string;
+  category: Category;
+  tests: ApiRunResult[];
+  summary: string;
+  nextStep?: string;
+};
+
+function FailureSummary({ tests }: { tests: ApiRunResult[] }) {
+  const incidents = useMemo(() => {
+    const byCause = new Map<string, RunIncident>();
+    for (const test of tests) {
+      const key = test.fingerprint || `${test.category ?? "unclear"}:${test.test}`;
+      const existing = byCause.get(key);
+      if (existing) {
+        existing.tests.push(test);
+        continue;
+      }
+      byCause.set(key, {
+        key,
+        fingerprint: test.fingerprint ?? "",
+        category: categoryOf(test),
+        tests: [test],
+        summary:
+          test.analysis_summary ||
+          firstLine(test.error || test.error_snippet || "No analysis stored for this test."),
+        nextStep: test.analysis_next_step,
+      });
+    }
+    return [...byCause.values()];
+  }, [tests]);
+
+  const counts = useMemo(() => {
+    const byCategory = new Map<Category, number>();
+    for (const incident of incidents) {
+      byCategory.set(
+        incident.category,
+        (byCategory.get(incident.category) ?? 0) + incident.tests.length,
+      );
+    }
+    return [...byCategory.entries()];
+  }, [incidents]);
+
+  return (
+    <section className="overflow-hidden rounded-[10px] border border-line bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-[#12171e] px-3.5 py-2.5">
+        <h2 className="text-[12.5px] font-semibold">Failure summary</h2>
+        <span className="text-[11px] text-faint">
+          {tests.length} failed · {incidents.length} {incidents.length === 1 ? "cause" : "causes"}
+        </span>
+        <div className="ml-auto flex flex-wrap gap-1.5">
+          {counts.map(([category, count]) => (
+            <Badge key={category} tone={categoryTone[category]}>
+              {category === "unclear" ? "UNANALYZED" : categoryLabel[category]} {count}
+            </Badge>
+          ))}
+        </div>
+      </div>
+      <div className="divide-y divide-line-soft">
+        {incidents.map((incident) => (
+          <div
+            key={incident.key}
+            className="grid gap-1.5 px-3.5 py-2.5 lg:grid-cols-[130px_minmax(0,1fr)_auto] lg:items-start lg:gap-3"
+          >
+            <div className="flex items-center gap-1.5">
+              <Badge tone={categoryTone[incident.category]}>
+                {incident.category === "unclear" ? "UNANALYZED" : categoryLabel[incident.category]}
+              </Badge>
+              <span className="text-[10.5px] text-faint">{incident.tests.length}</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[12px] leading-relaxed text-ink">{incident.summary}</p>
+              {incident.nextStep && (
+                <p className="mt-1 text-[11px] leading-relaxed text-muted">{incident.nextStep}</p>
+              )}
+            </div>
+            {incident.fingerprint && (
+              <a
+                href={`/ui/?failure=${encodeURIComponent(incident.fingerprint)}`}
+                className="text-[11px] text-brand hover:underline"
+              >
+                Failure history
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -504,6 +602,22 @@ function TestDetail({ result }: { result: ApiRunResult }) {
       </div>
 
       <div className="flex flex-col gap-3.5 p-4">
+        {result.analysis_summary && (
+          <div>
+            <BlockLabel>Cause</BlockLabel>
+            <p className="text-[12px] leading-relaxed text-[#adbac7]">
+              {result.analysis_summary}
+            </p>
+            {result.analysis_next_step && (
+              <>
+                <BlockLabel>Next step</BlockLabel>
+                <p className="text-[11px] leading-relaxed text-muted">
+                  {result.analysis_next_step}
+                </p>
+              </>
+            )}
+          </div>
+        )}
         <div>
           <BlockLabel>Error</BlockLabel>
           <pre className="max-h-64 overflow-auto rounded-md border border-line-soft bg-[#0b0f14] p-2 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#adbac7]">

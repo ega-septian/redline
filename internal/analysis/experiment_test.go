@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"redline/internal/llm"
 	"redline/internal/store"
@@ -40,13 +41,24 @@ func TestProposeFix(t *testing.T) {
 			{"path": "playwright.config.ts", "find": "retries: 0", "replace": "retries: 5"}, // file yang tidak dikirim
 		},
 	}}}
-	a := &Analyzer{Store: s, LLM: fake}
+	a := &Analyzer{Store: s, LLM: fake, Pricing: llm.Pricing{InputPerMTok: 0.10, OutputPerMTok: 0.50}}
 	files := []SourceFile{{Path: "tests/order.spec.ts", Content: "const token = \"Bearer abc.def\";\nparse(response.json())"}}
 	attempts := []Attempt{{Hypothesis: "matcher salah", Patch: "-a\n+b", Result: "Expected: 1"}}
 
+	before, err := s.SpendSince(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	fix, err := a.ProposeFix(ctx, fps["order dibayar"], files, attempts)
 	if err != nil {
 		t.Fatal(err)
+	}
+	after, err := s.SpendSince(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after <= before {
+		t.Fatalf("AI cost was not recorded: before %.8f after %.8f", before, after)
 	}
 	if fix.Category != "test_bug" || len(fix.Edits) != 1 || fix.Edits[0].Path != "tests/order.spec.ts" {
 		t.Fatalf("hanya edit ke file yang dikirim yang boleh lolos: %+v", fix)
@@ -69,6 +81,15 @@ func TestProposeFix(t *testing.T) {
 	}
 	if _, err := a.ProposeFix(ctx, fps["order dibayar"], nil, nil); !errors.Is(err, ErrBadFixInput) {
 		t.Errorf("tanpa file harus ErrBadFixInput, dapat %v", err)
+	}
+
+	limited := &Analyzer{Store: s, LLM: fake, Pricing: a.Pricing, Model: a.Model, DailyBudgetUSD: 0.0000001}
+	calls := fake.calls
+	if _, err := limited.ProposeFix(ctx, fps["order dibayar"], files, nil); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("want ErrBudgetExceeded, got %v", err)
+	}
+	if fake.calls != calls {
+		t.Errorf("budget check must run before the AI call")
 	}
 }
 
