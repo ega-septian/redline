@@ -87,7 +87,9 @@ func builtinRules(msg string) *store.Analysis {
 			Summary: fmt.Sprintf("The API returned %s while the test expected %s. A 5xx means the server failed to process the request. "+
 				"Even if test data triggered it, the server should return 4xx with a validation message, not 5xx.", r[1], e[1]),
 			Evidence: []string{e[0], r[0]},
-			NextStep: "Check the backend logs for this run (for example `docker logs <container-api>`) to find the exception, then report it to the backend team with the request.",
+			NextStep: "This is a server-side failure, not a test failure. If you have backend access, check the server logs for this request. " +
+				"If you are QA/SDET: reproduce it with the curl in this report, capture the response body and request ID, and open a bug for the backend owner. " +
+				"Keep the expected status; do not change the test to accept a 5xx.",
 		}
 	}
 

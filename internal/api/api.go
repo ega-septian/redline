@@ -840,6 +840,18 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range tests {
 		tests[i].Artifacts = byTest[tests[i].TestKey]
+		if tests[i].Status != "failed" || tests[i].Fingerprint == "" {
+			continue
+		}
+		// Surface the stored cause on the run page, not only on the failures page.
+		if a, err := s.Store.GetAnalysis(r.Context(), tests[i].Fingerprint, analysis.PromptVersion); err == nil {
+			tests[i].AnalysisSummary = a.Summary
+			tests[i].AnalysisNextStep = a.NextStep
+			tests[i].AnalysisSource = a.Source
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.serverError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": run, "tests": tests})
 }
@@ -1364,6 +1376,8 @@ func (s *Server) handleFix(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, analysis.ErrBadFixInput):
 		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, analysis.ErrBudgetExceeded):
+		writeError(w, http.StatusTooManyRequests, err.Error())
 	case err != nil:
 		s.Log.Error("patch proposal failed", "fingerprint", r.PathValue("fingerprint"), "err", err)
 		writeError(w, http.StatusBadGateway, "patch proposal failed; check the server logs")

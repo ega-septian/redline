@@ -404,6 +404,11 @@ type RunResult struct {
 	Confidence    string     `json:"confidence,omitempty"`
 	HumanLabel    string     `json:"human_label,omitempty"`
 	Artifacts     []Artifact `json:"artifacts,omitempty"`
+
+	// Response-only fields filled by GET /api/runs/{id} from the stored analysis.
+	AnalysisSummary  string `json:"analysis_summary,omitempty"`
+	AnalysisNextStep string `json:"analysis_next_step,omitempty"`
+	AnalysisSource   string `json:"analysis_source,omitempty"`
 }
 
 // Artifact adalah trace atau screenshot yang diupload reporter dan disimpan server.

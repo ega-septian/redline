@@ -146,6 +146,9 @@ export type ApiRunResult = {
   confidence?: string;
   human_label?: string;
   artifacts?: ApiArtifact[];
+  analysis_summary?: string;
+  analysis_next_step?: string;
+  analysis_source?: string;
 };
 
 export type ApiArtifact = {
