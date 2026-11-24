@@ -69,6 +69,14 @@ func (d *Document) Match(method, path string) (string, bool) {
 	return tmpl, true
 }
 
+// MatchPath maps a concrete path to its documented template regardless of the HTTP method. It lets
+// Coverage attribute path-level responses such as 405 (method not allowed) to the documented
+// operations on that path, even when the failing call used an undocumented method.
+func (d *Document) MatchPath(path string) (string, bool) {
+	tmpl := d.match(path)
+	return tmpl, tmpl != ""
+}
+
 // Diff compares this contract with a previous snapshot. It reports added/removed endpoints, status-code
 // changes and schema/parameter changes for endpoints that still exist. Descriptions are ignored.
 func (d *Document) Diff(previous *Document) []ContractChange {

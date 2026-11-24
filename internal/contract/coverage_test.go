@@ -47,6 +47,15 @@ func TestEndpointsAndMatch(t *testing.T) {
 	if _, ok := doc.Match("GET", "/unknown"); ok {
 		t.Error("endpoint tidak terdokumentasi tidak boleh match")
 	}
+	if tmpl, ok := doc.MatchPath("/products/123"); !ok || tmpl != "/products/{productId}" {
+		t.Errorf("MatchPath /products/123 = %q %v", tmpl, ok)
+	}
+	if tmpl, ok := doc.MatchPath("/brands"); !ok || tmpl != "/brands" {
+		t.Errorf("MatchPath /brands = %q %v", tmpl, ok)
+	}
+	if _, ok := doc.MatchPath("/unknown"); ok {
+		t.Error("MatchPath tidak boleh match path yang tidak ada")
+	}
 }
 
 func TestContractDiff(t *testing.T) {

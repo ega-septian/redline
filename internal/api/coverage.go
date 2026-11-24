@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"redline/internal/contract"
+	"redline/internal/coverage"
 	"redline/internal/store"
 )
 
 type coverageStatusHint struct {
-	Status string `json:"status"`
-	Hint   string `json:"hint"` // likely_unreachable / reachable / unknown
-	Reason string `json:"reason"`
+	Status     string               `json:"status"`
+	Hint       string               `json:"hint"` // likely_unreachable / reachable / unknown
+	Reason     string               `json:"reason"`
+	Suggestion *coverage.Suggestion `json:"suggestion,omitempty"`
 }
 
 type coverageEndpoint struct {
@@ -75,11 +77,18 @@ type coverageResponse struct {
 // suggestion for the operator, never an automatic ignore.
 func coverageHint(method, path, status string, observed bool) coverageStatusHint {
 	hint := coverageStatusHint{Status: status, Hint: "unknown"}
-	if observed || method != "GET" {
+	if observed {
 		return hint
 	}
-	switch status {
-	case "404":
+	if status == "405" {
+		hint.Hint = "reachable"
+		hint.Reason = "405 is path-level; call this path with another HTTP method"
+		return hint
+	}
+	if method != "GET" {
+		return hint
+	}
+	if status == "404" {
 		if strings.Contains(path, "{") {
 			hint.Hint = "reachable"
 			hint.Reason = "use an unknown path parameter"
@@ -87,11 +96,37 @@ func coverageHint(method, path, status string, observed bool) coverageStatusHint
 			hint.Hint = "likely_unreachable"
 			hint.Reason = "no path parameter; 404 belongs to a detail endpoint"
 		}
-	case "405":
-		hint.Hint = "likely_unreachable"
-		hint.Reason = "405 requires a non-GET method"
 	}
 	return hint
+}
+
+// observePathStatus attributes a path-level response such as 405 to every documented operation on
+// the same path that lists it. The call method may be undocumented (for example PUT /brands), but
+// the response still proves that the path returns 405 for unsupported methods.
+func observePathStatus(doc *contract.Document, observed map[string]map[string]bool, path, status string) {
+	tmpl, ok := doc.MatchPath(path)
+	if !ok {
+		return
+	}
+	for _, endpoint := range doc.Endpoints() {
+		if endpoint.Path != tmpl || !hasStatus(endpoint.StatusCodes, status) {
+			continue
+		}
+		key := endpoint.Method + " " + tmpl
+		if observed[key] == nil {
+			observed[key] = map[string]bool{}
+		}
+		observed[key][status] = true
+	}
+}
+
+func hasStatus(statuses []string, status string) bool {
+	for _, s := range statuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 // handleCoverage: GET /api/coverage?project=toolshop
@@ -158,6 +193,9 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	for _, call := range calls {
 		template, ok := latest.Match(call.Method, call.Path)
 		if !ok {
+			if call.Status == 405 {
+				observePathStatus(latest, observed, call.Path, "405")
+			}
 			continue
 		}
 		key := call.Method + " " + template
@@ -196,6 +234,13 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	endpoints := latest.Endpoints()
+	pathMethods := map[string]map[string]bool{}
+	for _, endpoint := range endpoints {
+		if pathMethods[endpoint.Path] == nil {
+			pathMethods[endpoint.Path] = map[string]bool{}
+		}
+		pathMethods[endpoint.Path][endpoint.Method] = true
+	}
 	response := coverageResponse{
 		Available: true, Project: project, Snapshot: &snapshots[0],
 		Endpoints: make([]coverageEndpoint, 0, len(endpoints)),
@@ -233,7 +278,9 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		}
 		hints := make([]coverageStatusHint, 0, len(endpoint.StatusCodes))
 		for _, code := range endpoint.StatusCodes {
-			hints = append(hints, coverageHint(endpoint.Method, endpoint.Path, code, observed[key][code]))
+			hint := coverageHint(endpoint.Method, endpoint.Path, code, observed[key][code])
+			hint.Suggestion = coverage.Suggest(project, endpoint, pathMethods[endpoint.Path], code, observed[key][code])
+			hints = append(hints, hint)
 		}
 		row := coverageEndpoint{
 			Method: endpoint.Method, Path: endpoint.Path, Summary: endpoint.Summary,
@@ -345,6 +392,9 @@ func coverageHistory(snapshots []store.ContractSnapshot, docs []*contract.Docume
 		for _, call := range callsByRun[snapshot.RunID] {
 			template, ok := doc.Match(call.Method, call.Path)
 			if !ok {
+				if call.Status == 405 {
+					observePathStatus(doc, observed, call.Path, "405")
+				}
 				continue
 			}
 			key := call.Method + " " + template
