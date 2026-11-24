@@ -425,6 +425,22 @@ function SuggestDialog({ target, onClose }: { target: SuggestTarget; onClose: ()
             <SuggestionFact label="Kind" value={suggestion.kind} />
           </div>
 
+          {suggestion.body_fields && Object.keys(suggestion.body_fields).length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Body fields</div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {Object.entries(suggestion.body_fields).map(([field, kind]) => (
+                  <span
+                    key={field}
+                    className="rounded border border-line-soft bg-canvas px-1.5 py-0.5 font-mono text-[9.5px] text-muted"
+                  >
+                    {field}: {kind}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-3">
             <div className="text-[10px] uppercase tracking-[0.8px] text-faint">Command</div>
             <pre className="mt-1.5 overflow-x-auto rounded-md border border-line-soft bg-[#0b0f14] p-2.5 font-mono text-[10.5px] leading-relaxed text-[#cdd9e5]">

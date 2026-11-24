@@ -401,6 +401,8 @@ export type ApiCoverageSuggestion = {
   path: string;
   status: string;
   request?: { method: string; path: string };
+  candidates?: string[];
+  body_fields?: Record<string, string>;
   expected_status?: number;
   command?: string;
 };
