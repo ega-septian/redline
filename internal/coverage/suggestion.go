@@ -33,6 +33,7 @@ type Suggestion struct {
 	Path           string   `json:"path"`
 	Status         string   `json:"status"`
 	Request        *Request `json:"request,omitempty"`
+	Candidates     []string `json:"candidates,omitempty"`
 	ExpectedStatus int      `json:"expected_status,omitempty"`
 	Command        string   `json:"command,omitempty"`
 }
@@ -46,14 +47,15 @@ func Suggest(project string, endpoint contract.EndpointSpec, pathMethods map[str
 	s := &Suggestion{Method: endpoint.Method, Path: endpoint.Path, Status: status}
 	switch status {
 	case "405":
-		candidate := firstNotDocumented(pathMethods, "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
-		if candidate == "" {
+		candidates := undocumentedMethods(pathMethods, "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD")
+		if len(candidates) == 0 {
 			return nil
 		}
 		s.Kind = KindRecipe
 		s.Confidence = "high"
-		s.Reason = fmt.Sprintf("405 is path-level; %s %s is not documented for this path and should return 405.", candidate, endpoint.Path)
-		s.Request = &Request{Method: candidate, Path: endpoint.Path}
+		s.Reason = fmt.Sprintf("405 is path-level; try %s on %s and expect 405.", strings.Join(candidates, "/"), endpoint.Path)
+		s.Request = &Request{Method: candidates[0], Path: endpoint.Path}
+		s.Candidates = candidates
 		s.ExpectedStatus = 405
 		s.Command = fmt.Sprintf("npx redline coverage probe --project=%s --operation %q --status %s",
 			project, endpoint.Method+" "+endpoint.Path, status)
@@ -85,8 +87,12 @@ func Suggest(project string, endpoint contract.EndpointSpec, pathMethods map[str
 		s.Reason = "Send a malformed body or query; this needs a small fixture."
 	case "401":
 		s.Kind = KindRecipe
-		s.Confidence = "medium"
-		s.Reason = "Call without credentials; this needs auth context."
+		s.Confidence = "high"
+		s.Reason = "Call without credentials and expect 401."
+		s.Request = &Request{Method: endpoint.Method, Path: endpoint.Path}
+		s.ExpectedStatus = 401
+		s.Command = fmt.Sprintf("npx redline coverage probe --project=%s --operation %q --status %s",
+			project, endpoint.Method+" "+endpoint.Path, status)
 	case "403":
 		s.Kind = KindRecipe
 		s.Confidence = "medium"
@@ -99,11 +105,12 @@ func Suggest(project string, endpoint contract.EndpointSpec, pathMethods map[str
 	return s
 }
 
-func firstNotDocumented(pathMethods map[string]bool, candidates ...string) string {
+func undocumentedMethods(pathMethods map[string]bool, candidates ...string) []string {
+	out := []string{}
 	for _, method := range candidates {
 		if !pathMethods[method] {
-			return method
+			out = append(out, method)
 		}
 	}
-	return ""
+	return out
 }

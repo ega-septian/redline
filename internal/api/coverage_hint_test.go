@@ -19,6 +19,8 @@ func TestCoverageHint(t *testing.T) {
 		{"404 detail", "GET", "/brands/{brandId}", "404", false, "reachable"},
 		{"405 get", "GET", "/brands", "405", false, "reachable"},
 		{"405 post", "POST", "/brands", "405", false, "reachable"},
+		{"401 get", "GET", "/users/me", "401", false, "reachable"},
+		{"403 get", "GET", "/users/me", "403", false, "reachable"},
 		{"404 post", "POST", "/brands", "404", false, "unknown"},
 		{"observed 404", "GET", "/brands", "404", true, "unknown"},
 		{"200", "GET", "/brands", "200", false, "unknown"},

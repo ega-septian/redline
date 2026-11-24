@@ -85,6 +85,16 @@ func coverageHint(method, path, status string, observed bool) coverageStatusHint
 		hint.Reason = "405 is path-level; call this path with another HTTP method"
 		return hint
 	}
+	if status == "401" {
+		hint.Hint = "reachable"
+		hint.Reason = "call without credentials"
+		return hint
+	}
+	if status == "403" {
+		hint.Hint = "reachable"
+		hint.Reason = "call with a valid token that has the wrong role"
+		return hint
+	}
 	if method != "GET" {
 		return hint
 	}
