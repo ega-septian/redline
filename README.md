@@ -73,7 +73,7 @@ password. Create a separate key per project in **Config → API keys**.
 ### 2. Connect a Playwright project
 
 ```bash
-npm i -D github:ega-septian/redline#v1.21.5
+npm i -D github:ega-septian/redline#v1.21.6
 ```
 
 Add the reporter after the JSON reporter in `playwright.config.ts`:
