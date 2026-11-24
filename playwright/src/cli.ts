@@ -1223,6 +1223,7 @@ type CoverageHint = {
     confidence: string;
     reason: string;
     request?: { method: string; path: string };
+    candidates?: string[];
     expected_status?: number;
   };
 };
@@ -1302,20 +1303,29 @@ async function coverage(args: string[]) {
   const fixtureMatch = existing.match(/from\s+["']([^"']*fixtures[^"']*)["']/);
   const fixtureImport = fixtureMatch?.[1] ?? "./fixtures";
   const expected = suggestion.expected_status ?? Number(status);
+  const candidates = suggestion.candidates?.length ? suggestion.candidates : [request.method];
   const tag = `@TC-PROBE-${Date.now().toString(36).toUpperCase()}`;
   const tempAbs = path.join(targetDir, `__redline-probe-${Date.now().toString(36)}.spec.ts`);
   const tempRel = path.relative(ROOT, tempAbs).split(path.sep).join("/");
   const code = `import { expect, test } from ${JSON.stringify(fixtureImport)};
 
-test(${JSON.stringify(`coverage probe ${request.method} ${request.path} ${expected}`)}, { tag: ${JSON.stringify(tag)} }, async ({ request }) => {
-  const response = await request.fetch(${JSON.stringify(request.path)}, { method: ${JSON.stringify(request.method)} });
-  expect(response.status()).toBe(${expected});
+test(${JSON.stringify(`coverage probe ${candidates.join("/")} ${request.path} ${expected}`)}, { tag: ${JSON.stringify(tag)} }, async ({ request }) => {
+  const seen: string[] = [];
+  for (const method of ${JSON.stringify(candidates)}) {
+    const response = await request.fetch(${JSON.stringify(request.path)}, { method });
+    seen.push(\`\${method}: \${response.status()}\`);
+    if (response.status() === ${expected}) {
+      expect(response.status()).toBe(${expected});
+      return;
+    }
+  }
+  throw new Error(\`no candidate returned ${expected}: \${seen.join(", ")}\`);
 });
 `;
 
   try {
     writeFileSync(tempAbs, code);
-    console.log(`Probing ${request.method} ${request.path} → ${expected}…`);
+    console.log(`Probing ${candidates.join("/")} ${request.path} → ${expected}…`);
     const result = spawnSync(
       process.platform === "win32" ? "npx.cmd" : "npx",
       ["playwright", "test", tempRel, "--project", project],
@@ -1326,12 +1336,12 @@ test(${JSON.stringify(`coverage probe ${request.method} ${request.path} ${expect
       },
     );
     if (result.status !== 0) {
-      console.log(`✗ probe failed: ${request.method} ${request.path} did not return ${expected}.`);
+      console.log(`✗ probe failed: ${candidates.join("/")} ${request.path} did not return ${expected}.`);
       process.exitCode = 1;
       return;
     }
     console.log(
-      `✓ VERIFIED: ${request.method} ${request.path} → ${expected}. The run was recorded; Coverage should show ${status} as observed.`,
+      `✓ VERIFIED: ${candidates.join("/")} ${request.path} → ${expected}. The run was recorded; Coverage should show ${status} as observed.`,
     );
   } finally {
     rmSync(tempAbs, { force: true });
