@@ -393,10 +393,23 @@ export type TestHistory = {
   runs: TestRunPoint[];
 };
 
+export type ApiCoverageSuggestion = {
+  kind: "unreachable" | "recipe" | "business" | string;
+  confidence: string;
+  reason: string;
+  method: string;
+  path: string;
+  status: string;
+  request?: { method: string; path: string };
+  expected_status?: number;
+  command?: string;
+};
+
 export type ApiCoverageStatusHint = {
   status: string;
   hint: "likely_unreachable" | "reachable" | "unknown" | string;
   reason: string;
+  suggestion?: ApiCoverageSuggestion;
 };
 
 export type ApiCoverageEndpoint = {
