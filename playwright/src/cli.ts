@@ -1224,6 +1224,7 @@ type CoverageHint = {
     reason: string;
     request?: { method: string; path: string };
     candidates?: string[];
+    body_fields?: Record<string, string>;
     expected_status?: number;
   };
 };
@@ -1304,6 +1305,31 @@ async function coverage(args: string[]) {
   const fixtureImport = fixtureMatch?.[1] ?? "./fixtures";
   const expected = suggestion.expected_status ?? Number(status);
   const candidates = suggestion.candidates?.length ? suggestion.candidates : [request.method];
+  const bodyChecks = Object.entries(suggestion.body_fields ?? {}).map(([field, kind]) => {
+    const key = JSON.stringify(field);
+    switch (kind) {
+      case "string":
+        return `expect(typeof body[${key}]).toBe("string");`;
+      case "integer":
+        return `expect(Number.isInteger(body[${key}])).toBe(true);`;
+      case "number":
+        return `expect(typeof body[${key}]).toBe("number");`;
+      case "boolean":
+        return `expect(typeof body[${key}]).toBe("boolean");`;
+      case "array":
+        return `expect(Array.isArray(body[${key}])).toBe(true);`;
+      default:
+        return `expect(body[${key}]).toBeDefined();`;
+    }
+  });
+  const bodyAssertion = bodyChecks.length
+    ? [
+        "const body = (await response.json()) as Record<string, unknown>;",
+        "expect(body).not.toBeNull();",
+        'expect(typeof body).toBe("object");',
+        ...bodyChecks,
+      ].join("\n      ")
+    : "";
   const tag = `@TC-PROBE-${Date.now().toString(36).toUpperCase()}`;
   const tempAbs = path.join(targetDir, `__redline-probe-${Date.now().toString(36)}.spec.ts`);
   const tempRel = path.relative(ROOT, tempAbs).split(path.sep).join("/");
@@ -1316,6 +1342,7 @@ test(${JSON.stringify(`coverage probe ${candidates.join("/")} ${request.path} ${
     seen.push(\`\${method}: \${response.status()}\`);
     if (response.status() === ${expected}) {
       expect(response.status()).toBe(${expected});
+      ${bodyAssertion}
       return;
     }
   }
