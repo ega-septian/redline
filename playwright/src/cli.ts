@@ -25,6 +25,8 @@
  *   npx redline score --project=name   auto-accept calibration for one project
  *   npx redline impact <file>          tests affected when this file changes (transitive imports included)
  *   npx redline impact GET /brands/1   tests that call this endpoint
+ *   npx redline coverage probe --project=toolshop --operation "PUT /brands" --status 405
+ *                                      run a temporary test from a coverage recipe and verify the status
  *   npx redline comment                write/update the PR comment with redline-report.md
  *
  * Before an experiment, Redline records its guess. After it is proven, that guess is graded right or wrong.
@@ -1187,6 +1189,155 @@ function pullRequestNumber(): number {
   );
 }
 
+function flagValue(args: string[], name: string): string {
+  const index = args.indexOf(name);
+  if (index >= 0 && index + 1 < args.length && !args[index + 1].startsWith("--")) {
+    return args[index + 1];
+  }
+  const inline = args.find((arg) => arg.startsWith(`${name}=`));
+  return inline ? inline.slice(name.length + 1) : "";
+}
+
+function defaultTestDir(project: string): string {
+  const file = path.join(RESULTS_DIR, "results.json");
+  if (!existsSync(file)) return "";
+  try {
+    const results = JSON.parse(readFileSync(file, "utf8")) as {
+      config?: { projects?: Array<{ name?: string; testDir?: string }> };
+    };
+    const projects = results.config?.projects ?? [];
+    const selected = projects.find((item) => item.name === project) ?? projects[0];
+    if (!selected?.testDir) return "";
+    return path.resolve(ROOT, selected.testDir);
+  } catch {
+    return "";
+  }
+}
+
+type CoverageHint = {
+  status: string;
+  hint: string;
+  reason: string;
+  suggestion?: {
+    kind: string;
+    confidence: string;
+    reason: string;
+    request?: { method: string; path: string };
+    expected_status?: number;
+  };
+};
+
+type CoverageEndpoint = {
+  method: string;
+  path: string;
+  test_keys?: string[];
+  status_hints?: CoverageHint[];
+};
+
+/**
+ * coverage probe: run a temporary test from a deterministic coverage recipe, verify the expected
+ * status, and let the normal reporter record the call. The temporary spec is removed afterwards.
+ */
+async function coverage(args: string[]) {
+  if (args[0] !== "probe") {
+    throw new Error(
+      'usage: npx redline coverage probe --project=<project> --operation "PUT /brands" --status 405',
+    );
+  }
+  const project = flagValue(args, "--project");
+  const operation = flagValue(args, "--operation");
+  const status = flagValue(args, "--status");
+  const dirOverride = flagValue(args, "--dir");
+  if (!project || !operation || !status) {
+    throw new Error(
+      'usage: npx redline coverage probe --project=<project> --operation "PUT /brands" --status 405',
+    );
+  }
+  const [method, ...rest] = operation.trim().split(/\s+/);
+  const endpointPath = rest.join(" ");
+  if (!method || !endpointPath) throw new Error(`invalid --operation: ${operation}`);
+
+  const data = await api<{ endpoints?: CoverageEndpoint[] }>(
+    "GET",
+    `/api/coverage?project=${encodeURIComponent(project)}`,
+  );
+  const endpoint = (data.endpoints ?? []).find(
+    (item) => item.method.toUpperCase() === method.toUpperCase() && item.path === endpointPath,
+  );
+  if (!endpoint) throw new Error(`coverage endpoint not found: ${operation}`);
+  const hint = (endpoint.status_hints ?? []).find((item) => item.status === status);
+  const suggestion = hint?.suggestion;
+  if (!suggestion || suggestion.kind !== "recipe" || !suggestion.request) {
+    throw new Error(`no deterministic recipe for ${operation} ${status}`);
+  }
+  const request = suggestion.request;
+  if (request.path.includes("{")) {
+    throw new Error("this recipe needs a concrete path; path parameters require data setup");
+  }
+
+  const firstTest = (endpoint.test_keys ?? [])[0];
+  const file = firstTest?.split(" › ")[1];
+  let spec = "";
+  if (file) {
+    try {
+      spec = specPath(file);
+    } catch {
+      // fall through to --dir or the error below
+    }
+  }
+  const targetDir = dirOverride
+    ? path.resolve(ROOT, dirOverride)
+    : spec
+      ? path.dirname(path.join(ROOT, spec))
+      : defaultTestDir(project);
+  if (!targetDir) {
+    throw new Error(
+      "cannot find the test directory for this endpoint; pass --dir=tests/api/toolshop",
+    );
+  }
+  mkdirSync(targetDir, { recursive: true });
+
+  const existing =
+    spec && existsSync(path.join(ROOT, spec)) ? readFileSync(path.join(ROOT, spec), "utf8") : "";
+  const fixtureMatch = existing.match(/from\s+["']([^"']*fixtures[^"']*)["']/);
+  const fixtureImport = fixtureMatch?.[1] ?? "./fixtures";
+  const expected = suggestion.expected_status ?? Number(status);
+  const tag = `@TC-PROBE-${Date.now().toString(36).toUpperCase()}`;
+  const tempAbs = path.join(targetDir, `__redline-probe-${Date.now().toString(36)}.spec.ts`);
+  const tempRel = path.relative(ROOT, tempAbs).split(path.sep).join("/");
+  const code = `import { expect, test } from ${JSON.stringify(fixtureImport)};
+
+test(${JSON.stringify(`coverage probe ${request.method} ${request.path} ${expected}`)}, { tag: ${JSON.stringify(tag)} }, async ({ request }) => {
+  const response = await request.fetch(${JSON.stringify(request.path)}, { method: ${JSON.stringify(request.method)} });
+  expect(response.status()).toBe(${expected});
+});
+`;
+
+  try {
+    writeFileSync(tempAbs, code);
+    console.log(`Probing ${request.method} ${request.path} → ${expected}…`);
+    const result = spawnSync(
+      process.platform === "win32" ? "npx.cmd" : "npx",
+      ["playwright", "test", tempRel, "--project", project],
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: { ...process.env, CI: "", REDLINE: "1", REDLINE_AI: "0", REDLINE_VERIFY: "0" },
+      },
+    );
+    if (result.status !== 0) {
+      console.log(`✗ probe failed: ${request.method} ${request.path} did not return ${expected}.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(
+      `✓ VERIFIED: ${request.method} ${request.path} → ${expected}. The run was recorded; Coverage should show ${status} as observed.`,
+    );
+  } finally {
+    rmSync(tempAbs, { force: true });
+  }
+}
+
 async function comment(args: string[]) {
   const file = args[0] ? path.resolve(args[0]) : path.join(RESULTS_DIR, "redline-report.md");
   if (!existsSync(file)) {
@@ -1640,6 +1791,8 @@ async function main() {
       return decide(args[0], "rejected");
     case "impact":
       return impact(args);
+    case "coverage":
+      return coverage(args);
     case "comment":
       return comment(args);
     default:
