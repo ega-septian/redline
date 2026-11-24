@@ -26,16 +26,17 @@ type Request struct {
 
 // Suggestion is one deterministic recipe for a missing status code.
 type Suggestion struct {
-	Kind           Kind     `json:"kind"`
-	Confidence     string   `json:"confidence"`
-	Reason         string   `json:"reason"`
-	Method         string   `json:"method"`
-	Path           string   `json:"path"`
-	Status         string   `json:"status"`
-	Request        *Request `json:"request,omitempty"`
-	Candidates     []string `json:"candidates,omitempty"`
-	ExpectedStatus int      `json:"expected_status,omitempty"`
-	Command        string   `json:"command,omitempty"`
+	Kind           Kind              `json:"kind"`
+	Confidence     string            `json:"confidence"`
+	Reason         string            `json:"reason"`
+	Method         string            `json:"method"`
+	Path           string            `json:"path"`
+	Status         string            `json:"status"`
+	Request        *Request          `json:"request,omitempty"`
+	Candidates     []string          `json:"candidates,omitempty"`
+	BodyFields     map[string]string `json:"body_fields,omitempty"`
+	ExpectedStatus int               `json:"expected_status,omitempty"`
+	Command        string            `json:"command,omitempty"`
 }
 
 // Suggest returns a deterministic recipe when the status has a known way to be observed.

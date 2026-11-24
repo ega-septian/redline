@@ -58,6 +58,30 @@ func TestEndpointsAndMatch(t *testing.T) {
 	}
 }
 
+func TestResponseFields(t *testing.T) {
+	doc := parse(t, `{
+		"openapi":"3.0.0",
+		"components":{"responses":{"MethodNotAllowedResponse":{
+			"content":{"application/json":{"schema":{"type":"object","properties":{"message":{"type":"string"}}}}}
+		}}},
+		"paths":{"/brands":{"get":{"responses":{
+			"200":{"description":"ok"},
+			"405":{"$ref":"#/components/responses/MethodNotAllowedResponse"}
+		}}}}
+	}`)
+	schema, ok := doc.ResponseSchema("GET", "/brands", "405")
+	if !ok || schema["type"] != "object" {
+		t.Fatalf("want resolved 405 schema, got %+v %v", schema, ok)
+	}
+	fields, ok := doc.ResponseFields("GET", "/brands", "405")
+	if !ok || fields["message"] != "string" {
+		t.Fatalf("want message:string, got %+v %v", fields, ok)
+	}
+	if _, ok := doc.ResponseFields("GET", "/brands", "200"); ok {
+		t.Error("200 has no body schema and must not return fields")
+	}
+}
+
 func TestContractDiff(t *testing.T) {
 	previous := parse(t, `{
 		"openapi":"3.0.0",

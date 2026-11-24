@@ -290,6 +290,11 @@ func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		for _, code := range endpoint.StatusCodes {
 			hint := coverageHint(endpoint.Method, endpoint.Path, code, observed[key][code])
 			hint.Suggestion = coverage.Suggest(project, endpoint, pathMethods[endpoint.Path], code, observed[key][code])
+			if hint.Suggestion != nil && (code == "405" || code == "401") {
+				if fields, ok := latest.ResponseFields(endpoint.Method, endpoint.Path, code); ok {
+					hint.Suggestion.BodyFields = fields
+				}
+			}
 			hints = append(hints, hint)
 		}
 		row := coverageEndpoint{

@@ -77,6 +77,56 @@ func (d *Document) MatchPath(path string) (string, bool) {
 	return tmpl, tmpl != ""
 }
 
+// ResponseSchema returns the resolved JSON body schema for one response status. Nil means the
+// contract documents the status without a JSON body.
+func (d *Document) ResponseSchema(method, path, status string) (map[string]any, bool) {
+	tmpl := d.match(path)
+	if tmpl == "" {
+		return nil, false
+	}
+	op, ok := d.paths[tmpl][strings.ToLower(method)].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	responses, _ := op["responses"].(map[string]any)
+	resp, _ := d.resolve(responses[status], 0).(map[string]any)
+	if resp == nil {
+		return nil, false
+	}
+	content, _ := resp["content"].(map[string]any)
+	media, _ := content["application/json"].(map[string]any)
+	if media == nil {
+		return nil, false
+	}
+	schema, ok := d.resolve(media["schema"], 0).(map[string]any)
+	if !ok || len(schema) == 0 {
+		return nil, false
+	}
+	return schema, true
+}
+
+// ResponseFields returns the top-level response properties and their primitive JSON types. It is a
+// pragmatic shape check for coverage probes, not a full JSON Schema validator.
+func (d *Document) ResponseFields(method, path, status string) (map[string]string, bool) {
+	schema, ok := d.ResponseSchema(method, path, status)
+	if !ok {
+		return nil, false
+	}
+	props, _ := schema["properties"].(map[string]any)
+	fields := map[string]string{}
+	for name, raw := range props {
+		prop, _ := d.resolve(raw, 0).(map[string]any)
+		kind, _ := prop["type"].(string)
+		if kind != "" {
+			fields[name] = kind
+		}
+	}
+	if len(fields) == 0 {
+		return nil, false
+	}
+	return fields, true
+}
+
 // Diff compares this contract with a previous snapshot. It reports added/removed endpoints, status-code
 // changes and schema/parameter changes for endpoints that still exist. Descriptions are ignored.
 func (d *Document) Diff(previous *Document) []ContractChange {
