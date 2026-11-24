@@ -327,7 +327,17 @@ export default class RedlineReporter implements Reporter {
 
     const mdFile = path.join(path.dirname(file), "redline-report.md");
     const when = jakartaTime(result.startTime);
-    const md = markdownReport(summary, incidents, resolved, baseURL, cost, when, this.curls);
+    const ephemeral = Boolean(process.env.CI) && /^http:\/\/localhost(:\d+)?/.test(baseURL);
+    const md = markdownReport(
+      summary,
+      incidents,
+      resolved,
+      baseURL,
+      cost,
+      when,
+      this.curls,
+      ephemeral,
+    );
     writeFileSync(mdFile, md);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
 
@@ -784,6 +794,7 @@ function markdownReport(
   cost: number,
   when: string,
   curls: Record<string, string>,
+  ephemeral: boolean,
 ): string {
   const md = [
     `# Redline: run #${r.run_id}`,
@@ -807,6 +818,28 @@ function markdownReport(
       );
     });
     md.push("");
+    if (ephemeral) {
+      const project = incidents[0]?.representative.group.test.split(" › ")[0] || "toolshop";
+      md.push(
+        "## Prove and fix locally",
+        "",
+        "This CI run used an ephemeral Redline; the fingerprints below are not available on your server.",
+        "",
+        "Re-run locally:",
+        "",
+        "```bash",
+        `npx playwright test --grep "<TC-ID>" --project=${project}`,
+        "```",
+        "",
+        "Then:",
+        "",
+        "```bash",
+        "npx redline verify",
+        "npx redline fix <fingerprint> --dry-run   # test_bug only",
+        "```",
+        "",
+      );
+    }
     incidents.forEach((v, i) => {
       const a = v.analysis;
       md.push(`## ${i + 1}. ${incidentName(v)}`, "");
@@ -815,6 +848,7 @@ function markdownReport(
         meta.push(`**Category:** ${category(v)}`, `**Confidence:** ${a.confidence}`);
         meta.push(`**Source:** ${sourceLabel[a.source] ?? a.source}${v.cached ? " (cache)" : ""}`);
       }
+      meta.push(`**Fingerprint:** \`${v.representative.group.fingerprint}\``);
       md.push(meta.join(" · "), "");
       if (a) {
         md.push(a.summary, "");
@@ -858,10 +892,12 @@ function markdownReport(
       } else {
         md.push(...list, "");
       }
-      md.push(
-        `[Details in Redline](${baseURL}/api/groups/${v.representative.group.fingerprint})`,
-        "",
-      );
+      if (!ephemeral) {
+        md.push(
+          `[Details in Redline](${baseURL}/api/groups/${v.representative.group.fingerprint})`,
+          "",
+        );
+      }
     });
   }
   if (resolved.length > 0) {
